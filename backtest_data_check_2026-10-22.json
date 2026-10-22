@@ -1,0 +1,28 @@
+{
+  "at": "2026-10-22T15:21:05.063914+05:30",
+  "source_commit": "fb109af",
+  "period": [
+    "2026-09-01",
+    "2026-10-01"
+  ],
+  "checks": [
+    {
+      "symbol": "ADANIGREEN",
+      "security_id": "3563",
+      "side": "CALL",
+      "error": "ReadTimeout"
+    },
+    {
+      "symbol": "BOSCHLTD",
+      "security_id": "2181",
+      "side": "PUT",
+      "error": "ReadTimeout"
+    },
+    {
+      "symbol": "CAMS",
+      "security_id": "342",
+      "side": "PUT",
+      "error": "ReadTimeout"
+    }
+  ]
+}
