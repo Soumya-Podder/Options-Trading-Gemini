@@ -1,0 +1,56 @@
+PAPER TRADE REPORT - 19 October 2026 (IST)
+
+Based on today's saved paper ledger, cross-checked against entry/exit logs.
+
+Closed trades: 4 | All NIFTY puts | 1 lot / 65 quantity each
+Gross profit: Rs.+1,043.25
+Estimated charges: Rs.258.00 (Rs.64.50 per trade)
+Net profit: Rs.+785.25
+Starting capital: Rs.30,000.00
+Ledger closing balance: Rs.30,785.25 net / Rs.31,043.25 gross
+Net return on Rs.30,000: 2.62%
+Gross winners/losers: 3/1 | Gross win rate: 75%
+Net winners/losers: 2/2 | Net win rate: 50%
+Gross profit factor: 3.57
+Average net P&L per trade: Rs.+196.31
+Average holding time: 185 seconds
+
+1. NIFTY 23050_PE
+Entry 10:28:42 @ Rs.46.00 -> Exit 10:29:58 @ Rs.39.75
+Hold: 1m 16s | Premium move: -6.25 points
+Gross: Rs.-406.25 | Net: Rs.-470.75 | -1.02R
+Exit: INITIAL_SL_HIT
+Spot at entry: 23,045.00 | CE minus PE OI: +191.53 lakh
+
+2. NIFTY 22950_PE
+Entry 11:59:30 @ Rs.45.10 -> Exit 12:04:23 @ Rs.61.00
+Hold: 4m 53s | Premium move: +15.90 points
+Gross: Rs.+1,033.50 | Net: Rs.+969.00 | +2.59R
+Exit: ASYMMETRIC_TRAIL_PROFIT
+Spot at entry: 22,965.00 | CE minus PE OI: +184.71 lakh
+
+3. NIFTY 22950_PE
+Entry 12:10:35 @ Rs.61.05 -> Exit 12:14:12 @ Rs.61.85
+Hold: 3m 37s | Premium move: +0.80 points
+Gross: Rs.+52.00 | Net: Rs.-12.50 | +0.13R
+Exit: ASYMMETRIC_TRAIL_PROFIT
+Spot at entry: 22,940.00 | CE minus PE OI: +275.64 lakh
+
+4. NIFTY 22950_PE
+Entry 12:14:21 @ Rs.62.35 -> Exit 12:16:56 @ Rs.67.95
+Hold: 2m 35s | Premium move: +5.60 points
+Gross: Rs.+364.00 | Net: Rs.+299.50 | +0.91R
+Exit: ASYMMETRIC_TRAIL_PROFIT
+Spot at entry: 22,930.00 | CE minus PE OI: +283.47 lakh
+
+ENTRY CONTEXT
+All four trades used the same bearish rule: call-side OI wall above 50 lakh, call short buildup, put long buildup, call-writer ceiling, and bearish dominance.
+
+OBSERVATIONS
+Trade 2 was the largest contributor: Rs.+969.00 net. Trade 1 lost Rs.470.75 net. Trade 3 made Rs.52 gross but lost Rs.12.50 after estimated charges.
+The fourth entry occurred only 9 seconds after the third exit. These records precede the currently configured 6-minute post-win cooldown; current settings should not be used to describe that earlier behavior.
+
+RECORD LIMITATIONS
+The session log records a paper-wallet reset at 14:31:14, followed by a restarted session showing 0 trades and repeated HTTP 429 rate-limit errors. The current ledger nevertheless contains the four earlier trades above; this report uses that saved ledger rather than treating the later reset message as the final result.
+Latest saved telemetry shows no active position, but has only a time (15:44:59), without a date.
+Charges are engine estimates, not a broker statement. Paper P&L is simulated. Historical backtest entries in the same log are excluded.

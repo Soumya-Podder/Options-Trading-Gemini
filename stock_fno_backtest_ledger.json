@@ -1,0 +1,23 @@
+{
+  "mode": "BACKTEST",
+  "initial_capital": 50000.0,
+  "trades": [],
+  "limitations": [
+    "Current universe and lot sizes; historical membership not reconstructed",
+    "Five-minute OHLC lacks bid/ask and intrabar path; modeled slippage, not verified fills",
+    "Missing bars or rolling ATM strike changes are unvalidated, never synthetic"
+  ],
+  "total_trades": 0,
+  "avg_winning_value_rs": 0.0,
+  "avg_losing_value_rs": 0.0,
+  "win_to_loss_ratio": null,
+  "net_avg_winning_value_rs": 0.0,
+  "net_avg_losing_value_rs": 0.0,
+  "net_win_to_loss_ratio": null,
+  "profit_without_charges": 0,
+  "virtual_balance_gross": 50000.0,
+  "net_profit_after_charges": 0,
+  "virtual_balance_net": 50000.0,
+  "unvalidated_candidates_or_outcomes": 1,
+  "stock_coverage": 50
+}

@@ -1,0 +1,97 @@
+{
+  "updated_at": "10:29:23",
+  "api_poll_interval_sec": 3.6,
+  "indices": {
+    "NIFTY": {
+      "index": "NIFTY",
+      "spot": 22720.85,
+      "d_spot_5m": -8.45,
+      "call_strikes_above": [
+        22750,
+        22800,
+        22850
+      ],
+      "put_strikes_below": [
+        22700,
+        22650,
+        22600
+      ],
+      "ce_3strike_lakhs": 153.71,
+      "pe_3strike_lakhs": 213.37,
+      "diff_ce_minus_pe_lakhs": -59.65,
+      "raw_diff_oi": -5965375,
+      "exceeds_50_lakhs": true,
+      "wall_tag": "PUT_SIDE_GT_50L",
+      "ce_quadrant": "SHORT_BUILDUP",
+      "pe_quadrant": "LONG_BUILDUP",
+      "market_controller": "CONTESTED_CHOP",
+      "market_dominance": "BALANCED_CHOP",
+      "recommended_dir": "HOLD",
+      "state_vec": [
+        1.193,
+        0.3881,
+        0.0267,
+        -0.8,
+        0.6,
+        1.5,
+        -0.338,
+        -0.3273,
+        0.0,
+        0.0
+      ],
+      "atm_ce_strike": 22750,
+      "atm_pe_strike": 22700,
+      "atm_ce_ltp": 156.0,
+      "atm_pe_ltp": 145.2,
+      "atm_ce_sec_id": "51342",
+      "atm_pe_sec_id": "51341",
+      "data_health": "LIVE_CLEAN"
+    },
+    "SENSEX": {
+      "index": "SENSEX",
+      "spot": 73505.38,
+      "d_spot_5m": 100.39,
+      "call_strikes_above": [
+        73600,
+        73700,
+        73800
+      ],
+      "put_strikes_below": [
+        73500,
+        73400,
+        73300
+      ],
+      "ce_3strike_lakhs": 63.16,
+      "pe_3strike_lakhs": 65.74,
+      "diff_ce_minus_pe_lakhs": -2.59,
+      "raw_diff_oi": -258880,
+      "exceeds_50_lakhs": false,
+      "wall_tag": "SUB_50L_DIFF",
+      "ce_quadrant": "SHORT_COVERING",
+      "pe_quadrant": "LONG_UNWINDING",
+      "market_controller": "CONTESTED_CHOP",
+      "market_dominance": "BALANCED_CHOP",
+      "recommended_dir": "HOLD",
+      "state_vec": [
+        0.0518,
+        0.041,
+        0.644,
+        1.0,
+        -0.8,
+        -1.5,
+        2.0,
+        0.1645,
+        0.0,
+        0.0
+      ],
+      "atm_ce_strike": 73600,
+      "atm_pe_strike": 73500,
+      "atm_ce_ltp": 209.15,
+      "atm_pe_ltp": 233.3,
+      "atm_ce_sec_id": "1125254",
+      "atm_pe_sec_id": "1124378",
+      "data_health": "LIVE_CLEAN"
+    }
+  },
+  "active_position": null
+}

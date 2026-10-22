@@ -1,0 +1,23 @@
+# Credentials and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python environments and generated files
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Downloaded market data and runtime logs
+dhan_hist_cache/
+*.log
+
+# Local editor and agent files
+.vscode/
+.idea/
+.codex/
+.agents/
