@@ -54,7 +54,7 @@ class StockSetupTests(unittest.TestCase):
         self.assertEqual(result["opt_type"], "PE")
         self.assertAlmostEqual(result["day_change_pct"], -3.24)
 
-    def test_retest_must_touch_boundary_and_hold(self):
+    def test_retest_is_optional_ranking_bonus(self):
         for low, close in ((102.5, 103.03), (103.13, 103.15), (102.99, 102.99)):
             with self.subTest(low=low, close=close):
                 data = copy.deepcopy(self.candles)
@@ -62,10 +62,12 @@ class StockSetupTests(unittest.TestCase):
                 data["close"][-2] = close
                 data["open"][-2] = max(data["open"][-2], low)
                 data["high"][-2] = max(data["high"][-2], close + 0.01)
-                self.assertIsNone(evaluate_stock_setup(data, self.as_of))
+                result = evaluate_stock_setup(data, self.as_of)
+                self.assertIsNotNone(result)
+                self.assertLess(result["signal_quality"], evaluate_stock_setup(self.candles, self.as_of)["signal_quality"])
 
     def test_confirmation_requires_volume_expansion(self):
-        self.candles["volume"][-1] = 1499
+        self.candles["volume"][-1] = 1199
         self.assertIsNone(evaluate_stock_setup(self.candles, self.as_of))
 
     def test_zero_volume_and_weak_body_rejected(self):
@@ -97,10 +99,10 @@ class StockSetupTests(unittest.TestCase):
             del self.candles[field][-2]
         self.assertIsNone(evaluate_stock_setup(self.candles, self.as_of))
 
-    def test_missing_opening_range_bar_rejected(self):
+    def test_missing_opening_range_does_not_block_momentum(self):
         for field in self.candles:
             del self.candles[field][76]
-        self.assertIsNone(evaluate_stock_setup(self.candles, self.as_of))
+        self.assertIsNotNone(evaluate_stock_setup(self.candles, self.as_of))
 
     def test_prior_session_close_is_required(self):
         data = {field: values[75:] for field, values in self.candles.items()}

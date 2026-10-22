@@ -1,8 +1,8 @@
-"""Conservative stock-option planning and a persistent one-entry-per-day gate.
+"""Conservative stock-option planning and a persistent slot-based daily entry gate.
 
 Rewards, losses, fees and slippage are estimates, never guaranteed fills or returns.
-The day gate consumes a day before submission so an ambiguous order result cannot
-lead to a second entry after a restart.
+The daily gate consumes a slot before submission so an ambiguous order result
+cannot release that slot after a restart.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ def _decimal(value: Any) -> Decimal:
     return result
 
 
-def premium_plan(
+def _percentage_plan(
     entry: float,
     qty: int,
     charge_fn: Callable[[float, float, int], float],
@@ -103,6 +103,57 @@ def premium_plan(
         return None
 
 
+def premium_plan(entry, qty, charge_fn, target_pct=3.0, stop_pct=0.5,
+                 min_net_rr=3.0, slippage_pct=0.1, rupee_target=0,
+                 max_lots=1, rupee_max_risk=float("inf")):
+    """Choose the smallest lot count reaching the net rupee target within limits.
+
+    qty is the exchange lot size. Rupee target prices include estimated fees
+    and adverse exit slippage; these estimates cannot guarantee execution.
+    """
+    if (not isinstance(max_lots, int) or isinstance(max_lots, bool) or max_lots < 1
+            or not math.isfinite(rupee_target) or rupee_target < 0
+            or math.isnan(rupee_max_risk) or rupee_max_risk <= 0):
+        return None
+    for lots in range(1, max_lots + 1):
+        if isinstance(qty, bool):
+            return None
+        units = qty * lots
+        plan = _percentage_plan(entry, units, charge_fn, target_pct, stop_pct,
+                                min_net_rr, slippage_pct)
+        if not plan or plan["expected_net_reward"] < rupee_target or plan["expected_net_risk"] > rupee_max_risk:
+            continue
+        target_price = plan["hard_target_price"]
+        if rupee_target:
+            stop_fill = math.floor(plan["initial_sl"]*(1-slippage_pct/100)*20 + 1e-9)/20
+            risk = (entry-stop_fill)*units + charge_fn(entry,stop_fill,units)
+            if risk <= 0 or risk > rupee_max_risk:
+                continue
+            plan["expected_net_risk"] = risk
+            # Integer tick bisection avoids a slow linear search for expensive options.
+            lo = math.floor(entry / float(TICK)) + 1
+            hi = round(target_price / float(TICK))
+            while lo < hi:
+                mid = (lo + hi) // 2
+                price = mid * float(TICK)
+                fill = math.floor(price * (1 - slippage_pct / 100)*20 + 1e-9)/20
+                net = (fill - entry) * units - charge_fn(entry, fill, units)
+                if net >= rupee_target:
+                    hi = mid
+                else:
+                    lo = mid + 1
+            target_price = round(lo * float(TICK), 2)
+            fill = math.floor(target_price * (1 - slippage_pct / 100)*20 + 1e-9)/20
+            reward = (fill-entry)*units - charge_fn(entry, fill, units)
+            if reward < rupee_target or reward / plan["expected_net_risk"] < min_net_rr:
+                continue
+            plan.update(expected_net_reward=reward, expected_net_rr=reward/plan["expected_net_risk"])
+            plan["trail_jump"] = max(float(TICK), round((target_price-entry)*0.25 / float(TICK))*float(TICK))
+        plan.update(lots=lots, qty=units, rupee_target_price=target_price)
+        return plan
+    return None
+
+
 def _finite_score(value: Any) -> float:
     try:
         score = float(value)
@@ -129,7 +180,7 @@ def rank_candidates(candidates: Iterable[Dict[str, Any]]) -> list[Dict[str, Any]
 
 
 class DailyTradeGate:
-    """Persist one consumed entry per calendar day across processes/restarts.
+    """Persist capped consumed entries per calendar day across processes/restarts.
 
     Call ``reserve`` immediately before entry. A reservation is never released,
     even for failed or ambiguous submissions. ``mark_closed`` records an outcome
@@ -137,20 +188,31 @@ class DailyTradeGate:
     date in its exchange timezone as an ISO date, e.g. ``2026-10-22``.
     """
 
-    def __init__(self, path: os.PathLike[str] | str):
+    def __init__(self, path: os.PathLike[str] | str, max_entries: int = 1):
+        if not 1 <= max_entries <= 2:
+            raise ValueError("Daily entries must be 1 or 2")
         self.path = Path(path)
+        self.max_entries = max_entries
 
-    def _day_path(self, day: str) -> Path:
+    def _day_path(self, day: str, slot: int = 1) -> Path:
         if not isinstance(day, str) or date.fromisoformat(day).isoformat() != day:
             raise ValueError("day must be an ISO date: YYYY-MM-DD")
-        return self.path / (day + ".json")
+        if not 1 <= slot <= self.max_entries:
+            raise ValueError("Invalid daily slot")
+        legacy = self.path / (day + ".json")
+        if slot == 1 and legacy.exists():
+            return legacy
+        return self.path / f"{day}.slot{slot}.json"
 
     def has_entry(self, day: str) -> bool:
         # Even a truncated file consumes the date: an order may have been sent.
-        return self._day_path(day).exists()
+        return self.count_entries(day) >= self.max_entries
 
-    def reserve(self, day: str, details: Dict[str, Any]) -> bool:
-        destination = self._day_path(day)
+    def count_entries(self, day: str) -> int:
+        return sum(self._day_path(day, slot).exists() for slot in range(1, self.max_entries + 1))
+
+    def reserve(self, day: str, details: Dict[str, Any], slot: int = 1) -> bool:
+        destination = self._day_path(day, slot)
         record = {
             "day": day,
             "state": "reserved",
@@ -170,9 +232,9 @@ class DailyTradeGate:
             os.fsync(stream.fileno())
         return True
 
-    def read(self, day: str) -> Optional[Dict[str, Any]]:
+    def read(self, day: str, slot: int = 1) -> Optional[Dict[str, Any]]:
         """Read a reservation; corrupt/incomplete files remain consumed."""
-        destination = self._day_path(day)
+        destination = self._day_path(day, slot)
         try:
             with destination.open("r", encoding="utf-8") as stream:
                 record = json.load(stream)
@@ -184,9 +246,29 @@ class DailyTradeGate:
         except (ValueError, UnicodeError):
             return {"day": day, "state": "unreadable", "details": {}}
 
-    def mark_closed(self, day: str, details: Dict[str, Any]) -> None:
-        destination = self._day_path(day)
-        record = self.read(day)
+    def update_position(self, day, slot, position):
+        record = self.read(day, slot)
+        if record is None or record.get("state") != "reserved":
+            raise ValueError("No open reservation")
+        record["details"]["position"] = position
+        self._write_record(day, slot, record)
+
+    def _write_record(self, day, slot, record):
+        encoded = json.dumps(record, ensure_ascii=True, allow_nan=False).encode("utf-8")
+        descriptor, temporary = tempfile.mkstemp(prefix=day + ".", suffix=".tmp", dir=self.path)
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, self._day_path(day, slot))
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
+
+    def mark_closed(self, day: str, details: Dict[str, Any], slot: int = 1) -> None:
+        destination = self._day_path(day, slot)
+        record = self.read(day, slot)
         if record is None:
             raise FileNotFoundError("Cannot close a day without an entry reservation")
         record.update(

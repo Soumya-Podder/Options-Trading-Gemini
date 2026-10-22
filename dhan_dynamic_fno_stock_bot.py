@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Selective stock options: one confirmed shortlist entry per day, fixed premium exits.
+"""Selective stock options: capped shortlist entries, rupee targets and premium exits.
 API reference: https://docs.dhanhq.co/
 Targets and stops are intentions, not guaranteed fills or profits.
 """
@@ -143,26 +143,44 @@ class DynamicStrategyConfig:
         self.initial_capital = float(env.get("STOCK_OPT_INITIAL_CAPITAL", 50000.0))
         self.min_day_change_pct = float(getattr(args, "min_pct", None) or env.get("SCANX_MIN_DAY_PCT", 2.20))
         self.ema_period = int(env.get("SCANX_EMA_PERIOD", 10))
-        self.max_concurrent = 1
-        self.max_daily_trades = 1
+        self.max_concurrent = int(env.get("STOCK_OPT_MAX_CONCURRENT", 2))
+        self.max_daily_trades = int(env.get("STOCK_OPT_MAX_DAILY_TRADES", 2))
         self.max_consec_losses = int(env.get("MAX_CONSECUTIVE_LOSSES_PER_DAY", 2))
 
-        self.target_pct = float(env.get("STOCK_OPT_TARGET_PCT", 3.0))
-        self.stop_pct = float(env.get("STOCK_OPT_STOP_PCT", 0.4))
-        self.min_rr_target = float(getattr(args, "min_rr", None) or env.get("STOCK_OPT_MIN_NET_RR", 3.0))
+        self.target_pct = float(env.get("STOCK_OPT_TARGET_PCT", 10.0))
+        self.stop_pct = float(env.get("STOCK_OPT_STOP_PCT", 1.0))
+        self.min_rr_target = float(getattr(args, "min_rr", None) or env.get("STOCK_OPT_MIN_NET_RR", 1.2))
         self.slippage_pct = float(env.get("STOCK_OPT_SLIPPAGE_PCT", 0.1))
         self.max_spread_pct = float(env.get("STOCK_OPT_MAX_SPREAD_PCT", 0.2))
-        self.max_hold_bars_5m = 3
+        self.max_hold_bars_5m = int(env.get("STOCK_OPT_MAX_HOLD_BARS_5M", 8))
+        self.rupee_target = float(env.get("STOCK_OPT_RUPEE_TARGET", 2000))
+        self.rupee_max_risk = float(env.get("STOCK_OPT_RUPEE_MAX_RISK", 1000))
+        self.max_lots = int(env.get("STOCK_OPT_MAX_LOTS", 3))
+        self.min_days_to_expiry = int(env.get("STOCK_OPT_MIN_DAYS_TO_EXPIRY", 5))
+        self.min_delta = float(env.get("STOCK_OPT_MIN_DELTA", 0.45))
+        self.max_delta = float(env.get("STOCK_OPT_MAX_DELTA", 0.75))
+        self.max_theta_pct_per_day = float(env.get("STOCK_OPT_MAX_THETA_PCT_PER_DAY", 5))
+        self.no_progress_bars = int(env.get("STOCK_OPT_NO_PROGRESS_BARS", 3))
+        self.max_premium = float(env.get("STOCK_OPT_MAX_PREMIUM", 1000))
         self.gate_dir = "stock_option_daily_entries"
-        if not all(math.isfinite(v) for v in (self.target_pct, self.stop_pct, self.min_rr_target, self.slippage_pct, self.max_spread_pct)):
+        numbers = (self.target_pct, self.stop_pct, self.min_rr_target, self.slippage_pct,
+                   self.max_spread_pct, self.rupee_target, self.rupee_max_risk,
+                   self.min_delta, self.max_delta, self.max_theta_pct_per_day, self.max_premium)
+        if not all(math.isfinite(v) for v in numbers):
             raise ValueError("Stock option settings must be finite")
-        if not (2 <= self.target_pct <= 3 and 0 < self.stop_pct <= 0.5 and self.min_rr_target >= 3
-                and self.slippage_pct >= 0 and 0 < self.max_spread_pct <= 0.2):
-            raise ValueError("Require target 2-3%, stop <=0.5%, net RR >=3, and spread <=0.2%")
+        if not (3 <= self.target_pct <= 20 and 0.5 <= self.stop_pct <= 10 and self.min_rr_target >= 1.2
+                and 0 <= self.slippage_pct < 100 and 0 < self.max_spread_pct <= 0.2
+                and 1 <= self.max_concurrent <= self.max_daily_trades <= 2
+                and self.rupee_target > 0 and self.rupee_max_risk > 0 and self.max_lots >= 1
+                and 0 < self.min_delta < self.max_delta <= 1 and self.min_days_to_expiry >= 4
+                and self.max_theta_pct_per_day > 0 and self.max_premium >= 15
+                and 1 <= self.no_progress_bars <= self.max_hold_bars_5m):
+            raise ValueError("Invalid stock-option target, risk, Greek or entry limits")
 
     def plan(self, entry: float, qty: int):
         return premium_plan(entry, qty, compute_fno_option_charges, self.target_pct,
-                            self.stop_pct, self.min_rr_target, self.slippage_pct)
+                            self.stop_pct, self.min_rr_target, self.slippage_pct,
+                            self.rupee_target, self.max_lots, self.rupee_max_risk)
 
 
 class DynamicStockOptionsUniverse:
@@ -182,9 +200,9 @@ class DynamicStockOptionsUniverse:
         return True
 
     @classmethod
-    def load_universe(cls, logger: logging.Logger) -> Dict[str, Dict[str, Any]]:
+    def load_universe(cls, logger: logging.Logger, min_days_to_expiry=5) -> Dict[str, Dict[str, Any]]:
         today_str = datetime.now().strftime("%Y-%m-%d")
-        cache_file = os.path.join(CACHE_DIR, f"dynamic_optstk_universe_{today_str}.json")
+        cache_file = os.path.join(CACHE_DIR, f"dynamic_optstk_universe_{today_str}_dte{min_days_to_expiry}.json")
         if os.path.exists(cache_file):
             try:
                 with open(cache_file, "r", encoding="utf-8") as f:
@@ -251,12 +269,11 @@ class DynamicStockOptionsUniverse:
         for base_sym, contracts in sorted(optstk_raw.items()):
             if base_sym not in eq_map or not contracts:
                 continue
-            valid_exps = sorted({c["expiry"] for c in contracts})
+            valid_exps = sorted({c["expiry"] for c in contracts
+                if (datetime.strptime(c["expiry"], "%Y-%m-%d").date() - datetime.now(IST).date()).days >= min_days_to_expiry})
+            if not valid_exps:
+                continue
             chosen_exp = valid_exps[0]
-            if len(valid_exps) > 1:
-                days_to_exp = (datetime.strptime(chosen_exp, "%Y-%m-%d").date() - datetime.now().date()).days
-                if days_to_exp <= 1:
-                    chosen_exp = valid_exps[1]
 
             near_contracts = [c for c in contracts if c["expiry"] == chosen_exp]
             if not near_contracts:
@@ -296,42 +313,38 @@ class DynamicStockOptionsUniverse:
         return universe
 
     @staticmethod
-    def resolve_atm_option(
-        stock_info: Dict[str, Any], spot_price: float, opt_type: str
-    ) -> Optional[Dict[str, Any]]:
-        """Resolves the exact ATM or slightly ITM Stock Option contract dynamically for high Delta."""
-        strikes_map = stock_info.get("strikes_map", {})
-        if not strikes_map:
-            return None
-        best_node = None
-        best_dist = float("inf")
-        step = max(0.5, float(stock_info.get("strike_step", max(1.0, spot_price * 0.01))))
-        for node in strikes_map.values():
-            if opt_type not in node:
+    def resolve_atm_option(stock_info, spot_price, opt_type, chain, cfg):
+        """Select a real broker delta in band, never an estimated moneyness delta."""
+        candidates = []
+        ivs = []
+        for strike, node in chain.items():
+            leg = node.get(opt_type.lower(), {})
+            try:
+                greeks = leg["greeks"]
+                delta, theta, gamma = (float(greeks[k]) for k in ("delta", "theta", "gamma"))
+                iv = float(leg["implied_volatility"])
+                if not all(math.isfinite(v) for v in (delta, theta, gamma, iv)) or iv <= 0 or gamma <= 0:
+                    continue
+                ivs.append(iv)
+                if not cfg.min_delta <= abs(delta) <= cfg.max_delta or (delta > 0) != (opt_type == "CE"):
+                    continue
+                strike_value = float(strike)
+                contract = stock_info["strikes_map"].get(f"{strike_value:.2f}", {}).get(opt_type)
+                if not contract or str(contract["security_id"]) != str(leg["security_id"]):
+                    continue
+                candidates.append({"symbol": stock_info["symbol"], "strike": strike_value,
+                    "strike_step": stock_info["strike_step"], "delta": delta, "theta": theta,
+                    "gamma": gamma, "iv": iv, "opt_type": opt_type,
+                    "opt_security_id": str(leg["security_id"]), "trading_symbol": contract["trading_symbol"],
+                    "lot_size": int(stock_info["fno_lot_size"]), "expiry": stock_info["nearest_expiry"],
+                    "greeks_timestamp": time.time()})
+            except (KeyError, TypeError, ValueError):
                 continue
-            strike_v = float(node["strike"])
-            bias = -0.20 * step if opt_type == "CE" else 0.20 * step
-            dist = abs(strike_v - (spot_price + bias))
-            if dist < best_dist:
-                best_dist = dist
-                best_node = node
-        if not best_node:
+        if not candidates or not ivs:
             return None
-        leg = best_node[opt_type]
-        strike_val = float(best_node["strike"])
-        moneyness = ((spot_price - strike_val) / step) if opt_type == "CE" else ((strike_val - spot_price) / step)
-        est_delta = max(0.42, min(0.70, 0.54 + 0.08 * math.tanh(moneyness)))
-        return {
-            "symbol": stock_info["symbol"],
-            "strike": strike_val,
-            "strike_step": step,
-            "est_delta": round(est_delta, 3),
-            "opt_type": opt_type,
-            "opt_security_id": leg["security_id"],
-            "trading_symbol": leg["trading_symbol"],
-            "lot_size": int(stock_info["fno_lot_size"]),
-            "expiry": stock_info["nearest_expiry"],
-        }
+        for candidate in candidates:
+            candidate["iv_range_low"], candidate["iv_range_high"] = min(ivs), max(ivs)
+        return min(candidates, key=lambda c: (abs(abs(c["delta"])-(cfg.min_delta+cfg.max_delta)/2), c["iv"]))
 
 
 class DhanStockOptionsClient:
@@ -343,6 +356,7 @@ class DhanStockOptionsClient:
         self.logger = logger
         self.last_chart_ts = 0.0
         self.last_quote_ts = 0.0
+        self.last_chain_ts = 0.0
         self.session = requests.Session()
         self.session.headers.update({
             "access-token": self.access_token,
@@ -375,6 +389,19 @@ class DhanStockOptionsClient:
     def _pace_quote(self):
         time.sleep(max(0, 1.05 - (time.monotonic() - self.last_quote_ts)))
         self.last_quote_ts = time.monotonic()
+
+    def fetch_option_chain(self, underlying_id, expiry):
+        time.sleep(max(0, 3.05 - (time.monotonic() - self.last_chain_ts)))
+        self.last_chain_ts = time.monotonic()
+        try:
+            response = self.session.post(f"{self.BASE_URL}/optionchain", json={
+                "UnderlyingScrip": int(underlying_id), "UnderlyingSeg": "NSE_EQ", "Expiry": expiry}, timeout=12)
+            if response.status_code == 200:
+                return response.json().get("data", {}).get("oc", {})
+        except (requests.RequestException, ValueError):
+            pass
+        self.logger.warning("Option chain unavailable; skipping Greek qualification")
+        return {}
 
     def fetch_option_quotes(self, security_ids):
         if not security_ids:
@@ -574,7 +601,8 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
     advance = direction * (spot_ltp - sig["conf_close"])
     if advance < 0 or advance > 0.25 * sig["atr_5m"]:
         return None
-    contract = DynamicStockOptionsUniverse.resolve_atm_option(stock_info, spot_ltp, sig["opt_type"])
+    chain = client.fetch_option_chain(stock_info["eq_security_id"], stock_info["nearest_expiry"])
+    contract = DynamicStockOptionsUniverse.resolve_atm_option(stock_info, spot_ltp, sig["opt_type"], chain, cfg)
     return {**sig, **contract, "spot_ltp": spot_ltp, "eq_security_id": stock_info["eq_security_id"]} if contract else None
 
 
@@ -590,7 +618,7 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None):
         bid_node, ask_node = quote["depth"]["buy"][0], quote["depth"]["sell"][0]
         bid, ask = float(bid_node["price"]), float(ask_node["price"])
         qty = int(sig["lot_size"])
-        if not all(math.isfinite(v) for v in (bid, ask, wallet)) or not 0 < bid <= ask or ask < 15:
+        if not all(math.isfinite(v) for v in (bid, ask, wallet)) or not 0 < bid <= ask or not 15 <= ask <= cfg.max_premium:
             return None
         if min(int(bid_node["quantity"]), int(ask_node["quantity"])) < qty:
             return None
@@ -598,7 +626,31 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None):
         if spread > cfg.max_spread_pct:
             return None
         plan = cfg.plan(ask, qty)
-        if not plan or bid <= plan["initial_sl"] or ask * qty + plan["estimated_costs"] > wallet:
+        if not plan:
+            return None
+        qty = plan["qty"]
+        if min(int(bid_node["quantity"]), int(ask_node["quantity"])) < qty:
+            return None
+        if bid <= plan["initial_sl"] or ask * qty + plan["estimated_costs"] > wallet:
+            return None
+        delta, theta, gamma, iv = (float(sig[k]) for k in ("delta", "theta", "gamma", "iv"))
+        if not all(math.isfinite(v) for v in (delta, theta, gamma, iv)):
+            return None
+        if not cfg.min_delta <= abs(delta) <= cfg.max_delta or gamma <= 0 or iv <= 0:
+            return None
+        if (delta > 0) != (sig["opt_type"] == "CE") or not 0 <= now_epoch-sig["greeks_timestamp"] <= 120:
+            return None
+        dte = (datetime.strptime(sig["expiry"], "%Y-%m-%d").date() - datetime.fromtimestamp(now_epoch, IST).date()).days
+        decay = max(0, -theta) * cfg.max_hold_bars_5m * 5 / (24*60)
+        move = 0.6 * float(sig["atr_5m"])
+        expected_gain = abs(delta)*move + 0.5*gamma*move*move - decay
+        if (dte < cfg.min_days_to_expiry or max(0, -theta)/ask*100 > cfg.max_theta_pct_per_day
+                or decay*qty >= cfg.rupee_target
+                or expected_gain*qty - plan["target_estimated_costs"] < cfg.rupee_target):
+            return None
+        # Cross-sectional IV range in the same expiry/side, not historical IV rank.
+        low, high = float(sig["iv_range_low"]), float(sig["iv_range_high"])
+        if not all(math.isfinite(v) for v in (low, high)) or high <= low or (iv-low)/(high-low) >= 0.8:
             return None
         return {**sig, **plan, "opt_ltp": ask, "bid": bid, "spread_pct": spread}
     except (KeyError, IndexError, TypeError, ValueError, OverflowError):
@@ -628,7 +680,7 @@ def close_paper_position(ledger, pos, price, reason, now):
     fees = compute_fno_option_charges(pos["entry_price"], price, qty)
     rec = {k: pos[k] for k in ("symbol", "contract", "opt_type", "scanner", "qty", "entry_price")}
     rec.update(timestamp=pos["entry_ts"], exit_timestamp=now.strftime("%Y-%m-%d %H:%M:%S"),
-               lots=1, exit_price=price, gross_pnl=gross, charges=fees, net_pnl=round(gross-fees, 2),
+               lots=pos.get("lots", 1), exit_price=price, gross_pnl=gross, charges=fees, net_pnl=round(gross-fees, 2),
                r_multiple=round(gross / (pos["opt_1r"] * qty), 2), exit_reason=reason,
                data_source="PAPER_BID_ASK", entry_id=pos["entry_id"])
     # Idempotent if interrupted between ledger save and closing the daily record.
@@ -648,21 +700,27 @@ def paper_exit(pos, quote, now, cfg):
             return None
     except (KeyError, IndexError, TypeError, ValueError):
         return None
+    elapsed = now.timestamp() - pos["entry_epoch"]
+    pos["peak_bid"] = max(pos.get("peak_bid", pos["entry_price"]), bid)
+    jump = pos["trail_jump"]
+    if jump > 0 and pos["peak_bid"] - pos["entry_price"] >= 2 * jump:
+        pos["current_sl"] = max(pos["current_sl"], round_tick(pos["peak_bid"]-jump))
+    price = math.floor(max(0.05, bid * (1 - cfg.slippage_pct/100))*20 + 1e-9)/20
+    net = (price-pos["entry_price"])*pos["qty"] - compute_fno_option_charges(pos["entry_price"], price, pos["qty"])
     reason = None
     if bid <= pos["current_sl"]:
-        reason = "PREMIUM_STOP"
+        reason = "TRAIL_STOP" if pos["current_sl"] > pos["initial_sl"] else "PREMIUM_STOP"
+    elif net >= cfg.rupee_target:
+        reason = "RUPEE_TARGET"
     elif bid >= pos["hard_target_price"]:
         reason = "PREMIUM_TARGET"
     elif now.time().replace(tzinfo=None) >= dtime(15, 25):
         reason = "EOD_SQUAREOFF"
-    elif now.timestamp() - pos["entry_epoch"] >= cfg.max_hold_bars_5m * 300:
-        reason = "TIME_EXIT_15M"
-    if not reason:
-        return None
-    # Stops may gap; record the observed executable price, never an invented stop fill.
-    price = min(bid, pos["hard_target_price"]) if reason == "PREMIUM_TARGET" else bid
-    price = round_tick(max(0.05, price * (1 - cfg.slippage_pct/100)))
-    return price, reason
+    elif elapsed >= cfg.no_progress_bars * 300 and pos["peak_bid"] < pos["entry_price"] + jump:
+        reason = "NO_PROGRESS"
+    elif elapsed >= cfg.max_hold_bars_5m * 300:
+        reason = "TIME_EXIT"
+    return (price, reason) if reason else None
 
 
 def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
@@ -670,115 +728,113 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
     if not env.get("DHAN_CLIENT_ID") or not env.get("DHAN_ACCESS_TOKEN"):
         raise ValueError("Missing Dhan credentials in .env")
     client = DhanStockOptionsClient(env["DHAN_CLIENT_ID"], env["DHAN_ACCESS_TOKEN"], logger)
-    universe = DynamicStockOptionsUniverse.load_universe(logger)
-    gate = DailyTradeGate(cfg.gate_dir)
-    # A scan is observational and must not initialize or alter a ledger.
-    if scan_once:
-        wallet = cfg.initial_capital
-        ledger = None
-    else:
-        ledger = load_or_init_ledger(live_mode, cfg.initial_capital)
-        wallet = ledger["virtual_balance_net"]
+    universe = DynamicStockOptionsUniverse.load_universe(logger, cfg.min_days_to_expiry)
+    gate = DailyTradeGate(cfg.gate_dir, cfg.max_daily_trades)
+    ledger = None if scan_once else load_or_init_ledger(live_mode, cfg.initial_capital)
     today = datetime.now(IST).strftime("%Y-%m-%d")
-    pos = None
-    saved = gate.read(today) if not scan_once else None
-    if saved:
+    positions = []
+    for slot in range(1, cfg.max_daily_trades + 1):
+        saved = None if scan_once else gate.read(today, slot)
+        if not saved or saved.get("state") == "closed":
+            continue
         details = saved.get("details", {})
-        if saved.get("state") == "reserved" and details.get("mode") == "PAPER" and not live_mode:
-            pos = details.get("position")
-            if pos and any(t.get("entry_id") == pos["entry_id"] for t in ledger["trades"]):
-                gate.mark_closed(today, {"recovered_from_ledger": True})
-                pos = None
-        if not pos:
-            logger.info("Stock-options daily entry already consumed; no further entry today.")
+        position = details.get("position")
+        if saved.get("state") != "reserved" or not position or details.get("mode") != "PAPER" or live_mode:
+            logger.warning("Unresolved reservation; reconcile broker/ledger before new entries.")
             return
-    if not scan_once and not pos and any(str(t.get("timestamp", "")).startswith(today) for t in ledger["trades"]):
-        logger.info("Stock-options ledger already contains today's trade; no further entry.")
-        return
-    logger.info("Selective stock options: maximum 1 entry/day | target %.2f%% | stop %.2f%% | estimated net RR >= %.1f",
-                cfg.target_pct, cfg.stop_pct, cfg.min_rr_target)
+        position["slot"] = slot
+        if any(t.get("entry_id") == position["entry_id"] for t in ledger["trades"]):
+            gate.mark_closed(today, {"recovered_from_ledger": True}, slot)
+        else:
+            positions.append(position)
     telegram = TelegramNotifier(env, logger, "LIVE" if live_mode else "PAPER") if TelegramNotifier and not scan_once else None
+    logger.info("Stock options: max %d/day | net target Rs.%.0f | estimated risk cap Rs.%.0f",
+                cfg.max_daily_trades, cfg.rupee_target, cfg.rupee_max_risk)
     try:
         while True:
             now = datetime.now(IST)
-            if now.strftime("%Y-%m-%d") != today:
-                logger.warning("Date changed; retaining any unresolved paper position in the daily record.")
+            if now.strftime("%Y-%m-%d") != today or now.weekday() >= 5 or now.time().replace(tzinfo=None) >= dtime(15, 30):
                 return
-            if now.weekday() >= 5 or now.time().replace(tzinfo=None) >= dtime(15, 30):
-                logger.info("Session closed. Any unresolved position remains in the daily record.")
-                return
-            if pos:
-                quotes = client.fetch_option_quotes([pos["opt_security_id"]])
-                decision = paper_exit(pos, quotes.get(str(pos["opt_security_id"]), {}), now, cfg)
-                if decision:
-                    price, reason = decision
-                    rec = close_paper_position(ledger, pos, price, reason, now)
-                    gate.mark_closed(today, rec)
-                    logger.info("[PAPER OPTSTK EXIT] %s | %s | net Rs.%+.2f", pos["contract"], reason, rec["net_pnl"])
-                    if telegram:
-                        telegram.exited(rec)
+            if positions:
+                quotes = client.fetch_option_quotes([p["opt_security_id"] for p in positions])
+                for pos in positions[:]:
+                    decision = paper_exit(pos, quotes.get(str(pos["opt_security_id"]), {}), now, cfg)
+                    if decision:
+                        rec = close_paper_position(ledger, pos, *decision, now)
+                        gate.mark_closed(today, rec, pos["slot"])
+                        positions.remove(pos)
+                        logger.info("[PAPER OPTSTK EXIT] %s | %s | net Rs.%+.2f", pos["contract"], decision[1], rec["net_pnl"])
+                        if telegram:
+                            telegram.exited(rec)
+                    else:
+                        gate.update_position(today, pos["slot"], pos)
+            completed = [] if scan_once else [t for t in ledger["trades"] if str(t.get("timestamp", "")).startswith(today)]
+            consumed = 0 if scan_once else max(gate.count_entries(today), len(completed)+len(positions))
+            if consumed >= cfg.max_daily_trades or len(positions) >= cfg.max_concurrent:
+                if not positions:
                     return
                 time.sleep(1.1)
                 continue
             if not dtime(9, 30) <= now.time().replace(tzinfo=None) <= dtime(14, 30):
-                if scan_once or now.hour >= 14:
+                if scan_once or (now.hour >= 14 and not positions):
                     return
-                time.sleep(10)
+                time.sleep(2)
                 continue
+            wallet = cfg.initial_capital if scan_once else ledger["virtual_balance_net"]
+            wallet -= sum(p["entry_price"]*p["qty"] + p["estimated_costs"] for p in positions)
             quotes = client.fetch_batch_ohlc(list(universe)).get("NSE_EQ", {})
             shortlist = shortlist_movers(quotes, cfg)
             signals = []
+            used_symbols = {p["symbol"] for p in positions} | {t["symbol"] for t in completed}
             for change, sec_id, ltp in shortlist:
-                if sec_id not in universe:
+                if sec_id not in universe or universe[sec_id]["symbol"] in used_symbols:
                     continue
                 sig = verify_live_scanx_and_resolve_stock_option(client, universe[sec_id], ltp, change, cfg)
                 if sig:
                     signals.append(sig)
             depth = client.fetch_option_quotes([s["opt_security_id"] for s in signals]) if signals else {}
-            candidates = [q for s in signals if (q := qualify_quote(s, depth.get(str(s["opt_security_id"]), {}), cfg, wallet))]
-            ranked = rank_candidates(candidates)
-            logger.info("Shortlist %d | confirmed %d | cost/liquidity qualified %d", len(shortlist), len(signals), len(ranked))
-            if not ranked:
-                if scan_once:
-                    return
-                time.sleep(30)
-                continue
-            best = ranked[0]
-            logger.info("Best current setup: %s %s | confirmation %.1f | estimated net RR %.2f | spread %.3f%%",
-                        best["symbol"], best["opt_type"], best["signal_quality"], best["expected_net_rr"], best["spread_pct"])
+            ranked = rank_candidates([q for sig in signals if (q := qualify_quote(sig, depth.get(str(sig["opt_security_id"]), {}), cfg, wallet))])
+            logger.info("Shortlist %d | confirmed %d | qualified %d", len(shortlist), len(signals), len(ranked))
             if scan_once:
                 return
-            # Recheck execution price immediately before the single daily reservation.
-            current_eq = client.fetch_batch_ohlc([best["eq_security_id"]]).get("NSE_EQ", {}).get(str(best["eq_security_id"]), {})
-            current_spot = float(current_eq.get("last_price", 0) or 0)
-            advance = (1 if best["opt_type"] == "CE" else -1) * (current_spot - best["conf_close"])
-            if current_spot <= 0 or not 0 <= advance <= 0.25 * best["atr_5m"]:
-                time.sleep(5)
-                continue
-            fresh = client.fetch_option_quotes([best["opt_security_id"]])
-            best = qualify_quote(best, fresh.get(str(best["opt_security_id"]), {}), cfg, wallet)
-            now = datetime.now(IST)
-            if not best or now.time().replace(tzinfo=None) > dtime(14, 30):
-                time.sleep(5)
-                continue
-            pos = {**best, "index": best["symbol"], "option_type": best["opt_type"], "lots": 1,
-                   "contract": f"{best['symbol']} {best['strike']:g}_{best['opt_type']}",
-                   "qty": best["lot_size"], "entry_price": best["opt_ltp"], "current_ltp": best["opt_ltp"],
-                   "current_sl": best["initial_sl"], "entry_ts": now.strftime("%Y-%m-%d %H:%M:%S"),
-                   "entry_epoch": now.timestamp(), "entry_id": f"STOCK_{today}"}
-            if not gate.reserve(today, {"mode": "LIVE" if live_mode else "PAPER", "position": pos}):
-                logger.info("Another session already reserved today's stock entry.")
+            capacity = min(cfg.max_concurrent-len(positions), cfg.max_daily_trades-consumed)
+            for best in ranked[:capacity]:
+                current = client.fetch_batch_ohlc([best["eq_security_id"]]).get("NSE_EQ", {}).get(str(best["eq_security_id"]), {})
+                spot = float(current.get("last_price", 0) or 0)
+                advance = (1 if best["opt_type"] == "CE" else -1)*(spot-best["conf_close"])
+                if spot <= 0 or not 0 <= advance <= 0.25*best["atr_5m"]:
+                    continue
+                fresh = client.fetch_option_quotes([best["opt_security_id"]])
+                best = qualify_quote(best, fresh.get(str(best["opt_security_id"]), {}), cfg, wallet)
+                now = datetime.now(IST)
+                if not best or now.time().replace(tzinfo=None) > dtime(14, 30):
+                    continue
+                slot = next((i for i in range(1, cfg.max_daily_trades+1) if gate.read(today, i) is None), None)
+                if slot is None:
+                    break
+                pos = {**best, "index": best["symbol"], "option_type": best["opt_type"], "slot": slot,
+                    "contract": f"{best['symbol']} {best['strike']:g}_{best['opt_type']}",
+                    "entry_price": best["opt_ltp"], "current_ltp": best["opt_ltp"], "peak_bid": best["opt_ltp"],
+                    "current_sl": best["initial_sl"], "entry_ts": now.strftime("%Y-%m-%d %H:%M:%S"),
+                    "entry_epoch": now.timestamp(), "entry_id": f"STOCK_{today}_{slot}"}
+                if not gate.reserve(today, {"mode": "LIVE" if live_mode else "PAPER", "position": pos}, slot):
+                    return
+                wallet -= pos["entry_price"]*pos["qty"] + pos["estimated_costs"]
+                if live_mode:
+                    oid = client.place_option_super_order(best["trading_symbol"], best["opt_security_id"],
+                        best["qty"], best["opt_ltp"], best["rupee_target_price"], best["initial_sl"], best["trail_jump"])
+                    logger.info("LIVE submission %s; slot consumed. Broker bracket owns exits; verify fills in Dhan.", oid or "unconfirmed")
+                    # Ambiguous submissions must never trigger another order.
+                    if not oid:
+                        return
+                else:
+                    positions.append(pos)
+                    logger.info("[PAPER OPTSTK ENTRY] %s | %d lots @ %.2f", pos["contract"], pos["lots"], pos["entry_price"])
+                    if telegram:
+                        telegram.position(pos, entry=True)
+            if live_mode and gate.count_entries(today):
                 return
-            if live_mode:
-                # Broker owns the fixed target/stop bracket. Submission is not a fill;
-                # never fabricate live P&L from local quotes or submit twice on timeout.
-                oid = client.place_option_super_order(best["trading_symbol"], best["opt_security_id"],
-                         best["lot_size"], best["opt_ltp"], best["hard_target_price"], best["initial_sl"], 0)
-                logger.info("LIVE submission result: %s. Daily slot consumed. Verify fills and bracket in Dhan; local P&L not inferred.", oid or "unconfirmed")
-                return
-            logger.info("[PAPER OPTSTK ENTRY] %s @ %.2f | target %.2f | stop %.2f", pos["contract"], pos["entry_price"], pos["hard_target_price"], pos["current_sl"])
-            if telegram:
-                telegram.position(pos, entry=True)
+            time.sleep(1.1 if positions else 30)
     finally:
         if telegram:
             telegram.close()
@@ -787,41 +843,52 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
 def simulate_fixed_premium_trade(entry_ts, bars, qty, cfg):
     """Real OHLC only. Reject missing bars/rolling-strike changes; stop first on ties."""
     first = bars.get(entry_ts)
-    if not first or first.get("strike", 0) <= 0 or first.get("open", 0) < 15:
+    if not first or first.get("strike", 0) <= 0 or not 15 <= first.get("open", 0) <= cfg.max_premium:
         return None
     entry = round_tick(first["open"] * (1 + cfg.slippage_pct / 100))
     plan = cfg.plan(entry, qty)
     if not plan:
         return None
+    stop, peak = plan["initial_sl"], entry
+    target = min(plan["hard_target_price"], plan["rupee_target_price"])
     for offset in range(cfg.max_hold_bars_5m):
         ts = entry_ts + offset * 300
         bar = bars.get(ts)
         if not bar or bar.get("strike") != first["strike"]:
             return None
         o, h, l, c = (float(bar[k]) for k in ("open", "high", "low", "close"))
-        if not all(math.isfinite(x) and x > 0 for x in (o, h, l, c)) or not l <= min(o, c) <= max(o, c) <= h:
+        if not all(math.isfinite(x) and x > 0 for x in (o,h,l,c)) or not l <= min(o,c) <= max(o,c) <= h:
             return None
         price, reason = None, None
-        if l <= plan["initial_sl"]:
-            price, reason = min(o, plan["initial_sl"]), "PREMIUM_STOP"
-        elif h >= plan["hard_target_price"]:
-            price, reason = plan["hard_target_price"], "PREMIUM_TARGET"
-        elif datetime.fromtimestamp(ts, IST).time().replace(tzinfo=None) >= dtime(15, 25):
+        # Existing stop first; a newly raised trail only applies to following bars.
+        # OHLC does not establish whether the high preceded the low.
+        if l <= stop:
+            price, reason = min(o, stop), "TRAIL_STOP" if stop > plan["initial_sl"] else "PREMIUM_STOP"
+        elif h >= target:
+            price, reason = target, "RUPEE_TARGET"
+        elif datetime.fromtimestamp(ts, IST).time().replace(tzinfo=None) >= dtime(15,25):
             price, reason = c, "EOD_SQUAREOFF"
-        elif offset == cfg.max_hold_bars_5m - 1:
-            price, reason = c, "TIME_EXIT_15M"
+        else:
+            peak = max(peak, h)
+            if offset+1 >= cfg.no_progress_bars and peak < entry+plan["trail_jump"]:
+                price, reason = c, "NO_PROGRESS"
+            elif offset == cfg.max_hold_bars_5m-1:
+                price, reason = c, "TIME_EXIT"
+            if peak-entry >= 2*plan["trail_jump"]:
+                stop = max(stop, round_tick(peak-plan["trail_jump"]))
         if reason:
-            price = round_tick(max(0.05, price * (1 - cfg.slippage_pct / 100)))
+            # Floor fills to avoid rounding away the modeled adverse slippage.
+            price = math.floor(max(0.05,price*(1-cfg.slippage_pct/100))*20 + 1e-9)/20
             return {**plan, "entry_price": entry, "exit_price": price, "exit_reason": reason,
-                    "exit_timestamp": datetime.fromtimestamp(ts+300, IST).strftime("%Y-%m-%d %H:%M:%S"),
-                    "strike": first["strike"]}
+                "exit_timestamp": datetime.fromtimestamp(ts+300,IST).strftime("%Y-%m-%d %H:%M:%S"),
+                "strike": first["strike"]}
     return None
 
 
 def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
     env = load_dotenv_file(".env")
     client = DhanStockOptionsClient(env.get("DHAN_CLIENT_ID", ""), env.get("DHAN_ACCESS_TOKEN", ""), logger)
-    universe = DynamicStockOptionsUniverse.load_universe(logger)
+    universe = DynamicStockOptionsUniverse.load_universe(logger, cfg.min_days_to_expiry)
     # Deterministic coverage; do not use today's momentum to select past winners.
     stocks = sorted(universe.values(), key=lambda s: s["symbol"])
     if max_stocks > 0:
@@ -855,11 +922,16 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
     ledger = {"mode": "BACKTEST", "initial_capital": cfg.initial_capital, "trades": [],
               "limitations": ["Current universe and lot sizes; historical membership not reconstructed",
                               "Five-minute OHLC lacks bid/ask and intrabar path; modeled slippage, not verified fills",
-                              "Missing bars or rolling ATM strike changes are unvalidated, never synthetic"]}
-    used_days, option_maps, skipped = set(), {}, 0
+                              "Missing bars or rolling ATM strike changes are unvalidated, never synthetic",
+                              "Exit-policy replay only: historical broker Greeks, IV range, DTE and delta-selected contracts unavailable",
+                              "Trailing stops advance on following bars; same-bar trail path is unvalidated"]}
+    used_days, option_maps, skipped = {}, {}, 0
+    active_until = []
+    used_symbols = {}
     for ts in sorted(snapshots):
         day = datetime.fromtimestamp(ts, IST).strftime("%Y-%m-%d")
-        if day in used_days:
+        active_until = [end_ts for end_ts in active_until if end_ts > ts]
+        if used_days.get(day, 0) >= cfg.max_daily_trades or len(active_until) >= cfg.max_concurrent:
             continue
         candidates = []
         for _, sec, _ in shortlist_movers(snapshots[ts], cfg):
@@ -867,6 +939,8 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
             if not sig:
                 continue
             stock = frames[sec]
+            if stock["symbol"] in used_symbols.get(day, set()):
+                continue
             key = (sec, sig["opt_type"])
             if key not in option_maps:
                 raw = client.fetch_rolling_stock_option(sec, sig["opt_type"], start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
@@ -874,49 +948,60 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
                                     for i, t in enumerate(raw["timestamp"])} if raw and all(k in raw for k in ("timestamp", "open", "high", "low", "close", "strike")) else {}
             bars = option_maps[key]
             first = bars.get(ts)
-            if not first or first["open"] < 15 or first["strike"] <= 0:
+            if not first or not 15 <= first["open"] <= cfg.max_premium or first["strike"] <= 0:
                 skipped += 1
                 continue
             qty = stock["fno_lot_size"]
             entry = round_tick(first["open"] * (1 + cfg.slippage_pct / 100))
             plan = cfg.plan(entry, qty)
-            wallet = cfg.initial_capital + sum(t["net_pnl"] for t in ledger["trades"])
-            if plan and entry*qty + plan["estimated_costs"] <= wallet:
-                candidates.append({**sig, **plan, "symbol": stock["symbol"], "qty": qty, "map_key": key})
+            wallet = cfg.initial_capital + sum(t["net_pnl"] for t in ledger["trades"]
+                if datetime.strptime(t["exit_timestamp"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST).timestamp() <= ts)
+            wallet -= sum(t["entry_price"]*t["qty"] + t["estimated_costs"] for t in ledger["trades"]
+                if datetime.strptime(t["exit_timestamp"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST).timestamp() > ts)
+            if plan and entry*plan["qty"] + plan["estimated_costs"] <= wallet:
+                candidates.append({**sig, **plan, "symbol": stock["symbol"], "lot_size": qty, "map_key": key})
         ranked = rank_candidates(candidates)
         if not ranked:
             continue
-        best = ranked[0]
-        # Consume date BEFORE looking at future outcome, including missing data.
-        used_days.add(day)
-        sim = simulate_fixed_premium_trade(ts, option_maps[best["map_key"]], best["qty"], cfg)
-        if sim is None:
-            skipped += 1
-            continue
-        qty = best["qty"]
-        gross = round((sim["exit_price"]-sim["entry_price"])*qty, 2)
-        fees = compute_fno_option_charges(sim["entry_price"], sim["exit_price"], qty)
-        ledger["trades"].append({**sim, "symbol": best["symbol"], "opt_type": best["opt_type"],
-            "contract": f"{best['symbol']} {sim['strike']:g}_{best['opt_type']}", "qty": qty, "lots": 1,
-            "timestamp": datetime.fromtimestamp(ts, IST).strftime("%Y-%m-%d %H:%M:%S"),
-            "gross_pnl": gross, "charges": fees, "net_pnl": round(gross-fees, 2), "data_source": "REAL_OPTION_OHLC_MODELED_FILLS"})
+        for best in ranked[:min(cfg.max_concurrent-len(active_until), cfg.max_daily_trades-used_days.get(day,0))]:
+            entry = round_tick(option_maps[best["map_key"]][ts]["open"]*(1+cfg.slippage_pct/100))
+            if entry*best["qty"] + best["estimated_costs"] > wallet:
+                continue
+            wallet -= entry*best["qty"] + best["estimated_costs"]
+            # Consume date BEFORE looking at future outcome, including missing data.
+            used_symbols.setdefault(day, set()).add(best["symbol"])
+            active_until.append(ts + cfg.max_hold_bars_5m*300)
+            used_days[day] = used_days.get(day, 0) + 1
+            sim = simulate_fixed_premium_trade(ts, option_maps[best["map_key"]], best["lot_size"], cfg)
+            if sim is None:
+                skipped += 1
+                continue
+            active_until.pop()
+            active_until.append(datetime.strptime(sim["exit_timestamp"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST).timestamp())
+            qty = sim["qty"]
+            gross = round((sim["exit_price"]-sim["entry_price"])*qty, 2)
+            fees = compute_fno_option_charges(sim["entry_price"], sim["exit_price"], qty)
+            ledger["trades"].append({**sim, "symbol": best["symbol"], "opt_type": best["opt_type"],
+                "contract": f"{best['symbol']} {sim['strike']:g}_{best['opt_type']}", "qty": qty, "lots": sim["lots"],
+                "timestamp": datetime.fromtimestamp(ts, IST).strftime("%Y-%m-%d %H:%M:%S"),
+                "gross_pnl": gross, "charges": fees, "net_pnl": round(gross-fees, 2), "data_source": "REAL_OPTION_OHLC_MODELED_FILLS"})
     update_ledger_metrics(ledger)
     ledger["unvalidated_candidates_or_outcomes"] = skipped
     ledger["stock_coverage"] = len(frames)
     atomic_write_json("stock_fno_backtest_ledger.json", ledger)
     logger.info("Selective backtest: %d trades, %d unvalidated candidates/outcomes | net Rs.%+.2f | avg net win/loss ratio %s",
                 ledger["total_trades"], skipped, ledger["net_profit_after_charges"], ledger["net_win_to_loss_ratio"])
-    logger.info("Saved separate stock_fno_backtest_ledger.json. Five-minute data cannot validate a 0.5%% stop's execution quality.")
+    logger.info("Saved separate stock_fno_backtest_ledger.json. Replay does not validate historical Greeks, strike selection or intrabar execution.")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Selective stock options: best confirmed shortlist setup, maximum one entry per day")
-    parser.add_argument("--live", action="store_true", help="Submit one fixed target/stop bracket to Dhan; verify actual fills in Dhan")
+    parser = argparse.ArgumentParser(description="Selective stock options: best confirmed shortlist setup, maximum two entries per day")
+    parser.add_argument("--live", action="store_true", help="Submit capped rupee-target brackets with broker trailing stops; verify fills in Dhan")
     parser.add_argument("--scan-once", action="store_true", help="Rank current qualifying setups without trading")
     parser.add_argument("--backtest-days", type=int, default=0)
     parser.add_argument("--max-stocks", type=int, default=50, help="Historical coverage, alphabetically selected; 0 for all")
     parser.add_argument("--min-pct", type=float, default=None)
-    parser.add_argument("--min-rr", type=float, default=None, help="Minimum estimated net reward/risk, at least 3")
+    parser.add_argument("--min-rr", type=float, default=None, help="Minimum estimated net reward/risk, at least 1.2")
     parser.add_argument("--reset-ledger", action="store_true", help="Reset stock paper ledger; does not reset daily entry limit")
     args = parser.parse_args()
     strat_cfg = DynamicStrategyConfig(load_dotenv_file(".env"), args)

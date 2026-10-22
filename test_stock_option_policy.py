@@ -67,6 +67,19 @@ class PremiumPlanTests(unittest.TestCase):
             with self.subTest(invalid_fee=invalid_fee):
                 self.assertIsNone(premium_plan(100, 1000, lambda *_: invalid_fee))
 
+    def test_rupee_target_sizes_smallest_lot_count_and_caps_risk(self):
+        plan = premium_plan(100, 100, lambda *_:40, target_pct=10, stop_pct=1,
+                            min_net_rr=1.2, rupee_target=2000, max_lots=3, rupee_max_risk=1000)
+        self.assertEqual(plan["lots"], 3)
+        self.assertEqual(plan["qty"], 300)
+        self.assertGreaterEqual(plan["expected_net_reward"], 2000)
+        self.assertLessEqual(plan["rupee_target_price"], plan["hard_target_price"])
+        self.assertGreater(plan["trail_jump"], 0)
+        for limits in ({"max_lots":2,"rupee_max_risk":1000}, {"max_lots":3,"rupee_max_risk":100}):
+            self.assertIsNone(premium_plan(100,100,lambda *_:40,target_pct=10,stop_pct=1,
+                min_net_rr=1.2,rupee_target=2000,**limits))
+
+
 
 class RankingTests(unittest.TestCase):
     def test_quality_precedes_net_ratio_after_qualification(self):
@@ -101,6 +114,30 @@ class DailyTradeGateTests(unittest.TestCase):
             self.assertEqual(restarted.read("2026-10-22")["state"], "closed")
             self.assertFalse(restarted.reserve("2026-10-22", {}))
             self.assertTrue(restarted.reserve("2026-10-23", {}))
+
+    def test_two_slots_survive_restart_and_trail_update(self):
+        with tempfile.TemporaryDirectory() as directory:
+            gate = DailyTradeGate(directory, 2)
+            day = "2026-10-22"
+            for slot in (1,2):
+                self.assertTrue(gate.reserve(day, {"position":{"current_sl":99}}, slot))
+            self.assertEqual(gate.count_entries(day),2)
+            self.assertTrue(gate.has_entry(day))
+            self.assertFalse(gate.reserve(day,{},2))
+            gate.update_position(day,2,{"current_sl":101})
+            restarted = DailyTradeGate(directory,2)
+            self.assertEqual(restarted.read(day,2)["details"]["position"]["current_sl"],101)
+            gate.mark_closed(day,{},1)
+            self.assertEqual(gate.count_entries(day),2)
+            self.assertEqual(restarted.read(day,2)["state"],"reserved")
+
+    def test_legacy_reservation_consumes_first_slot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory,"2026-10-22.json").write_text("{")
+            gate = DailyTradeGate(directory,2)
+            self.assertEqual(gate.count_entries("2026-10-22"),1)
+            self.assertFalse(gate.reserve("2026-10-22",{},1))
+            self.assertTrue(gate.reserve("2026-10-22",{},2))
 
     def test_multiple_processes_can_reserve_exactly_once(self):
         context = multiprocessing.get_context("spawn")

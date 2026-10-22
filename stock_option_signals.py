@@ -99,12 +99,8 @@ def evaluate_stock_setup(
 ) -> Optional[dict]:
     """Return a selective CE/PE setup, or None when any confirmation is absent.
 
-    The latest three closed five-minute bars must be a breakout beyond the true
-    09:15-09:30 opening range, a retest holding that boundary (wick tolerance
-    0.15 ATR), and a strong continuation beyond the retest's extreme. Trend uses
-    only complete 15-minute groups; VWAP uses today's closed candles. The volume
-    baseline is the ten preceding closed bars, including the prior session when
-    needed. EMA and ATR use exponential smoothing, matching the stock engine.
+    Scanner momentum, rising volume and price versus previous completed 15m
+    EMA require one directional confirmation close. ORB/retest adds rank only.
     """
     if (not isinstance(ema_period, int) or isinstance(ema_period, bool) or ema_period < 2):
         return None
@@ -124,19 +120,16 @@ def evaluate_stock_setup(
         return None
     today_bars = [bar for bar in bars if bar["date"] == today]
     previous_bars = [bar for bar in bars if bar["date"] < today]
-    if len(today_bars) < 6 or not previous_bars:
+    if len(today_bars) < 2 or not previous_bars:
         return None
     session_open = int(datetime.combine(today, SESSION_OPEN, IST).timestamp())
     opening = {bar["timestamp"]: bar for bar in today_bars}
     opening_range = [opening.get(session_open + offset) for offset in (0, 300, 600)]
-    if any(bar is None for bar in opening_range):
-        return None
-    orb_high = max(bar["high"] for bar in opening_range)
-    orb_low = min(bar["low"] for bar in opening_range)
-    breakout, retest, confirmation = today_bars[-3:]
-    if (breakout["timestamp"] < session_open + 900
-            or retest["timestamp"] != breakout["timestamp"] + BAR_SECONDS
-            or confirmation["timestamp"] != retest["timestamp"] + BAR_SECONDS):
+    opening_range = [bar for bar in opening_range if bar is not None]
+    orb_high = max((bar["high"] for bar in opening_range), default=latest["high"])
+    orb_low = min((bar["low"] for bar in opening_range), default=latest["low"])
+    previous = today_bars[-2]
+    if latest["timestamp"] != previous["timestamp"] + BAR_SECONDS:
         return None
 
     day_change_pct = (latest["close"] / previous_bars[-1]["close"] - 1.0) * 100.0
@@ -161,35 +154,25 @@ def evaluate_stock_setup(
     vwap = sum(((bar["high"] + bar["low"] + bar["close"]) / 3.0) * bar["volume"]
                for bar in today_bars) / total_volume
     average_volume = sum(bar["volume"] for bar in bars[-11:-1]) / 10.0
-    if average_volume <= 0 or latest["volume"] <= 0 or latest["volume"] < 1.5 * average_volume:
+    if average_volume <= 0 or latest["volume"] <= 0 or latest["volume"] < 1.2 * average_volume:
         return None
     candle_range = latest["high"] - latest["low"]
-    if candle_range <= 0 or abs(latest["close"] - latest["open"]) < 0.6 * candle_range:
+    if candle_range <= 0 or abs(latest["close"] - latest["open"]) < 0.45 * candle_range:
         return None
 
+    bullish = (day_change_pct >= min_day_change_pct
+               and latest["volume"] > previous["volume"]
+               and latest["close"] > previous_ema
+               and latest["close"] > max(previous["close"], latest["open"]))
+    bearish = (day_change_pct <= -min_day_change_pct
+               and latest["volume"] > previous["volume"]
+               and latest["close"] < previous_ema
+               and latest["close"] < min(previous["close"], latest["open"]))
     tolerance = 0.15 * atr_5m
-    bullish = (
-        day_change_pct >= min_day_change_pct
-        and ema_value > previous_ema
-        and bars_15m[-1]["close"] > ema_value
-        and latest["close"] > max(ema_value, vwap)
-        and breakout["close"] > orb_high
-        and orb_high - tolerance <= retest["low"] <= orb_high + tolerance
-        and retest["close"] >= orb_high
-        and latest["close"] > max(retest["high"], latest["open"])
-        and latest["high"] - latest["close"] <= 0.25 * candle_range
-    )
-    bearish = (
-        day_change_pct <= -min_day_change_pct
-        and ema_value < previous_ema
-        and bars_15m[-1]["close"] < ema_value
-        and latest["close"] < min(ema_value, vwap)
-        and breakout["close"] < orb_low
-        and orb_low - tolerance <= retest["high"] <= orb_low + tolerance
-        and retest["close"] <= orb_low
-        and latest["close"] < min(retest["low"], latest["open"])
-        and latest["close"] - latest["low"] <= 0.25 * candle_range
-    )
+    orb_bonus = ((bullish and latest["close"] > orb_high
+                  and abs(previous["low"]-orb_high) <= tolerance and previous["close"] >= orb_high)
+                 or (bearish and latest["close"] < orb_low
+                     and abs(previous["high"]-orb_low) <= tolerance and previous["close"] <= orb_low))
     if not bullish and not bearish:
         return None
     relative_volume = latest["volume"] / average_volume
@@ -199,10 +182,10 @@ def evaluate_stock_setup(
     # This is a ranking heuristic among already-qualified setups, not a win
     # probability. Capping the volume term prevents one spike dominating rank.
     signal_quality = (40.0 * min(relative_volume / 3.0, 1.0)
-                      + 35.0 * body_ratio + 25.0 * close_strength)
+                      + 30.0 * body_ratio + 20.0 * close_strength + 10.0 * orb_bonus)
     return {
         "opt_type": "CE" if bullish else "PE",
-        "scanner": "BULLISH_ORB_RETEST_CONFIRMATION" if bullish else "BEARISH_ORB_RETEST_CONFIRMATION",
+        "scanner": "BULLISH_MOMENTUM_CONFIRMATION" if bullish else "BEARISH_MOMENTUM_CONFIRMATION",
         "spot_ltp": latest["close"],
         "day_change_pct": day_change_pct,
         "ema10_15m": ema_value,
