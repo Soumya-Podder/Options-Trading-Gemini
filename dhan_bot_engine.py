@@ -766,6 +766,32 @@ def update_ratchet_sl(entry_price: float, current_sl: float, highest_ltp: float,
     return new_sl, armed
 
 
+def nifty_target_quantities(index, lots, lot_size):
+    """Split only multi-lot Nifty trades, rounding T1 down to whole lots."""
+    if index != "NIFTY" or lots < 2:
+        return None
+    first = (lots // 2) * lot_size
+    return first, lots * lot_size - first
+
+
+def book_target_one(ledger, position, price, timestamp):
+    """Realize T1 once; final trade accounting reconciles this booked amount."""
+    if position.get("target_one_done"):
+        return
+    qty = position["target_one_qty"]
+    gross = round((price-position["entry_price"])*qty, 2)
+    fees = round(20 + (20 + position["lots"]*24.5)*qty/position["original_qty"], 2)
+    position.update(target_one_done=True, qty=position["qty"]-qty,
+                    partial_gross=gross, partial_net=round(gross-fees,2))
+    position["exit_fills"] = [{"qty":qty,"price":price,"timestamp":timestamp,"reason":"TARGET_1_10_POINTS"}]
+    ledger["virtual_balance_gross"] = round(ledger["virtual_balance_gross"]+gross,2)
+    ledger["virtual_balance_net"] = round(ledger["virtual_balance_net"]+gross-fees,2)
+    ledger["profit_without_charges"] = round(ledger["virtual_balance_gross"]-ledger["initial_capital"],2)
+    ledger["net_profit_after_charges"] = round(ledger["virtual_balance_net"]-ledger["initial_capital"],2)
+    ledger["active_position"] = {k:v for k,v in position.items() if k != "entry_dt"}
+    atomic_write_json("paper_trade_ledger.json",ledger)
+
+
 def evaluate_real_option_trade_bars(
     entry_idx: int,
     is_ce: bool,
@@ -776,11 +802,22 @@ def evaluate_real_option_trade_bars(
     closes: List[float],
     strikes: List[Any],
     sl_points: float,
-    interval_min: int = 5
+    interval_min: int = 5,
+    index: str = "", lots: int = 1, lot_size: int = 1, exit_fills=None
 ) -> Tuple[int, float, float, str]:
     entry_price = float(closes[entry_idx])
     entry_strike = int(float(strikes[entry_idx] or 0))
     entry_day = datetime.fromtimestamp(timestamps[entry_idx]).strftime("%Y-%m-%d")
+
+    split = nifty_target_quantities(index, lots, lot_size)
+    fills = exit_fills if exit_fills is not None else []
+    remaining = lots*lot_size
+    def finish(j, price, reason):
+        if split:
+            fills.append({"qty":remaining,"price":round(price,2),"timestamp":str(datetime.fromtimestamp(timestamps[j])),"reason":reason})
+            average = sum(f["price"]*f["qty"] for f in fills)/(lots*lot_size)
+            return j, average, round((average-entry_price)/sl_points,2), reason
+        return j, round(price,2), round((price-entry_price)/sl_points,2), reason
 
     current_sl = round(entry_price - sl_points, 2)
     highest_high = entry_price
@@ -795,7 +832,7 @@ def evaluate_real_option_trade_bars(
         if day_str != entry_day or dt.time() >= EOD_SQUAREOFF_TIME:
             exit_p = float(opens[j]) if day_str != entry_day else float(closes[j])
             r_mult = round((exit_p - entry_price) / sl_points, 2)
-            return j, round(exit_p, 2), r_mult, "EOD_SQUAREOFF"
+            return finish(j, exit_p, "EOD_SQUAREOFF")
 
         bar_o = float(opens[j])
         bar_h = float(highs[j])
@@ -814,29 +851,37 @@ def evaluate_real_option_trade_bars(
             exit_p = current_sl
             r_mult = round((exit_p - entry_price) / sl_points, 2)
             reason = "ASYMMETRIC_TRAIL_PROFIT" if ratchet_armed and r_mult > 0 else "INITIAL_SL_HIT"
-            return j, round(exit_p, 2), r_mult, reason
+            return finish(j, exit_p, reason)
+
+        if split:
+            if not fills and bar_h >= entry_price+10:
+                fills.append({"qty":split[0],"price":entry_price+10,"timestamp":str(dt),"reason":"TARGET_1_10_POINTS"})
+                remaining -= split[0]
+            if bar_h >= entry_price+20:
+                return finish(j, entry_price+20, "TARGET_2_20_POINTS")
 
         if bar_h > highest_high:
             highest_high = bar_h
-            current_sl, is_armed = update_ratchet_sl(entry_price, current_sl, highest_high, sl_points)
-            ratchet_armed = ratchet_armed or is_armed
+            if not split:
+                current_sl, is_armed = update_ratchet_sl(entry_price, current_sl, highest_high, sl_points)
+                ratchet_armed = ratchet_armed or is_armed
 
         if bar_c < bar_o and bar_c <= current_sl:
             exit_p = current_sl
             r_mult = round((exit_p - entry_price) / sl_points, 2)
             reason = "ASYMMETRIC_TRAIL_PROFIT" if ratchet_armed and r_mult > 0 else "INITIAL_SL_HIT"
-            return j, round(exit_p, 2), r_mult, reason
+            return finish(j, exit_p, reason)
 
         elapsed_min = (j - entry_idx) * interval_min
         if elapsed_min >= 25 and (highest_high - entry_price) < (0.80 * sl_points):
             exit_p = bar_c
             r_mult = round((exit_p - entry_price) / sl_points, 2)
-            return j, round(exit_p, 2), r_mult, "THETA_TIME_STOP"
+            return finish(j, exit_p, "THETA_TIME_STOP")
 
     last_idx = n_bars - 1
     exit_p = float(closes[last_idx])
     r_mult = round((exit_p - entry_price) / sl_points, 2)
-    return last_idx, round(exit_p, 2), r_mult, "END_OF_WINDOW"
+    return finish(last_idx, exit_p, "END_OF_WINDOW")
 
 
 def record_closed_trade(
@@ -858,14 +903,15 @@ def record_closed_trade(
     exit_reason: str,
     sig: str,
     state_vec: List[float],
-    data_health: str
+    data_health: str,
+    exit_fills=None, booked_gross: float = 0, booked_net: float = 0
 ) -> float:
     gross_pnl = round((exit_price - entry_price) * qty, 2)
-    charges = round(40.0 + (lots * 24.5), 2)
+    charges = round(40.0 + (lots * 24.5) + 20.0*max(0,len(exit_fills or [])-1), 2)
     net_pnl = round(gross_pnl - charges, 2)
 
-    ledger["virtual_balance_gross"] = round(ledger["virtual_balance_gross"] + gross_pnl, 2)
-    ledger["virtual_balance_net"] = round(ledger["virtual_balance_net"] + net_pnl, 2)
+    ledger["virtual_balance_gross"] = round(ledger["virtual_balance_gross"] + gross_pnl - booked_gross, 2)
+    ledger["virtual_balance_net"] = round(ledger["virtual_balance_net"] + net_pnl - booked_net, 2)
     ledger["profit_without_charges"] = round(ledger["virtual_balance_gross"] - ledger["initial_capital"], 2)
     ledger["net_profit_after_charges"] = round(ledger["virtual_balance_net"] - ledger["initial_capital"], 2)
 
@@ -887,6 +933,10 @@ def record_closed_trade(
         "rule_used": sig,
         "data_health": data_health
     }
+    if exit_fills:
+        trade_record["exit_fills"] = exit_fills
+        trade_record["exit_price"] = round(exit_price,4)
+        ledger.pop("active_position",None)
     ledger["trades"].append(trade_record)
     ledger["total_trades"] = len(ledger["trades"])
 
@@ -1064,6 +1114,16 @@ def run_real_historical_backtest(
                 strike_val = atm_ce_strike if is_ce else atm_pe_strike
                 entry_price = round(float(leg["close"][i]), 2)
 
+                lots = brain.compute_lots(
+                    idx_name,
+                    sig,
+                    entry_price,
+                    ledger["virtual_balance_net"],
+                    d_stat["consec_losses"],
+                )
+                qty = lots * cfg["lot_size"]
+                exit_fills = []
+
                 exit_idx, exit_price, r_mult, exit_reason = evaluate_real_option_trade_bars(
                     entry_idx=i,
                     is_ce=is_ce,
@@ -1075,18 +1135,10 @@ def run_real_historical_backtest(
                     strikes=leg.get("strike", [strike_val] * n_bars)[:n_bars],
                     sl_points=cfg["sl_points"],
                     interval_min=interval_min,
+                    index=idx_name, lots=lots, lot_size=cfg["lot_size"], exit_fills=exit_fills,
                 )
 
                 skip_until_idx = (exit_idx + cooldown_bars) if r_mult < 0 else (exit_idx + win_cooldown_bars)
-                lots = brain.compute_lots(
-                    idx_name,
-                    sig,
-                    entry_price,
-                    ledger["virtual_balance_net"],
-                    d_stat["consec_losses"],
-                )
-                qty = lots * cfg["lot_size"]
-
                 gross_pnl = record_closed_trade(
                     ledger=ledger,
                     brain=brain,
@@ -1106,7 +1158,7 @@ def run_real_historical_backtest(
                     exit_reason=exit_reason,
                     sig=sig,
                     state_vec=analysis["state_vec"],
-                    data_health="DHAN_REAL_HISTORICAL",
+                    data_health="DHAN_REAL_HISTORICAL", exit_fills=exit_fills,
                 )
 
                 d_stat["trades"] += 1
@@ -1191,6 +1243,15 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger) -> None
 
     telegram = TelegramNotifier(env, logger, "LIVE" if live_mode else "PAPER")
     active_pos: Optional[Dict[str, Any]] = None
+    saved_partial = ledger.get("active_position")
+    if saved_partial:
+        if live_mode or ledger.get("mode") != "PAPER" or not saved_partial.get("entry_ts", "").startswith(today_str):
+            logger.error("Unresolved partial position in ledger; reconcile it before starting a new session.")
+            telegram.close()
+            return
+        active_pos = saved_partial.copy()
+        active_pos["entry_dt"] = datetime.strptime(active_pos["entry_ts"], "%Y-%m-%d %H:%M:%S")
+        logger.info("Resuming Nifty paper remainder after target 1: Qty %d", active_pos["qty"])
     cooldown_until: Optional[datetime] = None
     cycle = 0
 
@@ -1249,7 +1310,19 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger) -> None
                 elif now.time() >= EOD_SQUAREOFF_TIME:
                     exit_reason = "EOD_SQUAREOFF"
 
-                if not exit_reason and curr_ltp > active_pos["highest_ltp"]:
+                staged = "target_one_qty" in active_pos
+                if not exit_reason and staged:
+                    if not active_pos["target_one_done"] and curr_ltp >= active_pos["entry_price"]+10:
+                        if live_mode:
+                            oid = dhan.place_market_order(active_pos["security_id"],cfg["fno_segment"],"SELL",active_pos["target_one_qty"],tag="NIFTY_T1")
+                            if not oid:
+                                logger.error("T1 submission unconfirmed; stopping for broker reconciliation.")
+                                break
+                        book_target_one(ledger,active_pos,round(curr_ltp,2),now.strftime("%Y-%m-%d %H:%M:%S"))
+                        logger.info("[%s PARTIAL EXIT] NIFTY T1 +10 points | Qty %d @ %.2f | Remaining %d", "LIVE" if live_mode else "PAPER", active_pos["target_one_qty"],curr_ltp,active_pos["qty"])
+                    if curr_ltp >= active_pos["entry_price"]+20:
+                        exit_reason = "TARGET_2_20_POINTS"
+                if not exit_reason and not staged and curr_ltp > active_pos["highest_ltp"]:
                     active_pos["highest_ltp"] = curr_ltp
                     new_sl, armed = update_ratchet_sl(
                         active_pos["entry_price"], active_pos["current_sl"],
@@ -1258,15 +1331,24 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger) -> None
                     active_pos["current_sl"] = new_sl
                     active_pos["ratchet_armed"] = active_pos["ratchet_armed"] or armed
 
+                if staged:
+                    active_pos["highest_ltp"] = max(active_pos["highest_ltp"],curr_ltp)
+
                 if exit_reason:
                     if live_mode and active_pos.get("security_id"):
-                        dhan.place_market_order(
+                        exit_order = dhan.place_market_order(
                             security_id=active_pos["security_id"],
                             exchange_segment=cfg["fno_segment"],
                             transaction_type="SELL",
                             quantity=active_pos["qty"],
                         )
+                        if staged and not exit_order:
+                            logger.error("Final submission unconfirmed; stopping for broker reconciliation.")
+                            break
                     exit_price = round(curr_ltp, 2)
+                    fills = active_pos.get("exit_fills",[]) + ([{"qty":active_pos["qty"],"price":exit_price,"timestamp":now.strftime("%Y-%m-%d %H:%M:%S"),"reason":exit_reason}] if staged else [])
+                    if fills:
+                        exit_price = sum(f["qty"]*f["price"] for f in fills)/active_pos["original_qty"]
                     r_mult = round((exit_price - active_pos["entry_price"]) / cfg["sl_points"], 2)
                     gross_pnl = record_closed_trade(
                         ledger=ledger,
@@ -1278,7 +1360,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger) -> None
                         strike_val=strike_k,
                         opt_type=active_pos["option_type"],
                         lots=active_pos["lots"],
-                        qty=active_pos["qty"],
+                        qty=active_pos.get("original_qty",active_pos["qty"]),
                         spot_at_entry=active_pos["spot_at_entry"],
                         oi_diff_lakhs=active_pos["oi_diff_lakhs"],
                         entry_price=active_pos["entry_price"],
@@ -1287,7 +1369,8 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger) -> None
                         exit_reason=exit_reason,
                         sig=active_pos["rule_used"],
                         state_vec=active_pos["state_vec"],
-                        data_health="LIVE_CLEAN",
+                        data_health="LIVE_CLEAN", exit_fills=fills,
+                        booked_gross=active_pos.get("partial_gross",0),booked_net=active_pos.get("partial_net",0),
                     )
                     day_trades += 1
                     if gross_pnl <= 0:
@@ -1354,6 +1437,9 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger) -> None
                             "rule_used": sig,
                             "state_vec": view["state_vec"],
                         }
+                        split = nifty_target_quantities(idx_name,lots,cfg["lot_size"])
+                        if split:
+                            active_pos.update(original_qty=qty,target_one_qty=split[0],target_one_done=False,exit_fills=[])
                         telegram.position(active_pos, entry=True)
                         logger.info(
                             f"[{'LIVE' if live_mode else 'PAPER'} ENTRY] {idx_name} {strike_k} {opt_type} "
