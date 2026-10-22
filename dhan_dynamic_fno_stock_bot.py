@@ -156,7 +156,7 @@ class DynamicStrategyConfig:
         self.rupee_target = float(env.get("STOCK_OPT_RUPEE_TARGET", 2000))
         self.rupee_max_risk = float(env.get("STOCK_OPT_RUPEE_MAX_RISK", 1000))
         self.max_lots = int(env.get("STOCK_OPT_MAX_LOTS", 3))
-        self.min_days_to_expiry = int(env.get("STOCK_OPT_MIN_DAYS_TO_EXPIRY", 5))
+        self.min_days_to_expiry = int(env.get("STOCK_OPT_MIN_DAYS_TO_EXPIRY", 12))
         self.min_delta = float(env.get("STOCK_OPT_MIN_DELTA", 0.45))
         self.max_delta = float(env.get("STOCK_OPT_MAX_DELTA", 0.75))
         self.max_theta_pct_per_day = float(env.get("STOCK_OPT_MAX_THETA_PCT_PER_DAY", 5))
@@ -200,7 +200,7 @@ class DynamicStockOptionsUniverse:
         return True
 
     @classmethod
-    def load_universe(cls, logger: logging.Logger, min_days_to_expiry=5) -> Dict[str, Dict[str, Any]]:
+    def load_universe(cls, logger: logging.Logger, min_days_to_expiry=12) -> Dict[str, Dict[str, Any]]:
         today_str = datetime.now().strftime("%Y-%m-%d")
         cache_file = os.path.join(CACHE_DIR, f"dynamic_optstk_universe_{today_str}_dte{min_days_to_expiry}.json")
         if os.path.exists(cache_file):
@@ -606,55 +606,76 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
     return {**sig, **contract, "spot_ltp": spot_ltp, "eq_security_id": stock_info["eq_security_id"]} if contract else None
 
 
-def qualify_quote(sig, quote, cfg, wallet, now_epoch=None):
-    """Use a fresh executable ask/bid and displayed size, never a candle fallback."""
+def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
+    """Qualify executable depth; optionally append the first rejection reason."""
+    def reject(reason):
+        if reasons is not None:
+            reasons.append(reason)
+        return None
     try:
         now_epoch = time.time() if now_epoch is None else now_epoch
         if not 0 <= now_epoch - (sig["signal_timestamp"] + 300) < 300:
-            return None
+            return reject("Confirmation candle is stale or not yet tradable")
         trade_time = datetime.strptime(quote["last_trade_time"], "%d/%m/%Y %H:%M:%S").replace(tzinfo=IST)
         if not 0 <= now_epoch - trade_time.timestamp() <= 30:
-            return None
+            return reject("Option quote older than 30s or future-dated")
         bid_node, ask_node = quote["depth"]["buy"][0], quote["depth"]["sell"][0]
         bid, ask = float(bid_node["price"]), float(ask_node["price"])
         qty = int(sig["lot_size"])
-        if not all(math.isfinite(v) for v in (bid, ask, wallet)) or not 0 < bid <= ask or not 15 <= ask <= cfg.max_premium:
-            return None
+        if not all(math.isfinite(v) for v in (bid, ask, wallet)) or not 0 < bid <= ask:
+            return reject("Unusable bid/ask or wallet")
+        if not 15 <= ask <= cfg.max_premium:
+            return reject(f"Premium {ask:.2f} outside 15-{cfg.max_premium:.0f}")
         if min(int(bid_node["quantity"]), int(ask_node["quantity"])) < qty:
-            return None
+            return reject("Displayed depth below one lot")
         spread = (ask - bid) / ask * 100
         if spread > cfg.max_spread_pct:
-            return None
+            return reject(f"Spread {spread:.2f}% above {cfg.max_spread_pct:.2f}%")
         plan = cfg.plan(ask, qty)
         if not plan:
-            return None
+            return reject(f"No lot count reaches Rs.{cfg.rupee_target:.0f} within risk/RR limits")
         qty = plan["qty"]
         if min(int(bid_node["quantity"]), int(ask_node["quantity"])) < qty:
-            return None
-        if bid <= plan["initial_sl"] or ask * qty + plan["estimated_costs"] > wallet:
-            return None
+            return reject(f"Displayed depth below {plan['lots']} lots")
+        if bid <= plan["initial_sl"]:
+            return reject("Bid already at or below the planned stop")
+        if ask * qty + plan["estimated_costs"] > wallet:
+            return reject("Insufficient wallet for the planned size")
         delta, theta, gamma, iv = (float(sig[k]) for k in ("delta", "theta", "gamma", "iv"))
         if not all(math.isfinite(v) for v in (delta, theta, gamma, iv)):
-            return None
-        if not cfg.min_delta <= abs(delta) <= cfg.max_delta or gamma <= 0 or iv <= 0:
-            return None
-        if (delta > 0) != (sig["opt_type"] == "CE") or not 0 <= now_epoch-sig["greeks_timestamp"] <= 120:
-            return None
+            return reject("Non-finite broker Greeks")
+        if not cfg.min_delta <= abs(delta) <= cfg.max_delta:
+            return reject(f"Delta {abs(delta):.2f} outside {cfg.min_delta:.2f}-{cfg.max_delta:.2f}")
+        if gamma <= 0 or iv <= 0:
+            return reject("Non-positive gamma or IV")
+        if (delta > 0) != (sig["opt_type"] == "CE"):
+            return reject("Delta sign disagrees with option type")
+        if not 0 <= now_epoch-sig["greeks_timestamp"] <= 120:
+            return reject("Greeks older than 120s or future-dated")
         dte = (datetime.strptime(sig["expiry"], "%Y-%m-%d").date() - datetime.fromtimestamp(now_epoch, IST).date()).days
+        if dte < cfg.min_days_to_expiry:
+            return reject(f"Only {dte} days to expiry, need {cfg.min_days_to_expiry}")
+        theta_pct = max(0, -theta)/ask*100
+        if theta_pct > cfg.max_theta_pct_per_day:
+            return reject(f"Theta {theta_pct:.2f}%/day above {cfg.max_theta_pct_per_day:.2f}%")
         decay = max(0, -theta) * cfg.max_hold_bars_5m * 5 / (24*60)
+        if decay*qty >= cfg.rupee_target:
+            return reject(f"Decay over hold Rs.{decay*qty:.0f} exceeds the Rs.{cfg.rupee_target:.0f} target")
         move = 0.6 * float(sig["atr_5m"])
         expected_gain = abs(delta)*move + 0.5*gamma*move*move - decay
-        if (dte < cfg.min_days_to_expiry or max(0, -theta)/ask*100 > cfg.max_theta_pct_per_day
-                or decay*qty >= cfg.rupee_target
-                or expected_gain*qty - plan["target_estimated_costs"] < cfg.rupee_target):
-            return None
+        net_gain = expected_gain*qty - plan["target_estimated_costs"]
+        if net_gain < cfg.rupee_target:
+            return reject(f"A 0.6 ATR move nets only Rs.{net_gain:.0f} of the Rs.{cfg.rupee_target:.0f} target")
         # Cross-sectional IV range in the same expiry/side, not historical IV rank.
         low, high = float(sig["iv_range_low"]), float(sig["iv_range_high"])
-        if not all(math.isfinite(v) for v in (low, high)) or high <= low or (iv-low)/(high-low) >= 0.8:
-            return None
-        return {**sig, **plan, "opt_ltp": ask, "bid": bid, "spread_pct": spread}
-    except (KeyError, IndexError, TypeError, ValueError, OverflowError):
-        return None
+        if not all(math.isfinite(v) for v in (low, high)) or high <= low:
+            return reject("Unusable chain IV range")
+        if (iv-low)/(high-low) >= 0.8:
+            return reject(f"IV in the top {100*(1-(iv-low)/(high-low)):.0f}% of the chain")
+        return {**sig, **plan, "opt_ltp": ask, "bid": bid, "spread_pct": spread,
+                "dte": dte, "theta_pct_per_day": theta_pct, "expected_move_gain": net_gain}
+    except (KeyError, IndexError, TypeError, ValueError, OverflowError) as error:
+        return reject(f"Malformed quote or Greek data ({type(error).__name__})")
 
 
 def update_ledger_metrics(ledger):
@@ -797,7 +818,15 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                 if sig:
                     signals.append(sig)
             depth = client.fetch_option_quotes([s["opt_security_id"] for s in signals]) if signals else {}
-            ranked = rank_candidates([q for sig in signals if (q := qualify_quote(sig, depth.get(str(sig["opt_security_id"]), {}), cfg, wallet))])
+            candidates = []
+            for sig in signals:
+                reasons = []
+                qualified = qualify_quote(sig, depth.get(str(sig["opt_security_id"]), {}), cfg, wallet, reasons=reasons)
+                if qualified:
+                    candidates.append(qualified)
+                else:
+                    logger.info("[OPTSTK REJECT] %s %s | %s", sig["symbol"], sig["opt_type"], reasons[0] if reasons else "Unspecified rejection")
+            ranked = rank_candidates(candidates)
             logger.info("Shortlist %d | confirmed %d | qualified %d", len(shortlist), len(signals), len(ranked))
             if scan_once:
                 return
@@ -809,7 +838,11 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                 if spot <= 0 or not 0 <= advance <= 0.25*best["atr_5m"]:
                     continue
                 fresh = client.fetch_option_quotes([best["opt_security_id"]])
-                best = qualify_quote(best, fresh.get(str(best["opt_security_id"]), {}), cfg, wallet)
+                reasons = []
+                symbol = best["symbol"]
+                best = qualify_quote(best, fresh.get(str(best["opt_security_id"]), {}), cfg, wallet, reasons=reasons)
+                if not best:
+                    logger.info("[OPTSTK RECHECK REJECT] %s | %s", symbol, reasons[0] if reasons else "Unspecified rejection")
                 now = datetime.now(IST)
                 if not best or now.time().replace(tzinfo=None) > dtime(14, 30):
                     continue

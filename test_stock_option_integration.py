@@ -152,6 +152,31 @@ class IntegrationTests(unittest.TestCase):
         gate.mark_closed.assert_called_once()
         self.assertEqual(pos["persisted_state"],(99,101))
 
+    def test_detailed_rejection_reason_and_qualified_metrics(self):
+        self.assertEqual(self.cfg.min_days_to_expiry,12)
+        reasons=[]
+        result=bot.qualify_quote(self.sig,self.quote,self.cfg,60000,self.now.timestamp(),reasons)
+        self.assertIsNotNone(result)
+        self.assertEqual(reasons,[])
+        self.assertEqual(result["dte"],35)
+        self.assertAlmostEqual(result["theta_pct_per_day"],1)
+        self.assertGreaterEqual(result["expected_move_gain"],self.cfg.rupee_target)
+        for edits,expected in (({"expiry":"2026-10-27"},"Only 5 days to expiry, need 12"),
+                               ({"theta":-7},"Theta 7.00%/day above 5.00%"),
+                               ({"atr_5m":0.1},"A 0.6 ATR move nets only Rs."),
+                               ({"iv":29},"IV in the top"),
+                               ({"delta":float("nan")},"Non-finite broker Greeks")):
+            with self.subTest(edits=edits):
+                reasons=[]
+                self.assertIsNone(bot.qualify_quote({**self.sig,**edits},self.quote,self.cfg,60000,self.now.timestamp(),reasons))
+                self.assertEqual(len(reasons),1)
+                self.assertTrue(reasons[0].startswith(expected),reasons)
+        q=copy.deepcopy(self.quote)
+        q["depth"]["buy"][0]["price"]=98.9
+        reasons=[]
+        self.assertIsNone(bot.qualify_quote(self.sig,q,self.cfg,60000,self.now.timestamp(),reasons))
+        self.assertEqual(reasons,["Bid already at or below the planned stop"])
+
     def test_premium_cap(self):
         q = copy.deepcopy(self.quote)
         q["depth"]["buy"][0]["price"] = 1001
@@ -210,7 +235,7 @@ class IntegrationTests(unittest.TestCase):
                  patch.object(bot,"load_or_init_ledger",return_value={"trades":[],"virtual_balance_net":200000}), \
                  patch.object(bot,"shortlist_movers",return_value=[(3,"1",100),(3,"2",100)]), \
                  patch.object(bot,"verify_live_scanx_and_resolve_stock_option",side_effect=candidates), \
-                 patch.object(bot,"qualify_quote",side_effect=lambda sig,*args: sig), \
+                 patch.object(bot,"qualify_quote",side_effect=lambda sig,*args,**kwargs: sig), \
                  patch.object(bot,"TelegramNotifier",None):
                 clock.now.return_value = self.now
                 bot.run_dynamic_stock_options_session(True,False,cfg,logging.getLogger("test"))
