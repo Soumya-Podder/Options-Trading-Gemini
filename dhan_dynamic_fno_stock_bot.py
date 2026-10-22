@@ -148,7 +148,7 @@ class DynamicStrategyConfig:
         self.max_consec_losses = int(env.get("MAX_CONSECUTIVE_LOSSES_PER_DAY", 2))
 
         self.target_pct = float(env.get("STOCK_OPT_TARGET_PCT", 10.0))
-        self.stop_pct = float(env.get("STOCK_OPT_STOP_PCT", 1.0))
+        self.stop_pct = float(env.get("STOCK_OPT_STOP_PCT", 4.0))
         self.min_rr_target = float(getattr(args, "min_rr", None) or env.get("STOCK_OPT_MIN_NET_RR", 1.2))
         self.slippage_pct = float(env.get("STOCK_OPT_SLIPPAGE_PCT", 0.1))
         self.max_spread_pct = float(env.get("STOCK_OPT_MAX_SPREAD_PCT", 1.5))

@@ -13,7 +13,7 @@ import dhan_dynamic_fno_stock_bot as bot
 
 class IntegrationTests(unittest.TestCase):
     def setUp(self):
-        self.cfg = bot.DynamicStrategyConfig({}, argparse.Namespace())
+        self.cfg = bot.DynamicStrategyConfig({"STOCK_OPT_STOP_PCT":"1"}, argparse.Namespace())
         self.now = datetime(2026, 10, 22, 11, 0, 10, tzinfo=bot.IST)
         self.sig = {"symbol": "TEST", "lot_size": 500, "signal_timestamp": self.now.timestamp()-310,
                     "delta": 0.6, "theta": -1, "gamma": 0.01, "iv": 20,
@@ -176,6 +176,17 @@ class IntegrationTests(unittest.TestCase):
         reasons=[]
         self.assertIsNone(bot.qualify_quote(self.sig,q,self.cfg,60000,self.now.timestamp(),reasons))
         self.assertEqual(reasons,["Bid already at or below the planned stop"])
+
+    def test_four_percent_default_preserves_rupee_risk_cap(self):
+        cfg=bot.DynamicStrategyConfig({},argparse.Namespace())
+        self.assertEqual(cfg.stop_pct,4)
+        self.assertEqual(cfg.rupee_max_risk,1000)
+        self.assertIsNone(cfg.plan(100,500))
+        plan=cfg.plan(50,430)
+        self.assertIsNotNone(plan)
+        self.assertLessEqual(plan["expected_net_risk"],1000)
+        self.assertGreaterEqual(plan["expected_net_reward"],2000)
+        self.assertEqual(plan["initial_sl"],48)
 
     def test_premium_cap(self):
         q = copy.deepcopy(self.quote)
