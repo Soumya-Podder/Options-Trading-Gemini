@@ -158,7 +158,7 @@ class BacktestCoverageTests(unittest.TestCase):
         for key in previous:previous[key]+=latest[key]
         client=MagicMock()
         client.fetch_intraday_candles.return_value=previous
-        client.fetch_rolling_stock_option.return_value=None if missing else {**latest,"timestamp":[latest["timestamp"][0]+300],"open":[10],"strike":[1000]}
+        client.fetch_rolling_stock_option.return_value=None if missing else {**latest,"timestamp":[latest["timestamp"][0]+300],"open":[2],"strike":[1000]}
         client.history_events=[{"reason":"request_error"}] if missing else []
         client.history_coverage=[]
         if partial:
@@ -171,13 +171,13 @@ class BacktestCoverageTests(unittest.TestCase):
              patch.object(bot,"evaluate_stock_setup",return_value={"opt_type":"CE"}),patch.object(bot,"atomic_write_json"):
             ledger=bot.run_stock_options_historical_backtest(5,0,bot.DynamicStrategyConfig({},argparse.Namespace()),MagicMock())
             if partial:
-                client.fetch_rolling_stock_option.assert_not_called()
+                client.fetch_rolling_stock_option.assert_called_once()
             return ledger
 
-    def test_incomplete_underlying_history_is_not_replayed(self):
+    def test_history_warning_allows_setups_but_marks_report_incomplete(self):
         ledger=self.run_case(False,partial=True)
         self.assertEqual(ledger["status"],"INCOMPLETE_DATA")
-        self.assertEqual(ledger["stock_coverage"],0)
+        self.assertEqual(ledger["stock_coverage"],1)
         self.assertEqual(ledger["total_trades"],0)
 
     def test_missing_options_cannot_be_a_clean_zero_trade_result(self):

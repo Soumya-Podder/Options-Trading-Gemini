@@ -81,6 +81,17 @@ class PremiumPlanTests(unittest.TestCase):
 
 
 
+class RupeeTargetRatioTests(unittest.TestCase):
+    def test_target_can_rise_above_minimum_to_preserve_ratio(self):
+        plan = premium_plan(50,430,lambda *_:100,target_pct=12,stop_pct=5,
+                            min_net_rr=1.5,rupee_target=1200,max_lots=2,rupee_max_risk=1800)
+        self.assertIsNotNone(plan)
+        self.assertGreater(plan["net_profit_target"],1200)
+        self.assertGreaterEqual(plan["expected_net_rr"],1.5)
+        self.assertLessEqual(plan["rupee_target_price"],plan["hard_target_price"])
+        self.assertLessEqual(plan["expected_net_risk"],1800)
+
+
 class RankingTests(unittest.TestCase):
     def test_quality_precedes_net_ratio_after_qualification(self):
         low = {"symbol": "FAST", "day_change_pct": 10, "signal_quality": 99, "expected_net_rr": 3}

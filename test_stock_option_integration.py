@@ -12,8 +12,49 @@ import dhan_dynamic_fno_stock_bot as bot
 
 
 class IntegrationTests(unittest.TestCase):
+    def test_expiry_formats_and_invalid_dates(self):
+        for raw in ("2026-10-29", "2026-10-29 14:30:00", "2026-10-29T14:30:00",
+                    "29-Oct-2026", "29-October-2026", "29/10/2026", "29-10-2026"):
+            self.assertEqual(bot.normalize_expiry(raw),"2026-10-29")
+        for raw in ("",None,"31-Feb-2026","unknown"):
+            self.assertIsNone(bot.normalize_expiry(raw))
+
+    def test_security_id_alias_still_requires_master_match(self):
+        stock={"symbol":"TEST","strike_step":10,"fno_lot_size":100,"nearest_expiry":"2026-11-26",
+               "strikes_map":{"100.00":{"CE":{"security_id":"123","trading_symbol":"TEST-CE"}}}}
+        chain={"100.000000":{"ce":{"securityId":123,"greeks":{"delta":0.6,"theta":-1,"gamma":0.01},"implied_volatility":20}}}
+        self.assertEqual(bot.DynamicStockOptionsUniverse.resolve_atm_option(stock,100,"CE",chain,self.cfg)["opt_security_id"],"123")
+        chain["100.000000"]["ce"]["securityId"]=999
+        self.assertIsNone(bot.DynamicStockOptionsUniverse.resolve_atm_option(stock,100,"CE",chain,self.cfg))
+
+    def test_paper_target_honors_minimum_rr_profit_requirement(self):
+        cfg=bot.DynamicStrategyConfig({},argparse.Namespace())
+        pos={**cfg.plan(50,430),"entry_price":50,"entry_epoch":self.now.timestamp(),"peak_bid":50}
+        pos.update(current_sl=pos["initial_sl"],trail_jump=0)
+        bid=53.5
+        quote={"received_epoch":self.now.timestamp(),"depth":{"buy":[{"price":bid,"quantity":pos["qty"]}]}}
+        self.assertGreater((bid-50)*pos["qty"]-bot.compute_fno_option_charges(50,bid,pos["qty"]),1200)
+        self.assertIsNone(bot.paper_exit(pos,quote,self.now,cfg))
+
+    def test_follow_through_band_for_calls_and_puts(self):
+        from unittest.mock import MagicMock
+        stock={"eq_security_id":"1","nearest_expiry":"2026-11-26"}
+        client=MagicMock()
+        client.fetch_intraday_candles.return_value={"timestamp":[1]}
+        for side,direction in (("CE",1),("PE",-1)):
+            for advance,allowed in ((-0.31,False),(-0.3,True),(0,True),(1,True),(2,True),(2.01,False)):
+                with self.subTest(side=side,advance=advance):
+                    client.fetch_batch_ohlc.return_value={"NSE_EQ":{"1":{"last_price":100+direction*advance}}}
+                    sig={"opt_type":side,"conf_close":100,"atr_5m":2}
+                    with patch.object(bot,"evaluate_stock_setup",return_value=sig), \
+                         patch.object(bot.DynamicStockOptionsUniverse,"resolve_atm_option",return_value={"opt_security_id":"9"}):
+                        result=bot.verify_live_scanx_and_resolve_stock_option(client,stock,100,3,self.cfg)
+                    self.assertEqual(result is not None,allowed)
+
     def setUp(self):
-        self.cfg = bot.DynamicStrategyConfig({"STOCK_OPT_STOP_PCT":"1"}, argparse.Namespace())
+        self.cfg = bot.DynamicStrategyConfig({"STOCK_OPT_STOP_PCT":"1", "STOCK_OPT_TARGET_PCT":"10",
+            "STOCK_OPT_MIN_NET_RR":"1.2", "STOCK_OPT_RUPEE_TARGET":"2000",
+            "STOCK_OPT_RUPEE_MAX_RISK":"1000", "STOCK_OPT_MAX_LOTS":"3"}, argparse.Namespace())
         self.now = datetime(2026, 10, 22, 11, 0, 10, tzinfo=bot.IST)
         self.sig = {"symbol": "TEST", "lot_size": 500, "signal_timestamp": self.now.timestamp()-310,
                     "delta": 0.6, "theta": -1, "gamma": 0.01, "iv": 20,
@@ -34,7 +75,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(s["expected_net_rr"], 1.2)
 
     def test_wide_spread_stale_depth_or_insufficient_size_rejected(self):
-        for edit in (lambda q: q["depth"]["buy"][0].update(price=98),
+        for edit in (lambda q: q["depth"]["buy"][0].update(price=97),
                      lambda q: q["depth"]["sell"][0].update(quantity=499),
                      lambda q: q.update(last_trade_time="22/10/2026 10:59:00")):
             q = copy.deepcopy(self.quote)
@@ -111,11 +152,11 @@ class IntegrationTests(unittest.TestCase):
         self.assertIsNone(self.qualify())
 
     def test_spread_default_override_and_validation_ceiling(self):
-        self.assertEqual(self.cfg.max_spread_pct,1.5)
-        for cap in (0.2,1.5,3):
+        self.assertEqual(self.cfg.max_spread_pct,2.5)
+        for cap in (0.2,2.5,5):
             cfg=bot.DynamicStrategyConfig({"STOCK_OPT_MAX_SPREAD_PCT":str(cap)},argparse.Namespace())
             self.assertEqual(cfg.max_spread_pct,cap)
-        for cap in (0,3.01,float("nan")):
+        for cap in (0,5.01,float("nan")):
             with self.assertRaises(ValueError):
                 bot.DynamicStrategyConfig({"STOCK_OPT_MAX_SPREAD_PCT":str(cap)},argparse.Namespace())
 
@@ -153,7 +194,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(pos["persisted_state"],(99,101))
 
     def test_detailed_rejection_reason_and_qualified_metrics(self):
-        self.assertEqual(self.cfg.min_days_to_expiry,12)
+        self.assertEqual(self.cfg.min_days_to_expiry,4)
         reasons=[]
         result=bot.qualify_quote(self.sig,self.quote,self.cfg,60000,self.now.timestamp(),reasons)
         self.assertIsNotNone(result)
@@ -161,9 +202,9 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(result["dte"],35)
         self.assertAlmostEqual(result["theta_pct_per_day"],1)
         self.assertGreaterEqual(result["expected_move_gain"],self.cfg.rupee_target)
-        for edits,expected in (({"expiry":"2026-10-27"},"Only 5 days to expiry, need 12"),
-                               ({"theta":-7},"Theta 7.00%/day above 5.00%"),
-                               ({"atr_5m":0.1},"A 0.6 ATR move nets only Rs."),
+        for edits,expected in (({"expiry":"2026-10-25"},"Only 3 days to expiry, need 4"),
+                               ({"theta":-7},"Theta 7.00%/day above 6.00%"),
+                               ({"atr_5m":0.1},"A 1.8 ATR move nets only Rs."),
                                ({"iv":29},"IV in the top"),
                                ({"delta":float("nan")},"Non-finite broker Greeks")):
             with self.subTest(edits=edits):
@@ -177,16 +218,17 @@ class IntegrationTests(unittest.TestCase):
         self.assertIsNone(bot.qualify_quote(self.sig,q,self.cfg,60000,self.now.timestamp(),reasons))
         self.assertEqual(reasons,["Bid already at or below the planned stop"])
 
-    def test_four_percent_default_preserves_rupee_risk_cap(self):
+    def test_new_defaults_preserve_rupee_risk_and_rr(self):
         cfg=bot.DynamicStrategyConfig({},argparse.Namespace())
-        self.assertEqual(cfg.stop_pct,4)
-        self.assertEqual(cfg.rupee_max_risk,1000)
+        self.assertEqual((cfg.target_pct,cfg.stop_pct,cfg.rupee_target,cfg.rupee_max_risk,cfg.max_lots),
+                         (12,5,1200,1800,2))
         self.assertIsNone(cfg.plan(100,500))
         plan=cfg.plan(50,430)
         self.assertIsNotNone(plan)
-        self.assertLessEqual(plan["expected_net_risk"],1000)
-        self.assertGreaterEqual(plan["expected_net_reward"],2000)
-        self.assertEqual(plan["initial_sl"],48)
+        self.assertLessEqual(plan["expected_net_risk"],1800)
+        self.assertGreaterEqual(plan["expected_net_reward"],1200)
+        self.assertGreaterEqual(plan["expected_net_rr"],1.5)
+        self.assertEqual(plan["initial_sl"],47.5)
 
     def test_old_last_trade_with_fresh_depth_receipt_can_be_evaluated(self):
         q=copy.deepcopy(self.quote)

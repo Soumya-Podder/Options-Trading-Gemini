@@ -130,6 +130,7 @@ def premium_plan(entry, qty, charge_fn, target_pct=3.0, stop_pct=0.5,
             if risk <= 0 or risk > rupee_max_risk:
                 continue
             plan["expected_net_risk"] = risk
+            required_reward = max(rupee_target, min_net_rr * risk)
             # Integer tick bisection avoids a slow linear search for expensive options.
             lo = math.floor(entry / float(TICK)) + 1
             hi = round(target_price / float(TICK))
@@ -138,7 +139,7 @@ def premium_plan(entry, qty, charge_fn, target_pct=3.0, stop_pct=0.5,
                 price = mid * float(TICK)
                 fill = math.floor(price * (1 - slippage_pct / 100)*20 + 1e-9)/20
                 net = (fill - entry) * units - charge_fn(entry, fill, units)
-                if net >= rupee_target:
+                if net >= required_reward:
                     hi = mid
                 else:
                     lo = mid + 1
@@ -148,6 +149,7 @@ def premium_plan(entry, qty, charge_fn, target_pct=3.0, stop_pct=0.5,
             if reward < rupee_target or reward / plan["expected_net_risk"] < min_net_rr:
                 continue
             plan.update(expected_net_reward=reward, expected_net_rr=reward/plan["expected_net_risk"])
+            plan["net_profit_target"] = required_reward
             plan["trail_jump"] = max(float(TICK), round((target_price-entry)*0.25 / float(TICK))*float(TICK))
         plan.update(lots=lots, qty=units, rupee_target_price=target_price)
         return plan

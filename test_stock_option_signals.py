@@ -124,6 +124,18 @@ class StockSetupTests(unittest.TestCase):
     def test_insufficient_15m_history_rejected(self):
         self.assertIsNone(evaluate_stock_setup(self.candles, self.as_of, ema_period=100))
 
+    def test_old_sparse_history_does_not_veto_fresh_confirmation(self):
+        for field in self.candles:
+            del self.candles[field][1]
+        self.assertIsNotNone(evaluate_stock_setup(self.candles,self.as_of))
+
+    def test_partial_current_15m_bucket_is_not_aggregated(self):
+        from stock_option_signals import _completed_15m_bars, _closed_bars
+        bars=_closed_bars(self.candles,self.as_of)
+        bars.append({**bars[-1],"timestamp":bars[-1]["timestamp"]+300})
+        aggregates=_completed_15m_bars(bars)
+        self.assertTrue(all(x["timestamp"]+900 <= bars[-1]["timestamp"]+300 for x in aggregates))
+
     def test_threshold_applies_to_closed_day_move(self):
         self.assertIsNone(evaluate_stock_setup(self.candles, self.as_of, min_day_change_pct=4))
 

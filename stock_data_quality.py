@@ -34,9 +34,11 @@ class HistoricalDataMixin:
     def _history_issue(self, payload, start, end, kind, **details):
         event = {"security_id": str(payload["securityId"]), "instrument": payload["instrument"],
                  "side": payload.get("drvOptionType"), "from": start.isoformat(),
-                 "to_exclusive": end.isoformat(), "reason": kind, **details}
+                 "to_exclusive": end.isoformat(), "reason": kind,
+                 "severity": "coverage_warning" if kind in ("internal_bar_gap", "partial_session_tail") else "error",
+                 **details}
         self.history_events.append(event)
-        self.logger.warning("Historical data unavailable: %s", json.dumps(event))
+        self.logger.warning("Historical data quality: %s", json.dumps(event))
 
     def _history_window(self, endpoint, payload, start, end, fields, cache_dir, use_cache):
         now = datetime.now(IST)

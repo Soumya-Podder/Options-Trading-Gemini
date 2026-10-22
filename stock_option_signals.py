@@ -82,7 +82,9 @@ def _completed_15m_bars(bars: List[dict]) -> List[dict]:
         groups.setdefault(bucket_start, []).append(bar)
     result = []
     for timestamp, group in sorted(groups.items()):
-        if [bar["timestamp"] for bar in group] != [timestamp, timestamp + 300, timestamp + 600]:
+        # Aggregate observed bars only after the entire bucket has closed.
+        # Missing observations are not synthesized or treated as zero-volume bars.
+        if not group or timestamp + 900 > bars[-1]["timestamp"] + BAR_SECONDS:
             continue
         result.append({"timestamp": timestamp, "open": group[0]["open"],
                        "high": max(bar["high"] for bar in group),
@@ -138,10 +140,8 @@ def evaluate_stock_setup(
     bars_15m = _completed_15m_bars(bars)
     if len(bars_15m) < ema_period + 2:
         return None
-    # Missing recent 5m data must not silently make a stale 15m trend look valid.
-    expected_15m_end = session_open + ((latest["timestamp"] + 300 - session_open) // 900) * 900
-    if bars_15m[-1]["timestamp"] + 900 != expected_15m_end:
-        return None
+    # Freshness and consecutive confirmation bars are checked above. Older gaps
+    # may reduce trend observations without invalidating today's fresh setup.
     ema_values = _ema([bar["close"] for bar in bars_15m], ema_period)
     ema_value, previous_ema = ema_values[-1], ema_values[-2]
     atr_15m = _atr(bars_15m, ema_period)[-1]
