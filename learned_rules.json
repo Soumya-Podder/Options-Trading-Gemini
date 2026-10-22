@@ -95,7 +95,7 @@
     "avg_win_r": 3.4,
     "avg_loss_r": 0.92,
     "expectancy_r": 1.24,
-    "intraday_losses": 1,
+    "intraday_losses": 0,
     "last_lot_loss": true,
     "muted_on_day": ""
   },
@@ -118,7 +118,7 @@
     "avg_win_r": 1.36,
     "avg_loss_r": 0.87,
     "expectancy_r": 0.25,
-    "intraday_losses": 1,
+    "intraday_losses": 0,
     "last_lot_loss": true,
     "muted_on_day": ""
   },
