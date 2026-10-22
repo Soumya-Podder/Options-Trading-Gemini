@@ -1,0 +1,232 @@
+{
+  "at": "2026-10-22T15:01:26.466613+05:30",
+  "mode": "OBSERVATION_ONLY_AFTER_ENTRY_CUTOFF",
+  "universe": 210,
+  "entry_cutoff": "14:30 IST",
+  "snapshots": [
+    {
+      "at": "2026-10-22T15:01:32.786928+05:30",
+      "quotes_returned": 210,
+      "shortlist": 13,
+      "confirmed_contracts": 0,
+      "qualified": 0,
+      "rows": [
+        {
+          "symbol": "INDHOTEL",
+          "spot": 787.7,
+          "change_pct": 4.608,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Volume below 1.2x prior 10-bar average"
+        },
+        {
+          "symbol": "KAYNES",
+          "spot": 3296.9,
+          "change_pct": 4.164,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Beyond 1.25 ATR from 15m EMA"
+        },
+        {
+          "symbol": "BAJAJHLDNG",
+          "spot": 11239.0,
+          "change_pct": 2.405,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Directional/EMA/VWAP/rising-volume confirmation failed"
+        },
+        {
+          "symbol": "AMBUJACEM",
+          "spot": 368.4,
+          "change_pct": 2.362,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Volume below 1.2x prior 10-bar average"
+        },
+        {
+          "symbol": "POLICYBZR",
+          "spot": 1031.1,
+          "change_pct": 2.292,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Closed-candle daily move below threshold"
+        },
+        {
+          "symbol": "KEI",
+          "spot": 3882.5,
+          "change_pct": -8.224,
+          "direction": "PE",
+          "signal_quality": 44.6985,
+          "stage": "PRICE_RECHECK_REJECTED",
+          "reason": "Spot moved against confirmation or beyond chase limit"
+        },
+        {
+          "symbol": "SWIGGY",
+          "spot": 208.8,
+          "change_pct": -6.64,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Beyond 1.25 ATR from 15m EMA"
+        },
+        {
+          "symbol": "MAZDOCK",
+          "spot": 1913.3,
+          "change_pct": -4.215,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Volume below 1.2x prior 10-bar average"
+        },
+        {
+          "symbol": "KALYANKJIL",
+          "spot": 533.7,
+          "change_pct": -4.183,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Directional/EMA/VWAP/rising-volume confirmation failed"
+        },
+        {
+          "symbol": "WAAREEENER",
+          "spot": 2364.5,
+          "change_pct": -3.686,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Volume below 1.2x prior 10-bar average"
+        },
+        {
+          "symbol": "POWERINDIA",
+          "spot": 27040.0,
+          "change_pct": -3.601,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Volume below 1.2x prior 10-bar average"
+        },
+        {
+          "symbol": "RADICO",
+          "spot": 4202.7,
+          "change_pct": -3.521,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Beyond 1.25 ATR from 15m EMA"
+        },
+        {
+          "symbol": "OFSS",
+          "spot": 9917.0,
+          "change_pct": -3.371,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Beyond 1.25 ATR from 15m EMA"
+        }
+      ]
+    },
+    {
+      "at": "2026-10-22T15:01:42.120924+05:30",
+      "quotes_returned": 210,
+      "shortlist": 13,
+      "confirmed_contracts": 1,
+      "qualified": 0,
+      "rows": [
+        {
+          "symbol": "INDHOTEL",
+          "spot": 787.7,
+          "change_pct": 4.608,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Volume below 1.2x prior 10-bar average"
+        },
+        {
+          "symbol": "KAYNES",
+          "spot": 3296.6,
+          "change_pct": 4.155,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Beyond 1.25 ATR from 15m EMA"
+        },
+        {
+          "symbol": "BAJAJHLDNG",
+          "spot": 11238.0,
+          "change_pct": 2.396,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Directional/EMA/VWAP/rising-volume confirmation failed"
+        },
+        {
+          "symbol": "POLICYBZR",
+          "spot": 1031.2,
+          "change_pct": 2.302,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Closed-candle daily move below threshold"
+        },
+        {
+          "symbol": "AMBUJACEM",
+          "spot": 367.9,
+          "change_pct": 2.223,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Volume below 1.2x prior 10-bar average"
+        },
+        {
+          "symbol": "KEI",
+          "spot": 3887.3,
+          "change_pct": -8.11,
+          "direction": "PE",
+          "signal_quality": 44.6985,
+          "stage": "EXECUTION_REJECTED",
+          "contract": "KEI-Oct2026-3900-PE",
+          "bid": 69.4,
+          "ask": 70.35,
+          "spread_pct": 1.35,
+          "plan": {
+            "opt_1r": 0.7,
+            "initial_sl": 69.65,
+            "min_rr_target_price": 77.35,
+            "hard_target_price": 77.35,
+            "trail_jump": 1.55,
+            "expected_net_reward": 2008.1600000000042,
+            "expected_net_risk": 384.749999999999,
+            "expected_net_rr": 5.219389213775203,
+            "estimated_costs": 137.0525,
+            "target_estimated_costs": 137.0525,
+            "stop_estimated_costs": 129.1975,
+            "lots": 2,
+            "qty": 350,
+            "rupee_target_price": 76.5
+          },
+          "reason": "Execution/cost/Greek gate failed; inspect premium, spread and plan"
+        },
+        {
+          "symbol": "SWIGGY",
+          "spot": 208.9,
+          "change_pct": -6.595,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Beyond 1.25 ATR from 15m EMA"
+        },
+        {
+          "symbol": "MAZDOCK",
+          "spot": 1913.8,
+          "change_pct": -4.19,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Volume below 1.2x prior 10-bar average"
+        },
+        {
+          "symbol": "KALYANKJIL",
+          "spot": 533.75,
+          "change_pct": -4.174,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Directional/EMA/VWAP/rising-volume confirmation failed"
+        },
+        {
+          "symbol": "WAAREEENER",
+          "spot": 2365.7,
+          "change_pct": -3.637,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Volume below 1.2x prior 10-bar average"
+        },
+        {
+          "symbol": "POWERINDIA",
+          "spot": 27045.0,
+          "change_pct": -3.583,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Volume below 1.2x prior 10-bar average"
+        },
+        {
+          "symbol": "RADICO",
+          "spot": 4203.1,
+          "change_pct": -3.512,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Beyond 1.25 ATR from 15m EMA"
+        },
+        {
+          "symbol": "OFSS",
+          "spot": 9915.0,
+          "change_pct": -3.391,
+          "stage": "SIGNAL_REJECTED",
+          "reason": "Beyond 1.25 ATR from 15m EMA"
+        }
+      ]
+    }
+  ]
+}

@@ -20,4 +20,5 @@ dhan_hist_cache/
 .vscode/
 .idea/
 .codex/
+.codex-remote-attachments/
 .agents/
