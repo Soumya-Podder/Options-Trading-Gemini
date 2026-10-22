@@ -16,6 +16,8 @@ import argparse
 from datetime import datetime, timedelta, time as dtime, timezone
 from typing import Dict, Any, List, Optional, Tuple
 import requests
+from collections import Counter
+from stock_data_quality import HistoricalDataMixin, quote_received_age
 from stock_option_signals import evaluate_stock_setup
 from stock_option_policy import premium_plan, rank_candidates, DailyTradeGate
 
@@ -337,7 +339,8 @@ class DynamicStockOptionsUniverse:
                     "gamma": gamma, "iv": iv, "opt_type": opt_type,
                     "opt_security_id": str(leg["security_id"]), "trading_symbol": contract["trading_symbol"],
                     "lot_size": int(stock_info["fno_lot_size"]), "expiry": stock_info["nearest_expiry"],
-                    "greeks_timestamp": time.time()})
+                    "greeks_timestamp": leg.get("received_epoch", time.time()),
+                    "greeks_received_epoch": leg.get("received_epoch", time.time())})
             except (KeyError, TypeError, ValueError):
                 continue
         if not candidates or not ivs:
@@ -347,7 +350,7 @@ class DynamicStockOptionsUniverse:
         return min(candidates, key=lambda c: (abs(abs(c["delta"])-(cfg.min_delta+cfg.max_delta)/2), c["iv"]))
 
 
-class DhanStockOptionsClient:
+class DhanStockOptionsClient(HistoricalDataMixin):
     BASE_URL = "https://api.dhan.co/v2"
 
     def __init__(self, client_id: str, access_token: str, logger: logging.Logger):
@@ -357,6 +360,12 @@ class DhanStockOptionsClient:
         self.last_chart_ts = 0.0
         self.last_quote_ts = 0.0
         self.last_chain_ts = 0.0
+        self.history_events = []
+        self.history_coverage = []
+        self.history_failure_streak = 0
+        self.history_request_at = 0.0
+        self.history_cache_dir = CACHE_DIR
+        self._history_save = atomic_write_json
         self.session = requests.Session()
         self.session.headers.update({
             "access-token": self.access_token,
@@ -397,8 +406,14 @@ class DhanStockOptionsClient:
             response = self.session.post(f"{self.BASE_URL}/optionchain", json={
                 "UnderlyingScrip": int(underlying_id), "UnderlyingSeg": "NSE_EQ", "Expiry": expiry}, timeout=12)
             if response.status_code == 200:
-                return response.json().get("data", {}).get("oc", {})
-        except (requests.RequestException, ValueError):
+                chain = response.json().get("data", {}).get("oc", {})
+                received = time.time()
+                for node in chain.values():
+                    for side in ("ce", "pe"):
+                        if isinstance(node.get(side), dict):
+                            node[side]["received_epoch"] = received
+                return chain
+        except (requests.RequestException, ValueError, TypeError, AttributeError):
             pass
         self.logger.warning("Option chain unavailable; skipping Greek qualification")
         return {}
@@ -411,127 +426,15 @@ class DhanStockOptionsClient:
             response = self.session.post(f"{self.BASE_URL}/marketfeed/quote",
                 json={"NSE_FNO": [int(s) for s in security_ids]}, timeout=12)
             if response.status_code == 200:
-                return response.json().get("data", {}).get("NSE_FNO", {})
+                quotes = response.json().get("data", {}).get("NSE_FNO", {})
+                received = time.time()
+                for quote in quotes.values():
+                    quote["received_epoch"] = received
+                return quotes
             self.logger.warning("Option depth unavailable: HTTP %s", response.status_code)
-        except (requests.RequestException, ValueError):
+        except (requests.RequestException, ValueError, TypeError, AttributeError):
             self.logger.warning("Option depth unavailable; skipping entry/valuation")
         return {}
-
-    def fetch_intraday_candles(
-        self,
-        security_id: str,
-        exchange_segment: str = "NSE_EQ",
-        instrument: str = "EQUITY",
-        interval: str = "5",
-        from_date: Optional[str] = None,
-        to_date: Optional[str] = None,
-        use_cache: bool = False,
-    ) -> Optional[Dict[str, List[Any]]]:
-        today_str = to_date or datetime.now().strftime("%Y-%m-%d")
-        from_str = from_date or (datetime.now() - timedelta(days=5)).strftime("%Y-%m-%d")
-
-        cache_path = ""
-        if use_cache:
-            ckey = f"{exchange_segment}_{instrument}_{security_id}_{interval}m_{from_str}_{today_str}"
-            chash = hashlib.md5(ckey.encode("utf-8")).hexdigest()[:10]
-            cache_path = os.path.join(CACHE_DIR, f"{ckey}_{chash}.json")
-            if os.path.exists(cache_path):
-                try:
-                    with open(cache_path, "r", encoding="utf-8") as f:
-                        cached = json.load(f)
-                    if isinstance(cached, dict) and cached.get("close"):
-                        return cached
-                except Exception:
-                    pass
-
-        elapsed = time.time() - self.last_chart_ts
-        if elapsed < 0.45:
-            time.sleep(0.45 - elapsed)
-
-        payload = {
-            "securityId": str(security_id),
-            "exchangeSegment": exchange_segment,
-            "instrument": instrument,
-            "interval": str(interval),
-            "fromDate": from_str,
-            "toDate": today_str,
-        }
-        for attempt in range(1, 3):
-            try:
-                resp = self.session.post(f"{self.BASE_URL}/charts/intraday", json=payload, timeout=15)
-                self.last_chart_ts = time.time()
-                if resp.status_code == 200:
-                    data = resp.json().get("data", resp.json())
-                    if isinstance(data, dict) and data.get("close"):
-                        if use_cache and cache_path:
-                            atomic_write_json(cache_path, data)
-                        return data
-                    return None
-                elif resp.status_code == 429:
-                    time.sleep(3.0 * attempt)
-                else:
-                    return None
-            except requests.RequestException:
-                self.last_chart_ts = time.time()
-        return None
-
-    def fetch_rolling_stock_option(
-        self,
-        eq_security_id: str,
-        opt_type: str,
-        from_date: str,
-        to_date: str,
-        interval: str = "5",
-    ) -> Optional[Dict[str, List[Any]]]:
-        """Fetches real historical ATM Stock Option (`OPTSTK`) bars via Dhan `/v2/charts/rollingoption`."""
-        drv_type = "CALL" if opt_type == "CE" else "PUT"
-        ckey = f"OPTSTK_ROLL_{eq_security_id}_{drv_type}_{interval}m_{from_date}_{to_date}"
-        chash = hashlib.md5(ckey.encode("utf-8")).hexdigest()[:10]
-        cache_path = os.path.join(CACHE_DIR, f"{ckey}_{chash}.json")
-
-        if os.path.exists(cache_path):
-            try:
-                with open(cache_path, "r", encoding="utf-8") as f:
-                    cached = json.load(f)
-                if isinstance(cached, dict):
-                    if cached.get("empty"):
-                        return None
-                    if cached.get("timestamp"):
-                        return cached
-            except Exception:
-                pass
-
-        elapsed = time.time() - self.last_chart_ts
-        if elapsed < 0.65:
-            time.sleep(0.65 - elapsed)
-
-        payload = {
-            "exchangeSegment": "NSE_FNO",
-            "interval": str(interval),
-            "securityId": int(eq_security_id),
-            "instrument": "OPTSTK",
-            "expiryFlag": "MONTH",
-            "expiryCode": 1,
-            "strike": "ATM",
-            "drvOptionType": drv_type,
-            "requiredData": ["open", "high", "low", "close", "oi", "iv", "strike", "spot"],
-            "fromDate": from_date,
-            "toDate": to_date,
-        }
-        try:
-            resp = self.session.post(f"{self.BASE_URL}/charts/rollingoption", json=payload, timeout=18)
-            self.last_chart_ts = time.time()
-            if resp.status_code == 200:
-                data_node = resp.json().get("data", {})
-                side_key = "ce" if opt_type == "CE" else "pe"
-                leg = data_node.get(side_key) if isinstance(data_node, dict) else None
-                if leg and leg.get("timestamp"):
-                    atomic_write_json(cache_path, leg)
-                    return leg
-                atomic_write_json(cache_path, {"empty": True, "timestamp": []})
-        except requests.RequestException:
-            self.last_chart_ts = time.time()
-        return None
 
     def place_option_super_order(
         self,
@@ -596,6 +499,10 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
     sig = evaluate_stock_setup(candles, time.time(), cfg.min_day_change_pct, cfg.ema_period)
     if not sig:
         return None
+    current = client.fetch_batch_ohlc([stock_info["eq_security_id"]]).get("NSE_EQ", {}).get(str(stock_info["eq_security_id"]), {})
+    spot_ltp = float(current.get("last_price", 0) or 0)
+    if spot_ltp <= 0:
+        return None
     # Require the current underlying quote to hold confirmation, without chasing.
     direction = 1 if sig["opt_type"] == "CE" else -1
     advance = direction * (spot_ltp - sig["conf_close"])
@@ -616,9 +523,8 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         now_epoch = time.time() if now_epoch is None else now_epoch
         if not 0 <= now_epoch - (sig["signal_timestamp"] + 300) < 300:
             return reject("Confirmation candle is stale or not yet tradable")
-        trade_time = datetime.strptime(quote["last_trade_time"], "%d/%m/%Y %H:%M:%S").replace(tzinfo=IST)
-        if not 0 <= now_epoch - trade_time.timestamp() <= 30:
-            return reject("Option quote older than 30s or future-dated")
+        if not 0 <= quote_received_age(quote, now_epoch) <= 30:
+            return reject("Option snapshot older than 30s or future-dated")
         bid_node, ask_node = quote["depth"]["buy"][0], quote["depth"]["sell"][0]
         bid, ask = float(bid_node["price"]), float(ask_node["price"])
         qty = int(sig["lot_size"])
@@ -650,8 +556,8 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
             return reject("Non-positive gamma or IV")
         if (delta > 0) != (sig["opt_type"] == "CE"):
             return reject("Delta sign disagrees with option type")
-        if not 0 <= now_epoch-sig["greeks_timestamp"] <= 120:
-            return reject("Greeks older than 120s or future-dated")
+        if not 0 <= now_epoch-sig.get("greeks_received_epoch", sig["greeks_timestamp"]) <= 120:
+            return reject("Greek snapshot received over 120s ago or future-dated")
         dte = (datetime.strptime(sig["expiry"], "%Y-%m-%d").date() - datetime.fromtimestamp(now_epoch, IST).date()).days
         if dte < cfg.min_days_to_expiry:
             return reject(f"Only {dte} days to expiry, need {cfg.min_days_to_expiry}")
@@ -672,8 +578,15 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
             return reject("Unusable chain IV range")
         if (iv-low)/(high-low) >= 0.8:
             return reject(f"IV in the top {100*(1-(iv-low)/(high-low)):.0f}% of the chain")
+        try:
+            last_trade_age = now_epoch - datetime.strptime(quote["last_trade_time"], "%d/%m/%Y %H:%M:%S").replace(tzinfo=IST).timestamp()
+        except (KeyError, TypeError, ValueError):
+            last_trade_age = None
         return {**sig, **plan, "opt_ltp": ask, "bid": bid, "spread_pct": spread,
-                "dte": dte, "theta_pct_per_day": theta_pct, "expected_move_gain": net_gain}
+                "dte": dte, "theta_pct_per_day": theta_pct, "expected_move_gain": net_gain,
+                "quote_age_seconds": quote_received_age(quote, now_epoch),
+                "last_trade_age_seconds": last_trade_age,
+                "greeks_receipt_age_seconds": now_epoch-sig.get("greeks_received_epoch",sig["greeks_timestamp"])}
     except (KeyError, IndexError, TypeError, ValueError, OverflowError) as error:
         return reject(f"Malformed quote or Greek data ({type(error).__name__})")
 
@@ -716,8 +629,7 @@ def paper_exit(pos, quote, now, cfg):
     try:
         bid = float(quote["depth"]["buy"][0]["price"])
         size = int(quote["depth"]["buy"][0]["quantity"])
-        stamp = datetime.strptime(quote["last_trade_time"], "%d/%m/%Y %H:%M:%S").replace(tzinfo=IST)
-        if not math.isfinite(bid) or bid <= 0 or size < pos["qty"] or not 0 <= now.timestamp()-stamp.timestamp() <= 30:
+        if not math.isfinite(bid) or bid <= 0 or size < pos["qty"] or not 0 <= quote_received_age(quote, now.timestamp()) <= 30:
             return None
     except (KeyError, IndexError, TypeError, ValueError):
         return None
@@ -810,6 +722,7 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
             quotes = client.fetch_batch_ohlc(list(universe)).get("NSE_EQ", {})
             shortlist = shortlist_movers(quotes, cfg)
             signals = []
+            candidates = []
             used_symbols = {p["symbol"] for p in positions} | {t["symbol"] for t in completed}
             for change, sec_id, ltp in shortlist:
                 if sec_id not in universe or universe[sec_id]["symbol"] in used_symbols:
@@ -817,15 +730,13 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                 sig = verify_live_scanx_and_resolve_stock_option(client, universe[sec_id], ltp, change, cfg)
                 if sig:
                     signals.append(sig)
-            depth = client.fetch_option_quotes([s["opt_security_id"] for s in signals]) if signals else {}
-            candidates = []
-            for sig in signals:
-                reasons = []
-                qualified = qualify_quote(sig, depth.get(str(sig["opt_security_id"]), {}), cfg, wallet, reasons=reasons)
-                if qualified:
-                    candidates.append(qualified)
-                else:
-                    logger.info("[OPTSTK REJECT] %s %s | %s", sig["symbol"], sig["opt_type"], reasons[0] if reasons else "Unspecified rejection")
+                    depth = client.fetch_option_quotes([sig["opt_security_id"]])
+                    reasons = []
+                    qualified = qualify_quote(sig, depth.get(str(sig["opt_security_id"]), {}), cfg, wallet, reasons=reasons)
+                    if qualified:
+                        candidates.append(qualified)
+                    else:
+                        logger.info("[OPTSTK REJECT] %s %s | %s", sig["symbol"], sig["opt_type"], reasons[0] if reasons else "Unspecified rejection")
             ranked = rank_candidates(candidates)
             logger.info("Shortlist %d | confirmed %d | qualified %d", len(shortlist), len(signals), len(ranked))
             if scan_once:
@@ -836,6 +747,12 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                 spot = float(current.get("last_price", 0) or 0)
                 advance = (1 if best["opt_type"] == "CE" else -1)*(spot-best["conf_close"])
                 if spot <= 0 or not 0 <= advance <= 0.25*best["atr_5m"]:
+                    continue
+                # Ranking may have taken minutes. Rebuild the candidate from current
+                # closed candles and a newly received chain before any reservation.
+                best = verify_live_scanx_and_resolve_stock_option(client, universe[best["eq_security_id"]], spot, 0, cfg)
+                if not best:
+                    logger.info("[OPTSTK RECHECK REJECT] Setup no longer current")
                     continue
                 fresh = client.fetch_option_quotes([best["opt_security_id"]])
                 reasons = []
@@ -930,19 +847,23 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
     stocks = sorted(universe.values(), key=lambda s: s["symbol"])
     if max_stocks > 0:
         stocks = stocks[:max_stocks]
-    end = datetime.now(IST)
+    end = datetime.now(IST).replace(hour=0, minute=0, second=0, microsecond=0)
     start = end - timedelta(days=days)
     frames, snapshots, signals = {}, {}, {}
     for stock in stocks:
         sec = stock["eq_security_id"]
+        issue_count = len(client.history_events)
         candles = client.fetch_intraday_candles(sec, interval="5", from_date=start.strftime("%Y-%m-%d"),
                                                 to_date=end.strftime("%Y-%m-%d"), use_cache=True)
-        if not candles:
+        # Do not generate signals or replay trades from known incomplete history.
+        if not candles or len(client.history_events) > issue_count:
             continue
         frames[sec] = stock
         last_day, prev_close, last_close = None, None, None
         for i, ts in enumerate(candles["timestamp"]):
             ts = int(ts)
+            if ts < start.timestamp() or ts+300 > end.timestamp():
+                continue
             dt = datetime.fromtimestamp(ts+300, IST)
             day = dt.date()
             if day != last_day:
@@ -963,6 +884,7 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
                               "Exit-policy replay only: historical broker Greeks, IV range, DTE and delta-selected contracts unavailable",
                               "Trailing stops advance on following bars; same-bar trail path is unvalidated"]}
     used_days, option_maps, skipped = {}, {}, 0
+    data_skips, strategy_rejections = Counter(), Counter()
     active_until = []
     used_symbols = {}
     for ts in sorted(snapshots):
@@ -985,8 +907,12 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
                                     for i, t in enumerate(raw["timestamp"])} if raw and all(k in raw for k in ("timestamp", "open", "high", "low", "close", "strike")) else {}
             bars = option_maps[key]
             first = bars.get(ts)
-            if not first or not 15 <= first["open"] <= cfg.max_premium or first["strike"] <= 0:
+            if not first or first["strike"] <= 0:
                 skipped += 1
+                data_skips["option_history_unavailable" if not bars else "entry_bar_missing_or_invalid_strike"] += 1
+                continue
+            if not 15 <= first["open"] <= cfg.max_premium:
+                strategy_rejections["premium_outside_limits"] += 1
                 continue
             qty = stock["fno_lot_size"]
             entry = round_tick(first["open"] * (1 + cfg.slippage_pct / 100))
@@ -995,6 +921,10 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
                 if datetime.strptime(t["exit_timestamp"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST).timestamp() <= ts)
             wallet -= sum(t["entry_price"]*t["qty"] + t["estimated_costs"] for t in ledger["trades"]
                 if datetime.strptime(t["exit_timestamp"], "%Y-%m-%d %H:%M:%S").replace(tzinfo=IST).timestamp() > ts)
+            if not plan:
+                strategy_rejections["no_risk_target_plan"] += 1
+            elif entry*plan["qty"] + plan["estimated_costs"] > wallet:
+                strategy_rejections["insufficient_wallet"] += 1
             if plan and entry*plan["qty"] + plan["estimated_costs"] <= wallet:
                 candidates.append({**sig, **plan, "symbol": stock["symbol"], "lot_size": qty, "map_key": key})
         ranked = rank_candidates(candidates)
@@ -1011,6 +941,7 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
             used_days[day] = used_days.get(day, 0) + 1
             sim = simulate_fixed_premium_trade(ts, option_maps[best["map_key"]], best["lot_size"], cfg)
             if sim is None:
+                data_skips["simulation_missing_invalid_bars_or_strike_change"] += 1
                 skipped += 1
                 continue
             active_until.pop()
@@ -1025,10 +956,20 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
     update_ledger_metrics(ledger)
     ledger["unvalidated_candidates_or_outcomes"] = skipped
     ledger["stock_coverage"] = len(frames)
+    events = client.history_events
+    complete = not events and not skipped and len(frames) == len(stocks)
+    ledger.update(status="COMPLETED_EXIT_REPLAY" if complete else "INCOMPLETE_DATA",
+                  data_coverage_complete=complete, full_strategy_validated=False,
+                  data_rejection_counts=dict(data_skips), strategy_rejection_counts=dict(strategy_rejections),
+                  historical_data_issues=events, historical_data_coverage=client.history_coverage, stock_universe_requested=len(stocks),
+                  period={"from_inclusive":start.isoformat(),"to_exclusive":end.isoformat()})
     atomic_write_json("stock_fno_backtest_ledger.json", ledger)
+    if not complete:
+        logger.error("BACKTEST INCOMPLETE: %d history issues, %d unvalidated signals/outcomes. Recorded P&L is not a validated strategy result.",len(events),skipped)
     logger.info("Selective backtest: %d trades, %d unvalidated candidates/outcomes | net Rs.%+.2f | avg net win/loss ratio %s",
                 ledger["total_trades"], skipped, ledger["net_profit_after_charges"], ledger["net_win_to_loss_ratio"])
     logger.info("Saved separate stock_fno_backtest_ledger.json. Replay does not validate historical Greeks, strike selection or intrabar execution.")
+    return ledger
 
 
 if __name__ == "__main__":
@@ -1046,6 +987,8 @@ if __name__ == "__main__":
     if args.reset_ledger and os.path.exists(LEDGER_FILE):
         os.remove(LEDGER_FILE)
     if args.backtest_days > 0:
-        run_stock_options_historical_backtest(args.backtest_days, args.max_stocks, strat_cfg, log)
+        result = run_stock_options_historical_backtest(args.backtest_days, args.max_stocks, strat_cfg, log)
+        if result["status"] == "INCOMPLETE_DATA":
+            raise SystemExit(2)
     else:
         run_dynamic_stock_options_session(args.live, args.scan_once, strat_cfg, log)

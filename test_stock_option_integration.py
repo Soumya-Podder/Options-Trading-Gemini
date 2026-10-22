@@ -188,6 +188,27 @@ class IntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(plan["expected_net_reward"],2000)
         self.assertEqual(plan["initial_sl"],48)
 
+    def test_old_last_trade_with_fresh_depth_receipt_can_be_evaluated(self):
+        q=copy.deepcopy(self.quote)
+        q.update(last_trade_time="21/10/2026 10:00:00",received_epoch=self.now.timestamp())
+        result=self.qualify(q)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["quote_age_seconds"],0)
+        self.assertGreater(result["last_trade_age_seconds"],86400)
+        q["received_epoch"]-=31
+        self.assertIsNone(self.qualify(q))
+        q["received_epoch"]=self.now.timestamp()+1
+        self.assertIsNone(self.qualify(q))
+
+    def test_paper_exit_uses_fresh_depth_not_last_trade_time(self):
+        pos={**self.cfg.plan(100,500),"entry_price":100,"entry_epoch":self.now.timestamp(),"current_sl":99}
+        q=copy.deepcopy(self.quote)
+        q.update(last_trade_time="21/10/2026 10:00:00",received_epoch=self.now.timestamp())
+        q["depth"]["buy"][0]["price"]=106
+        self.assertEqual(bot.paper_exit(pos,q,self.now,self.cfg)[1],"RUPEE_TARGET")
+        q["received_epoch"]-=31
+        self.assertIsNone(bot.paper_exit(pos,q,self.now,self.cfg))
+
     def test_premium_cap(self):
         q = copy.deepcopy(self.quote)
         q["depth"]["buy"][0]["price"] = 1001
@@ -245,7 +266,7 @@ class IntegrationTests(unittest.TestCase):
                  patch.object(bot,"load_dotenv_file",return_value={"DHAN_CLIENT_ID":"test","DHAN_ACCESS_TOKEN":"test"}), \
                  patch.object(bot,"load_or_init_ledger",return_value={"trades":[],"virtual_balance_net":200000}), \
                  patch.object(bot,"shortlist_movers",return_value=[(3,"1",100),(3,"2",100)]), \
-                 patch.object(bot,"verify_live_scanx_and_resolve_stock_option",side_effect=candidates), \
+                 patch.object(bot,"verify_live_scanx_and_resolve_stock_option",side_effect=lambda client,stock,*args: next(x for x in candidates if x["symbol"]==stock["symbol"])), \
                  patch.object(bot,"qualify_quote",side_effect=lambda sig,*args,**kwargs: sig), \
                  patch.object(bot,"TelegramNotifier",None):
                 clock.now.return_value = self.now
