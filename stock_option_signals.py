@@ -163,10 +163,12 @@ def evaluate_stock_setup(
     bullish = (day_change_pct >= min_day_change_pct
                and latest["volume"] > previous["volume"]
                and latest["close"] > previous_ema
+               and latest["close"] > vwap
                and latest["close"] > max(previous["close"], latest["open"]))
     bearish = (day_change_pct <= -min_day_change_pct
                and latest["volume"] > previous["volume"]
                and latest["close"] < previous_ema
+               and latest["close"] < vwap
                and latest["close"] < min(previous["close"], latest["open"]))
     tolerance = 0.15 * atr_5m
     orb_bonus = ((bullish and latest["close"] > orb_high

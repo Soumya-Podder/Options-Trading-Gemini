@@ -34,7 +34,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(s["expected_net_rr"], 1.2)
 
     def test_wide_spread_stale_depth_or_insufficient_size_rejected(self):
-        for edit in (lambda q: q["depth"]["buy"][0].update(price=99),
+        for edit in (lambda q: q["depth"]["buy"][0].update(price=98),
                      lambda q: q["depth"]["sell"][0].update(quantity=499),
                      lambda q: q.update(last_trade_time="22/10/2026 10:59:00")):
             q = copy.deepcopy(self.quote)
@@ -109,6 +109,48 @@ class IntegrationTests(unittest.TestCase):
                 self.sig = original
         del self.sig["delta"]
         self.assertIsNone(self.qualify())
+
+    def test_spread_default_override_and_validation_ceiling(self):
+        self.assertEqual(self.cfg.max_spread_pct,1.5)
+        for cap in (0.2,1.5,3):
+            cfg=bot.DynamicStrategyConfig({"STOCK_OPT_MAX_SPREAD_PCT":str(cap)},argparse.Namespace())
+            self.assertEqual(cfg.max_spread_pct,cap)
+        for cap in (0,3.01,float("nan")):
+            with self.assertRaises(ValueError):
+                bot.DynamicStrategyConfig({"STOCK_OPT_MAX_SPREAD_PCT":str(cap)},argparse.Namespace())
+
+    def test_unchanged_paper_state_is_not_written(self):
+        from unittest.mock import MagicMock
+        gate=MagicMock()
+        pos={"entry_id":"saved","opt_security_id":"11","contract":"TEST_CE","current_sl":99,"peak_bid":100,"persisted_state":[99,100]}
+        gate.read.side_effect=[{"state":"reserved","details":{"mode":"PAPER","position":pos}},
+                               {"state":"closed","details":{}}]
+        gate.count_entries.return_value=2
+        calls=[]
+        def evaluate(position,*args):
+            calls.append(1)
+            if len(calls)==2:
+                position["peak_bid"]=101
+            if len(calls)==3:
+                return 101,"TIME_EXIT"
+            return None
+        client=MagicMock()
+        client.fetch_option_quotes.return_value={"11":{}}
+        with patch.object(bot,"datetime") as clock, \
+             patch.object(bot,"load_dotenv_file",return_value={"DHAN_CLIENT_ID":"test","DHAN_ACCESS_TOKEN":"test"}), \
+             patch.object(bot,"DhanStockOptionsClient",return_value=client), \
+             patch.object(bot.DynamicStockOptionsUniverse,"load_universe",return_value={}), \
+             patch.object(bot,"DailyTradeGate",return_value=gate), \
+             patch.object(bot,"load_or_init_ledger",return_value={"trades":[]}), \
+             patch.object(bot,"paper_exit",side_effect=evaluate), \
+             patch.object(bot,"close_paper_position",return_value={"net_pnl":0}), \
+             patch.object(bot,"TelegramNotifier",None), patch.object(bot.time,"sleep"):
+            clock.now.return_value=self.now
+            bot.run_dynamic_stock_options_session(False,False,self.cfg,logging.getLogger("test"))
+        self.assertEqual(len(calls),3)
+        gate.update_position.assert_called_once_with("2026-10-22",1,pos)
+        gate.mark_closed.assert_called_once()
+        self.assertEqual(pos["persisted_state"],(99,101))
 
     def test_premium_cap(self):
         q = copy.deepcopy(self.quote)

@@ -151,7 +151,7 @@ class DynamicStrategyConfig:
         self.stop_pct = float(env.get("STOCK_OPT_STOP_PCT", 1.0))
         self.min_rr_target = float(getattr(args, "min_rr", None) or env.get("STOCK_OPT_MIN_NET_RR", 1.2))
         self.slippage_pct = float(env.get("STOCK_OPT_SLIPPAGE_PCT", 0.1))
-        self.max_spread_pct = float(env.get("STOCK_OPT_MAX_SPREAD_PCT", 0.2))
+        self.max_spread_pct = float(env.get("STOCK_OPT_MAX_SPREAD_PCT", 1.5))
         self.max_hold_bars_5m = int(env.get("STOCK_OPT_MAX_HOLD_BARS_5M", 8))
         self.rupee_target = float(env.get("STOCK_OPT_RUPEE_TARGET", 2000))
         self.rupee_max_risk = float(env.get("STOCK_OPT_RUPEE_MAX_RISK", 1000))
@@ -169,7 +169,7 @@ class DynamicStrategyConfig:
         if not all(math.isfinite(v) for v in numbers):
             raise ValueError("Stock option settings must be finite")
         if not (3 <= self.target_pct <= 20 and 0.5 <= self.stop_pct <= 10 and self.min_rr_target >= 1.2
-                and 0 <= self.slippage_pct < 100 and 0 < self.max_spread_pct <= 0.2
+                and 0 <= self.slippage_pct < 100 and 0 < self.max_spread_pct <= 3
                 and 1 <= self.max_concurrent <= self.max_daily_trades <= 2
                 and self.rupee_target > 0 and self.rupee_max_risk > 0 and self.max_lots >= 1
                 and 0 < self.min_delta < self.max_delta <= 1 and self.min_days_to_expiry >= 4
@@ -767,7 +767,11 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                         if telegram:
                             telegram.exited(rec)
                     else:
-                        gate.update_position(today, pos["slot"], pos)
+                        # JSON restores tuples as lists; normalize before comparing.
+                        state = (pos["current_sl"], pos["peak_bid"])
+                        if state != tuple(pos.get("persisted_state") or ()):
+                            pos["persisted_state"] = state
+                            gate.update_position(today, pos["slot"], pos)
             completed = [] if scan_once else [t for t in ledger["trades"] if str(t.get("timestamp", "")).startswith(today)]
             consumed = 0 if scan_once else max(gate.count_entries(today), len(completed)+len(positions))
             if consumed >= cfg.max_daily_trades or len(positions) >= cfg.max_concurrent:

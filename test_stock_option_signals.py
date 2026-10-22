@@ -54,6 +54,19 @@ class StockSetupTests(unittest.TestCase):
         self.assertEqual(result["opt_type"], "PE")
         self.assertAlmostEqual(result["day_change_pct"], -3.24)
 
+    def test_bullish_and_bearish_require_vwap_alignment(self):
+        # Concentrate early session volume above the later bullish close.
+        data=copy.deepcopy(self.candles)
+        for i in range(75,78):
+            for field,value in (("open",104),("high",105),("low",103.5),("close",104.5),("volume",1000000)):
+                data[field][i]=value
+        self.assertIsNotNone(evaluate_stock_setup(self.candles,self.as_of))
+        self.assertIsNone(evaluate_stock_setup(data,self.as_of))
+        original=copy.deepcopy(data)
+        for field,counterpart in (("open","open"),("high","low"),("low","high"),("close","close")):
+            data[field]=[200-value for value in original[counterpart]]
+        self.assertIsNone(evaluate_stock_setup(data,self.as_of))
+
     def test_retest_is_optional_ranking_bonus(self):
         for low, close in ((102.5, 103.03), (103.13, 103.15), (102.99, 102.99)):
             with self.subTest(low=low, close=close):
