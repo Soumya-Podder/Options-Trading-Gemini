@@ -2,6 +2,8 @@
 
 Run commands from this project folder. Keep credentials in its single `.env` file. Runtime data, logs, replay results and temporary files belong inside the project.
 
+Daily entry limits are eight for Nifty and two for stock options. These are maximums, not a trading quota. Nifty saves each consumed entry slot before submission and restores the count after a restart; partial exits do not consume another entry. An unresolved submission blocks further entries until reconciled. The existing profit target, consecutive-loss breaker, qualification checks and 09:15–14:45 IST session can stop trading before the entry limit is reached.
+
 ## Runtime files
 
 | Files | Purpose |

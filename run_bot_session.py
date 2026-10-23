@@ -4,7 +4,7 @@ DhanHQ v4.5 Automated Session Manager & Clean Shutdown Controller
 =================================================================
 Launches the index and stock-options bots and live terminal dashboard,
 monitors their runtime,
-and triggers a clean shutdown at 03:46 PM IST.
+and triggers a clean shutdown at 02:46 PM IST.
 """
 
 import os
@@ -62,7 +62,7 @@ def main():
         print(f"[{datetime.now()}] Launching bot_dashboard.py...")
         dashboard_process = subprocess.Popen([PYTHON_EXEC, "bot_dashboard.py", "--refresh", "2.0"],cwd=PROJECT_DIR)
 
-        # 3. Monitor loop until 03:46 PM IST or manual termination
+        # 3. Monitor loop until 02:46 PM IST or manual termination
         while True:
             time.sleep(10)
             
@@ -80,10 +80,10 @@ def main():
             if index_done and stock_done:
                 break
 
-            # Check if past 03:46 PM IST shutdown time
+            # Check if past 02:46 PM IST shutdown time
             now = datetime.now()
-            if now.weekday() >= 5 or now.time() > datetime.strptime("15:46", "%H:%M").time():
-                print(f"[{datetime.now()}] Reached 03:46 PM IST session cutoff. Initiating clean shutdown...")
+            if now.weekday() >= 5 or now.time() > datetime.strptime("14:46", "%H:%M").time():
+                print(f"[{datetime.now()}] Reached 02:46 PM IST session cutoff. Initiating clean shutdown...")
                 break
 
     except KeyboardInterrupt:

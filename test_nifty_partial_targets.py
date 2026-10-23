@@ -1,4 +1,7 @@
 import unittest
+import json
+import tempfile
+from pathlib import Path
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 import dhan_bot_engine as bot
@@ -79,7 +82,52 @@ class NiftyTargetTests(unittest.TestCase):
         self.assertEqual(ledger["virtual_balance_net"],31841)
         self.assertEqual(ledger["total_trades"],1)
         self.assertEqual(ledger["trades"][0]["net_pnl"],1841)
+        self.assertNotIn("active_position",ledger)
         brain.learn_from_trade.assert_called_once()
+
+
+class NiftyEntryLimitTests(unittest.TestCase):
+    day="2026-10-23"
+
+    def test_eighth_entry_is_persisted_and_restart_cannot_take_ninth(self):
+        ledger={"trades":[{"timestamp":self.day+" 10:00:00"} for _ in range(7)]}
+        with tempfile.TemporaryDirectory() as directory:
+            path=str(Path(directory)/"ledger.json")
+            self.assertEqual(bot.MAX_TRADES_PER_DAY,8)
+            self.assertTrue(bot.reserve_index_entry(ledger,self.day,{},path))
+            restarted=json.loads(Path(path).read_text(encoding="utf-8"))
+            self.assertEqual(bot.index_entries_today(restarted,self.day),8)
+            self.assertFalse(bot.reserve_index_entry(restarted,self.day,{},path))
+            restarted.pop("pending_entry")
+            restarted["trades"].append({"timestamp":self.day+" 11:00:00"})
+            self.assertFalse(bot.reserve_index_entry(restarted,self.day,{},path))
+
+    def test_legacy_open_position_consumes_a_slot(self):
+        ledger={"trades":[{"timestamp":self.day} for _ in range(7)],
+                "active_position":{"entry_ts":self.day+" 10:00:00","target_one_done":True}}
+        self.assertEqual(bot.index_entries_today(ledger,self.day),8)
+        self.assertFalse(bot.reserve_index_entry(ledger,self.day,{}))
+
+    def test_interrupted_submission_blocks_duplicate_entry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=str(Path(directory)/"ledger.json")
+            ledger={"trades":[]}
+            self.assertTrue(bot.reserve_index_entry(ledger,self.day,{},path))
+            restarted=json.loads(Path(path).read_text(encoding="utf-8"))
+            self.assertEqual(bot.index_entries_today(restarted,self.day),1)
+            self.assertFalse(bot.reserve_index_entry(restarted,self.day,{},path))
+
+    def test_unpersisted_reservation_fails_before_submission(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=str(Path(directory)/"ledger.json")
+            with patch.object(bot,"atomic_write_json"):
+                with self.assertRaises(OSError):
+                    bot.reserve_index_entry({"trades":[]},self.day,{},path)
+
+    def test_previous_day_closed_entries_do_not_use_todays_capacity(self):
+        ledger={"trades":[{"timestamp":"2026-10-22 10:00:00"}],
+                "daily_entry_counts":{"2026-10-22":8}}
+        self.assertEqual(bot.index_entries_today(ledger,self.day),0)
 
 
 if __name__=="__main__":

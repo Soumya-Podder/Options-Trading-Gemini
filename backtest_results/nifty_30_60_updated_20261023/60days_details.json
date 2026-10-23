@@ -633,5 +633,4559 @@
     "Three rolling strikes per side approximate OI walls, not full historical chain",
     "Research maximum estimated initial gross stop risk Rs.1,000; gaps can exceed this",
     "Independent fresh learning per candidate; online learning continues chronologically"
-  ]
+  ],
+  "current_implementation_20261023": {
+    "period": {
+      "from_inclusive": "2026-08-24",
+      "to_exclusive": "2026-10-23",
+      "trading_window_ist": "09:15-14:45"
+    },
+    "chronological_learning_start": "2026-07-17",
+    "full_strategy_validated": false,
+    "config": {
+      "name": "current_implementation",
+      "entry": "level_oi",
+      "signal_minutes": 1,
+      "current_implementation": true,
+      "stop": 6.15,
+      "max_trades": 6,
+      "daily_profit_target": 1200.0,
+      "opening_trend": true,
+      "price_levels": false,
+      "slippage_pct": 0.1
+    },
+    "daily": [
+      {
+        "day": "2026-08-24",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 7
+        }
+      },
+      {
+        "day": "2026-08-25",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 7
+        }
+      },
+      {
+        "day": "2026-08-26",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 7
+        }
+      },
+      {
+        "day": "2026-08-27",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 7
+        }
+      },
+      {
+        "day": "2026-08-28",
+        "gross": -406.25,
+        "net": -470.75,
+        "trades": 1,
+        "unvalidated": false,
+        "eligible_entries": 1,
+        "rule_status_counts": {
+          "CANDIDATE": 7
+        }
+      },
+      {
+        "day": "2026-08-31",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 7
+        }
+      },
+      {
+        "day": "2026-09-01",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 7
+        }
+      },
+      {
+        "day": "2026-09-02",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 7
+        }
+      },
+      {
+        "day": "2026-09-03",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 7
+        }
+      },
+      {
+        "day": "2026-09-04",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 7
+        }
+      },
+      {
+        "day": "2026-09-07",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 7
+        }
+      },
+      {
+        "day": "2026-09-08",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 7
+        }
+      },
+      {
+        "day": "2026-09-09",
+        "gross": -191.75,
+        "net": -256.25,
+        "trades": 1,
+        "unvalidated": false,
+        "eligible_entries": 1,
+        "rule_status_counts": {
+          "CANDIDATE": 8
+        }
+      },
+      {
+        "day": "2026-09-10",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 8
+        }
+      },
+      {
+        "day": "2026-09-11",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 8
+        }
+      },
+      {
+        "day": "2026-09-15",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 8
+        }
+      },
+      {
+        "day": "2026-09-16",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 8
+        }
+      },
+      {
+        "day": "2026-09-17",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 8
+        }
+      },
+      {
+        "day": "2026-09-18",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 8
+        }
+      },
+      {
+        "day": "2026-09-21",
+        "gross": -185.25,
+        "net": -249.75,
+        "trades": 1,
+        "unvalidated": false,
+        "eligible_entries": 1,
+        "rule_status_counts": {
+          "CANDIDATE": 9
+        }
+      },
+      {
+        "day": "2026-09-22",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 9
+        }
+      },
+      {
+        "day": "2026-09-23",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 9
+        }
+      },
+      {
+        "day": "2026-09-24",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 9
+        }
+      },
+      {
+        "day": "2026-09-25",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 9
+        }
+      },
+      {
+        "day": "2026-09-28",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 9
+        }
+      },
+      {
+        "day": "2026-09-29",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 9
+        }
+      },
+      {
+        "day": "2026-09-30",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 9
+        }
+      },
+      {
+        "day": "2026-10-01",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 9
+        }
+      },
+      {
+        "day": "2026-10-05",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 9
+        }
+      },
+      {
+        "day": "2026-10-06",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 9
+        }
+      },
+      {
+        "day": "2026-10-07",
+        "gross": -409.5,
+        "net": -474.0,
+        "trades": 1,
+        "unvalidated": false,
+        "eligible_entries": 1,
+        "rule_status_counts": {
+          "CANDIDATE": 8,
+          "PRUNED": 1
+        }
+      },
+      {
+        "day": "2026-10-08",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 8,
+          "PRUNED": 1
+        }
+      },
+      {
+        "day": "2026-10-09",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 8,
+          "PRUNED": 1
+        }
+      },
+      {
+        "day": "2026-10-12",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 9
+        }
+      },
+      {
+        "day": "2026-10-13",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 9
+        }
+      },
+      {
+        "day": "2026-10-14",
+        "gross": 1267.5,
+        "net": 1203.0,
+        "trades": 1,
+        "unvalidated": false,
+        "eligible_entries": 1,
+        "rule_status_counts": {
+          "CANDIDATE": 10
+        }
+      },
+      {
+        "day": "2026-10-15",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 10
+        }
+      },
+      {
+        "day": "2026-10-16",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 10
+        }
+      },
+      {
+        "day": "2026-10-19",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 10
+        }
+      },
+      {
+        "day": "2026-10-21",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 10
+        }
+      },
+      {
+        "day": "2026-10-22",
+        "gross": 0.0,
+        "net": 0.0,
+        "trades": 0,
+        "unvalidated": false,
+        "eligible_entries": 0,
+        "rule_status_counts": {
+          "CANDIDATE": 10
+        }
+      }
+    ],
+    "trades": [
+      {
+        "timestamp": "2026-08-28 12:50:00",
+        "exit_timestamp": "2026-08-28 12:59:00",
+        "index": "NIFTY",
+        "contract": "24150_CE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 24109.65,
+        "oi_diff_lakhs": 122.75,
+        "entry_price": 102.55,
+        "exit_price": 96.3,
+        "gross_pnl": -406.25,
+        "net_pnl": -470.75,
+        "r_multiple": -1.02,
+        "learning_r_multiple": -1.181945,
+        "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+        "state_vec": [
+          -2.455,
+          -0.2594,
+          1.6953,
+          1.0,
+          -0.8,
+          1.5,
+          0.162,
+          0.3897,
+          0.0,
+          0.0
+        ],
+        "exit_reason": "INITIAL_SL_HIT",
+        "rule_used": "LEVEL_V1 RETEST_CONFIRMED & strike_oi=ce,pe -> BUY_CE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+        "market_structure": {
+          "allowed": true,
+          "ready": true,
+          "reason": "Confirmed level event with sufficient room",
+          "source": "INDEX_5M_OHLC",
+          "day_range_points": 111.45000000000073,
+          "min_body_fraction": 0.4,
+          "min_close_fraction": 0.6,
+          "confirm_window_sec": 600,
+          "confirmation_age_seconds": 0.0,
+          "levels": {
+            "previous_day_high": 24297.45,
+            "previous_day_low": 24090.85,
+            "day_high": 24188.3,
+            "day_low": 24076.85,
+            "opening_high": 24158.25,
+            "opening_low": 24106.55,
+            "range_high_before_confirmation": 24188.3,
+            "range_low_before_confirmation": 24076.85,
+            "range_high_before_breakout": 24188.3,
+            "range_low_before_breakout": 24076.85
+          },
+          "put_oi_wall": {
+            "strike": 24100.0,
+            "oi": 14069835.0,
+            "change_from_previous_close": 0.0
+          },
+          "call_oi_wall": {
+            "strike": 24200.0,
+            "oi": 21589035.0,
+            "change_from_previous_close": 0.0
+          },
+          "opening_trend": null,
+          "put_oi_buildup": null,
+          "call_oi_buildup": null,
+          "nearest_put_oi_level": {
+            "strike": 24100.0,
+            "oi": 14069835.0,
+            "change_from_previous_close": 0.0
+          },
+          "nearest_call_oi_level": {
+            "strike": 24150.0,
+            "oi": 13465335.0,
+            "change_from_previous_close": 0.0
+          },
+          "swing_levels": [
+            24076.85,
+            24077.0,
+            24092.85,
+            24109.65,
+            24130.4,
+            24136.15,
+            24141.5,
+            24141.55,
+            24158.25,
+            24166.05,
+            24166.25,
+            24170.6,
+            24188.3
+          ],
+          "confirmation_close": 24109.8,
+          "entry_levels": [
+            24076.85,
+            24077.0,
+            24090.85,
+            24092.85,
+            24100.0,
+            24106.55,
+            24109.65,
+            24130.4,
+            24136.15,
+            24141.5,
+            24141.55,
+            24158.25,
+            24166.05,
+            24166.25,
+            24170.6,
+            24188.3,
+            24200.0,
+            24297.45
+          ],
+          "setup": "RETEST_CONFIRMED",
+          "trigger_level": 24100.0,
+          "next_opposing_level": 24130.4,
+          "room_points": 20.75,
+          "structural_risk_points": 9.650000000001455,
+          "structure_rr": 2.150259067357189,
+          "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+          "level_reference_age_seconds": 300.0,
+          "strike_oi_confirmation": [
+            {
+              "strike": 24100.0,
+              "side": "ce",
+              "oi": 11638185.0,
+              "change_from_previous_day": null,
+              "change_over_5m": -123565.0,
+              "premium_change_over_5m": 3.700000000000003
+            },
+            {
+              "strike": 24100.0,
+              "side": "pe",
+              "oi": 14411150.0,
+              "change_from_previous_day": null,
+              "change_over_5m": 341315.0,
+              "premium_change_over_5m": -3.450000000000003
+            }
+          ],
+          "oi_confirmation_strike": 24100.0,
+          "direction_checks": {
+            "BUY_CE": {
+              "allowed": true,
+              "reason": "Confirmed level event with sufficient room",
+              "trigger_level": 24100.0,
+              "setup": "RETEST_CONFIRMED",
+              "room_points": 20.75,
+              "structure_rr": 2.150259067357189,
+              "oi_confirmed_levels": [
+                24100.0,
+                24200.0
+              ]
+            },
+            "BUY_PE": {
+              "allowed": false,
+              "reason": "Price has not held directional confirmation",
+              "trigger_level": null,
+              "setup": null,
+              "room_points": null,
+              "structure_rr": null,
+              "oi_confirmed_levels": []
+            }
+          }
+        }
+      },
+      {
+        "timestamp": "2026-09-09 10:25:00",
+        "exit_timestamp": "2026-09-09 10:31:00",
+        "index": "NIFTY",
+        "contract": "23550_CE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 23538.7,
+        "oi_diff_lakhs": -105.9,
+        "entry_price": 150.75,
+        "exit_price": 147.8,
+        "gross_pnl": -191.75,
+        "net_pnl": -256.25,
+        "r_multiple": -0.48,
+        "learning_r_multiple": -0.64146,
+        "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+        "state_vec": [
+          2.118,
+          0.6856,
+          2.0,
+          1.0,
+          -0.8,
+          1.5,
+          0.876,
+          0.1553,
+          1.0,
+          0.5
+        ],
+        "exit_reason": "INITIAL_SL_HIT",
+        "rule_used": "LEVEL_V1 BREAKOUT_HOLD & strike_oi=ce,pe -> BUY_CE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+        "market_structure": {
+          "allowed": true,
+          "ready": true,
+          "reason": "Confirmed level event with sufficient room",
+          "source": "INDEX_5M_OHLC",
+          "day_range_points": 82.64999999999782,
+          "min_body_fraction": 0.4,
+          "min_close_fraction": 0.6,
+          "confirm_window_sec": 600,
+          "confirmation_age_seconds": 0.0,
+          "levels": {
+            "previous_day_high": 23758.95,
+            "previous_day_low": 23623.1,
+            "day_high": 23549.3,
+            "day_low": 23466.65,
+            "opening_high": 23536.5,
+            "opening_low": 23477.55,
+            "range_high_before_confirmation": 23536.5,
+            "range_low_before_confirmation": 23466.65,
+            "range_high_before_breakout": 23536.5,
+            "range_low_before_breakout": 23466.65
+          },
+          "put_oi_wall": {
+            "strike": 23500.0,
+            "oi": 11980540.0,
+            "change_from_previous_close": 0.0
+          },
+          "call_oi_wall": {
+            "strike": 23500.0,
+            "oi": 10393370.0,
+            "change_from_previous_close": 0.0
+          },
+          "opening_trend": null,
+          "put_oi_buildup": null,
+          "call_oi_buildup": null,
+          "nearest_put_oi_level": {
+            "strike": 23500.0,
+            "oi": 11980540.0,
+            "change_from_previous_close": 0.0
+          },
+          "nearest_call_oi_level": {
+            "strike": 23550.0,
+            "oi": 4862650.0,
+            "change_from_previous_close": 0.0
+          },
+          "swing_levels": [
+            23466.65,
+            23533.45
+          ],
+          "confirmation_close": 23537.8,
+          "entry_levels": [
+            23466.65,
+            23477.55,
+            23500.0,
+            23533.45,
+            23536.5,
+            23623.1,
+            23758.95
+          ],
+          "setup": "BREAKOUT_HOLD",
+          "trigger_level": 23500.0,
+          "next_opposing_level": 23623.1,
+          "room_points": 84.39999999999782,
+          "structural_risk_points": 38.70000000000073,
+          "structure_rr": 2.1808785529714787,
+          "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+          "level_reference_age_seconds": 300.0,
+          "strike_oi_confirmation": [
+            {
+              "strike": 23500.0,
+              "side": "ce",
+              "oi": 8168225.0,
+              "change_from_previous_day": null,
+              "change_over_5m": -2225145.0,
+              "premium_change_over_5m": 17.75
+            },
+            {
+              "strike": 23500.0,
+              "side": "pe",
+              "oi": 13782600.0,
+              "change_from_previous_day": null,
+              "change_over_5m": 1802060.0,
+              "premium_change_over_5m": -9.450000000000003
+            }
+          ],
+          "oi_confirmation_strike": 23500.0,
+          "direction_checks": {
+            "BUY_CE": {
+              "allowed": true,
+              "reason": "Confirmed level event with sufficient room",
+              "trigger_level": 23500.0,
+              "setup": "BREAKOUT_HOLD",
+              "room_points": 84.39999999999782,
+              "structure_rr": 2.1808785529714787,
+              "oi_confirmed_levels": [
+                23500.0
+              ]
+            },
+            "BUY_PE": {
+              "allowed": false,
+              "reason": "Price has not held directional confirmation",
+              "trigger_level": null,
+              "setup": null,
+              "room_points": null,
+              "structure_rr": null,
+              "oi_confirmed_levels": []
+            }
+          }
+        }
+      },
+      {
+        "timestamp": "2026-09-21 10:05:00",
+        "exit_timestamp": "2026-09-21 10:46:00",
+        "index": "NIFTY",
+        "contract": "23350_PE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 23382.9,
+        "oi_diff_lakhs": 0.32,
+        "entry_price": 59.5,
+        "exit_price": 56.65,
+        "gross_pnl": -185.25,
+        "net_pnl": -249.75,
+        "r_multiple": -0.46,
+        "learning_r_multiple": -0.620162,
+        "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+        "state_vec": [
+          -0.0064,
+          -0.0006,
+          -2.0,
+          -0.8,
+          1.0,
+          -1.5,
+          -0.478,
+          -0.4803,
+          0.0,
+          0.5
+        ],
+        "exit_reason": "INITIAL_SL_HIT",
+        "rule_used": "LEVEL_V1 RETEST_CONFIRMED & strike_oi=ce,pe -> BUY_PE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+        "market_structure": {
+          "allowed": true,
+          "ready": true,
+          "reason": "Confirmed level event with sufficient room",
+          "source": "INDEX_5M_OHLC",
+          "day_range_points": 95.95000000000073,
+          "min_body_fraction": 0.4,
+          "min_close_fraction": 0.6,
+          "confirm_window_sec": 600,
+          "confirmation_age_seconds": 0.0,
+          "levels": {
+            "previous_day_high": 23389.15,
+            "previous_day_low": 23286.6,
+            "day_high": 23410.75,
+            "day_low": 23314.8,
+            "opening_high": 23402.95,
+            "opening_low": 23314.8,
+            "range_high_before_confirmation": 23410.75,
+            "range_low_before_confirmation": 23314.8,
+            "range_high_before_breakout": 23410.75,
+            "range_low_before_breakout": 23314.8
+          },
+          "put_oi_wall": {
+            "strike": 23300.0,
+            "oi": 23652135.0,
+            "change_from_previous_close": 0.0
+          },
+          "call_oi_wall": {
+            "strike": 23400.0,
+            "oi": 22404785.0,
+            "change_from_previous_close": 0.0
+          },
+          "opening_trend": null,
+          "put_oi_buildup": null,
+          "call_oi_buildup": null,
+          "nearest_put_oi_level": {
+            "strike": 23350.0,
+            "oi": 18576480.0,
+            "change_from_previous_close": 0.0
+          },
+          "nearest_call_oi_level": {
+            "strike": 23400.0,
+            "oi": 22404785.0,
+            "change_from_previous_close": 0.0
+          },
+          "swing_levels": [
+            23385.8,
+            23410.75
+          ],
+          "confirmation_close": 23382.9,
+          "entry_levels": [
+            23286.6,
+            23300.0,
+            23314.8,
+            23385.8,
+            23389.15,
+            23400.0,
+            23402.95,
+            23410.75
+          ],
+          "setup": "RETEST_CONFIRMED",
+          "trigger_level": 23400.0,
+          "next_opposing_level": 23314.8,
+          "room_points": 68.10000000000218,
+          "structural_risk_points": 17.099999999998545,
+          "structure_rr": 3.982456140351344,
+          "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+          "level_reference_age_seconds": 300.0,
+          "strike_oi_confirmation": [
+            {
+              "strike": 23400.0,
+              "side": "ce",
+              "oi": 23095020.0,
+              "change_from_previous_day": null,
+              "change_over_5m": 690235.0,
+              "premium_change_over_5m": -5.5
+            },
+            {
+              "strike": 23400.0,
+              "side": "pe",
+              "oi": 20474415.0,
+              "change_from_previous_day": null,
+              "change_over_5m": -61035.0,
+              "premium_change_over_5m": 5.450000000000003
+            }
+          ],
+          "oi_confirmation_strike": 23400.0,
+          "direction_checks": {
+            "BUY_CE": {
+              "allowed": false,
+              "reason": "Price has not held directional confirmation",
+              "trigger_level": null,
+              "setup": null,
+              "room_points": null,
+              "structure_rr": null,
+              "oi_confirmed_levels": []
+            },
+            "BUY_PE": {
+              "allowed": true,
+              "reason": "Confirmed level event with sufficient room",
+              "trigger_level": 23400.0,
+              "setup": "RETEST_CONFIRMED",
+              "room_points": 68.10000000000218,
+              "structure_rr": 3.982456140351344,
+              "oi_confirmed_levels": [
+                23300.0,
+                23400.0
+              ]
+            }
+          }
+        }
+      },
+      {
+        "timestamp": "2026-10-07 11:23:00",
+        "exit_timestamp": "2026-10-07 11:26:00",
+        "index": "NIFTY",
+        "contract": "22650_PE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 22681.3,
+        "oi_diff_lakhs": 15.99,
+        "entry_price": 130.05,
+        "exit_price": 123.75,
+        "gross_pnl": -409.5,
+        "net_pnl": -474.0,
+        "r_multiple": -1.02,
+        "learning_r_multiple": -1.180659,
+        "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+        "state_vec": [
+          -0.3198,
+          -0.0755,
+          0.6518,
+          -0.8,
+          0.6,
+          -1.5,
+          -0.41,
+          -0.4736,
+          0.0,
+          0.5
+        ],
+        "exit_reason": "INITIAL_SL_HIT",
+        "rule_used": "LEVEL_V1 RETEST_CONFIRMED & strike_oi=ce -> BUY_PE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+        "market_structure": {
+          "allowed": true,
+          "ready": true,
+          "reason": "Confirmed level event with sufficient room",
+          "source": "INDEX_5M_OHLC",
+          "day_range_points": 132.54999999999927,
+          "min_body_fraction": 0.4,
+          "min_close_fraction": 0.6,
+          "confirm_window_sec": 600,
+          "confirmation_age_seconds": 180.0,
+          "levels": {
+            "previous_day_high": 22776.1,
+            "previous_day_low": 22561.6,
+            "day_high": 22710.8,
+            "day_low": 22578.25,
+            "opening_high": 22692.95,
+            "opening_low": 22600.45,
+            "range_high_before_confirmation": 22710.8,
+            "range_low_before_confirmation": 22578.25,
+            "range_high_before_breakout": 22710.8,
+            "range_low_before_breakout": 22578.25
+          },
+          "put_oi_wall": {
+            "strike": 22600.0,
+            "oi": 10951980.0,
+            "change_from_previous_close": 0.0
+          },
+          "call_oi_wall": {
+            "strike": 22700.0,
+            "oi": 8960640.0,
+            "change_from_previous_close": 0.0
+          },
+          "opening_trend": null,
+          "put_oi_buildup": null,
+          "call_oi_buildup": null,
+          "nearest_put_oi_level": {
+            "strike": 22650.0,
+            "oi": 4791345.0,
+            "change_from_previous_close": 0.0
+          },
+          "nearest_call_oi_level": {
+            "strike": 22700.0,
+            "oi": 8960640.0,
+            "change_from_previous_close": 0.0
+          },
+          "swing_levels": [
+            22578.25,
+            22585.05,
+            22623.25,
+            22627.35,
+            22634.3,
+            22701.6,
+            22710.8
+          ],
+          "confirmation_close": 22678.4,
+          "entry_levels": [
+            22561.6,
+            22578.25,
+            22585.05,
+            22600.0,
+            22600.45,
+            22623.25,
+            22627.35,
+            22634.3,
+            22692.95,
+            22700.0,
+            22701.6,
+            22710.8,
+            22776.1
+          ],
+          "setup": "RETEST_CONFIRMED",
+          "trigger_level": 22700.0,
+          "next_opposing_level": 22634.3,
+          "room_points": 47.0,
+          "structural_risk_points": 18.700000000000728,
+          "structure_rr": 2.5133689839571214,
+          "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+          "level_reference_age_seconds": 300.0,
+          "strike_oi_confirmation": [
+            {
+              "strike": 22700.0,
+              "side": "ce",
+              "oi": 9017385.0,
+              "change_from_previous_day": null,
+              "change_over_5m": 56745.0,
+              "premium_change_over_5m": -3.200000000000017
+            }
+          ],
+          "oi_confirmation_strike": 22700.0,
+          "direction_checks": {
+            "BUY_CE": {
+              "allowed": false,
+              "reason": "Price has not held directional confirmation",
+              "trigger_level": null,
+              "setup": null,
+              "room_points": null,
+              "structure_rr": null,
+              "oi_confirmed_levels": []
+            },
+            "BUY_PE": {
+              "allowed": true,
+              "reason": "Confirmed level event with sufficient room",
+              "trigger_level": 22700.0,
+              "setup": "RETEST_CONFIRMED",
+              "room_points": 47.0,
+              "structure_rr": 2.5133689839571214,
+              "oi_confirmed_levels": [
+                22700.0
+              ]
+            }
+          }
+        }
+      },
+      {
+        "timestamp": "2026-10-14 13:05:00",
+        "exit_timestamp": "2026-10-14 13:07:00",
+        "index": "NIFTY",
+        "contract": "22600_PE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 22611.9,
+        "oi_diff_lakhs": 5.7,
+        "entry_price": 147.9,
+        "exit_price": 167.4,
+        "gross_pnl": 1267.5,
+        "net_pnl": 1203.0,
+        "r_multiple": 3.17,
+        "learning_r_multiple": 3.008686,
+        "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+        "state_vec": [
+          -0.114,
+          -0.0281,
+          -2.0,
+          -0.8,
+          1.0,
+          -1.5,
+          -2.0,
+          -0.8267,
+          0.0,
+          0.0
+        ],
+        "exit_reason": "DAILY_NET_PROFIT_TARGET",
+        "rule_used": "LEVEL_V1 BREAKOUT_HOLD & strike_oi=ce,pe -> BUY_PE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+        "market_structure": {
+          "allowed": true,
+          "ready": true,
+          "reason": "Confirmed level event with sufficient room",
+          "source": "INDEX_5M_OHLC",
+          "day_range_points": 152.40000000000146,
+          "min_body_fraction": 0.4,
+          "min_close_fraction": 0.6,
+          "confirm_window_sec": 600,
+          "confirmation_age_seconds": 0.0,
+          "levels": {
+            "previous_day_high": 22721.95,
+            "previous_day_low": 22288.45,
+            "day_high": 22757.95,
+            "day_low": 22605.55,
+            "opening_high": 22752.3,
+            "opening_low": 22663.8,
+            "range_high_before_confirmation": 22757.95,
+            "range_low_before_confirmation": 22651.8,
+            "range_high_before_breakout": 22757.95,
+            "range_low_before_breakout": 22655.35
+          },
+          "put_oi_wall": {
+            "strike": 22700.0,
+            "oi": 11070215.0,
+            "change_from_previous_close": 0.0
+          },
+          "call_oi_wall": {
+            "strike": 22700.0,
+            "oi": 10835240.0,
+            "change_from_previous_close": 0.0
+          },
+          "opening_trend": null,
+          "put_oi_buildup": null,
+          "call_oi_buildup": null,
+          "nearest_put_oi_level": {
+            "strike": 22600.0,
+            "oi": 7662525.0,
+            "change_from_previous_close": 0.0
+          },
+          "nearest_call_oi_level": {
+            "strike": 22650.0,
+            "oi": 2596750.0,
+            "change_from_previous_close": 0.0
+          },
+          "swing_levels": [
+            22655.35,
+            22674.8,
+            22695.65,
+            22711.7,
+            22729.6,
+            22739.4,
+            22742.5,
+            22747.2,
+            22757.95
+          ],
+          "confirmation_close": 22611.7,
+          "entry_levels": [
+            22288.45,
+            22655.35,
+            22663.8,
+            22674.8,
+            22695.65,
+            22700.0,
+            22711.7,
+            22721.95,
+            22729.6,
+            22739.4,
+            22742.5,
+            22747.2,
+            22752.3,
+            22757.95
+          ],
+          "setup": "BREAKOUT_HOLD",
+          "trigger_level": 22700.0,
+          "next_opposing_level": 22288.45,
+          "room_points": 323.4500000000007,
+          "structural_risk_points": 88.09999999999854,
+          "structure_rr": 3.6713961407492177,
+          "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+          "level_reference_age_seconds": 300.0,
+          "strike_oi_confirmation": [
+            {
+              "strike": 22700.0,
+              "side": "ce",
+              "oi": 11504675.0,
+              "change_from_previous_day": null,
+              "change_over_5m": 669435.0,
+              "premium_change_over_5m": -22.89999999999999
+            },
+            {
+              "strike": 22700.0,
+              "side": "pe",
+              "oi": 9492405.0,
+              "change_from_previous_day": null,
+              "change_over_5m": -1577810.0,
+              "premium_change_over_5m": 36.75
+            }
+          ],
+          "oi_confirmation_strike": 22700.0,
+          "direction_checks": {
+            "BUY_CE": {
+              "allowed": false,
+              "reason": "Price has not held directional confirmation",
+              "trigger_level": null,
+              "setup": null,
+              "room_points": null,
+              "structure_rr": null,
+              "oi_confirmed_levels": []
+            },
+            "BUY_PE": {
+              "allowed": true,
+              "reason": "Confirmed level event with sufficient room",
+              "trigger_level": 22700.0,
+              "setup": "BREAKOUT_HOLD",
+              "room_points": 323.4500000000007,
+              "structure_rr": 3.6713961407492177,
+              "oi_confirmed_levels": [
+                22700.0
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "stress_0_3_pct_trades": [
+      {
+        "timestamp": "2026-08-28 12:50:00",
+        "exit_timestamp": "2026-08-28 12:58:00",
+        "index": "NIFTY",
+        "contract": "24150_CE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 24109.65,
+        "oi_diff_lakhs": 122.75,
+        "entry_price": 102.75,
+        "exit_price": 96.3,
+        "gross_pnl": -419.25,
+        "net_pnl": -483.75,
+        "r_multiple": -1.05,
+        "learning_r_multiple": -1.211538,
+        "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+        "state_vec": [
+          -2.455,
+          -0.2594,
+          1.6953,
+          1.0,
+          -0.8,
+          1.5,
+          0.162,
+          0.3897,
+          0.0,
+          0.0
+        ],
+        "exit_reason": "INITIAL_SL_HIT",
+        "rule_used": "LEVEL_V1 RETEST_CONFIRMED & strike_oi=ce,pe -> BUY_CE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+        "market_structure": {
+          "allowed": true,
+          "ready": true,
+          "reason": "Confirmed level event with sufficient room",
+          "source": "INDEX_5M_OHLC",
+          "day_range_points": 111.45000000000073,
+          "min_body_fraction": 0.4,
+          "min_close_fraction": 0.6,
+          "confirm_window_sec": 600,
+          "confirmation_age_seconds": 0.0,
+          "levels": {
+            "previous_day_high": 24297.45,
+            "previous_day_low": 24090.85,
+            "day_high": 24188.3,
+            "day_low": 24076.85,
+            "opening_high": 24158.25,
+            "opening_low": 24106.55,
+            "range_high_before_confirmation": 24188.3,
+            "range_low_before_confirmation": 24076.85,
+            "range_high_before_breakout": 24188.3,
+            "range_low_before_breakout": 24076.85
+          },
+          "put_oi_wall": {
+            "strike": 24100.0,
+            "oi": 14069835.0,
+            "change_from_previous_close": 0.0
+          },
+          "call_oi_wall": {
+            "strike": 24200.0,
+            "oi": 21589035.0,
+            "change_from_previous_close": 0.0
+          },
+          "opening_trend": null,
+          "put_oi_buildup": null,
+          "call_oi_buildup": null,
+          "nearest_put_oi_level": {
+            "strike": 24100.0,
+            "oi": 14069835.0,
+            "change_from_previous_close": 0.0
+          },
+          "nearest_call_oi_level": {
+            "strike": 24150.0,
+            "oi": 13465335.0,
+            "change_from_previous_close": 0.0
+          },
+          "swing_levels": [
+            24076.85,
+            24077.0,
+            24092.85,
+            24109.65,
+            24130.4,
+            24136.15,
+            24141.5,
+            24141.55,
+            24158.25,
+            24166.05,
+            24166.25,
+            24170.6,
+            24188.3
+          ],
+          "confirmation_close": 24109.8,
+          "entry_levels": [
+            24076.85,
+            24077.0,
+            24090.85,
+            24092.85,
+            24100.0,
+            24106.55,
+            24109.65,
+            24130.4,
+            24136.15,
+            24141.5,
+            24141.55,
+            24158.25,
+            24166.05,
+            24166.25,
+            24170.6,
+            24188.3,
+            24200.0,
+            24297.45
+          ],
+          "setup": "RETEST_CONFIRMED",
+          "trigger_level": 24100.0,
+          "next_opposing_level": 24130.4,
+          "room_points": 20.75,
+          "structural_risk_points": 9.650000000001455,
+          "structure_rr": 2.150259067357189,
+          "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+          "level_reference_age_seconds": 300.0,
+          "strike_oi_confirmation": [
+            {
+              "strike": 24100.0,
+              "side": "ce",
+              "oi": 11638185.0,
+              "change_from_previous_day": null,
+              "change_over_5m": -123565.0,
+              "premium_change_over_5m": 3.700000000000003
+            },
+            {
+              "strike": 24100.0,
+              "side": "pe",
+              "oi": 14411150.0,
+              "change_from_previous_day": null,
+              "change_over_5m": 341315.0,
+              "premium_change_over_5m": -3.450000000000003
+            }
+          ],
+          "oi_confirmation_strike": 24100.0,
+          "direction_checks": {
+            "BUY_CE": {
+              "allowed": true,
+              "reason": "Confirmed level event with sufficient room",
+              "trigger_level": 24100.0,
+              "setup": "RETEST_CONFIRMED",
+              "room_points": 20.75,
+              "structure_rr": 2.150259067357189,
+              "oi_confirmed_levels": [
+                24100.0,
+                24200.0
+              ]
+            },
+            "BUY_PE": {
+              "allowed": false,
+              "reason": "Price has not held directional confirmation",
+              "trigger_level": null,
+              "setup": null,
+              "room_points": null,
+              "structure_rr": null,
+              "oi_confirmed_levels": []
+            }
+          }
+        }
+      },
+      {
+        "timestamp": "2026-09-09 10:25:00",
+        "exit_timestamp": "2026-09-09 10:31:00",
+        "index": "NIFTY",
+        "contract": "23550_CE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 23538.7,
+        "oi_diff_lakhs": -105.9,
+        "entry_price": 151.05,
+        "exit_price": 147.8,
+        "gross_pnl": -211.25,
+        "net_pnl": -275.75,
+        "r_multiple": -0.53,
+        "learning_r_multiple": -0.691822,
+        "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+        "state_vec": [
+          2.118,
+          0.6856,
+          2.0,
+          1.0,
+          -0.8,
+          1.5,
+          0.876,
+          0.1553,
+          1.0,
+          0.5
+        ],
+        "exit_reason": "INITIAL_SL_HIT",
+        "rule_used": "LEVEL_V1 BREAKOUT_HOLD & strike_oi=ce,pe -> BUY_CE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+        "market_structure": {
+          "allowed": true,
+          "ready": true,
+          "reason": "Confirmed level event with sufficient room",
+          "source": "INDEX_5M_OHLC",
+          "day_range_points": 82.64999999999782,
+          "min_body_fraction": 0.4,
+          "min_close_fraction": 0.6,
+          "confirm_window_sec": 600,
+          "confirmation_age_seconds": 0.0,
+          "levels": {
+            "previous_day_high": 23758.95,
+            "previous_day_low": 23623.1,
+            "day_high": 23549.3,
+            "day_low": 23466.65,
+            "opening_high": 23536.5,
+            "opening_low": 23477.55,
+            "range_high_before_confirmation": 23536.5,
+            "range_low_before_confirmation": 23466.65,
+            "range_high_before_breakout": 23536.5,
+            "range_low_before_breakout": 23466.65
+          },
+          "put_oi_wall": {
+            "strike": 23500.0,
+            "oi": 11980540.0,
+            "change_from_previous_close": 0.0
+          },
+          "call_oi_wall": {
+            "strike": 23500.0,
+            "oi": 10393370.0,
+            "change_from_previous_close": 0.0
+          },
+          "opening_trend": null,
+          "put_oi_buildup": null,
+          "call_oi_buildup": null,
+          "nearest_put_oi_level": {
+            "strike": 23500.0,
+            "oi": 11980540.0,
+            "change_from_previous_close": 0.0
+          },
+          "nearest_call_oi_level": {
+            "strike": 23550.0,
+            "oi": 4862650.0,
+            "change_from_previous_close": 0.0
+          },
+          "swing_levels": [
+            23466.65,
+            23533.45
+          ],
+          "confirmation_close": 23537.8,
+          "entry_levels": [
+            23466.65,
+            23477.55,
+            23500.0,
+            23533.45,
+            23536.5,
+            23623.1,
+            23758.95
+          ],
+          "setup": "BREAKOUT_HOLD",
+          "trigger_level": 23500.0,
+          "next_opposing_level": 23623.1,
+          "room_points": 84.39999999999782,
+          "structural_risk_points": 38.70000000000073,
+          "structure_rr": 2.1808785529714787,
+          "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+          "level_reference_age_seconds": 300.0,
+          "strike_oi_confirmation": [
+            {
+              "strike": 23500.0,
+              "side": "ce",
+              "oi": 8168225.0,
+              "change_from_previous_day": null,
+              "change_over_5m": -2225145.0,
+              "premium_change_over_5m": 17.75
+            },
+            {
+              "strike": 23500.0,
+              "side": "pe",
+              "oi": 13782600.0,
+              "change_from_previous_day": null,
+              "change_over_5m": 1802060.0,
+              "premium_change_over_5m": -9.450000000000003
+            }
+          ],
+          "oi_confirmation_strike": 23500.0,
+          "direction_checks": {
+            "BUY_CE": {
+              "allowed": true,
+              "reason": "Confirmed level event with sufficient room",
+              "trigger_level": 23500.0,
+              "setup": "BREAKOUT_HOLD",
+              "room_points": 84.39999999999782,
+              "structure_rr": 2.1808785529714787,
+              "oi_confirmed_levels": [
+                23500.0
+              ]
+            },
+            "BUY_PE": {
+              "allowed": false,
+              "reason": "Price has not held directional confirmation",
+              "trigger_level": null,
+              "setup": null,
+              "room_points": null,
+              "structure_rr": null,
+              "oi_confirmed_levels": []
+            }
+          }
+        }
+      },
+      {
+        "timestamp": "2026-09-21 10:05:00",
+        "exit_timestamp": "2026-09-21 10:45:00",
+        "index": "NIFTY",
+        "contract": "23350_PE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 23382.9,
+        "oi_diff_lakhs": 0.32,
+        "entry_price": 59.6,
+        "exit_price": 56.65,
+        "gross_pnl": -191.75,
+        "net_pnl": -256.25,
+        "r_multiple": -0.48,
+        "learning_r_multiple": -0.64146,
+        "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+        "state_vec": [
+          -0.0064,
+          -0.0006,
+          -2.0,
+          -0.8,
+          1.0,
+          -1.5,
+          -0.478,
+          -0.4803,
+          0.0,
+          0.5
+        ],
+        "exit_reason": "INITIAL_SL_HIT",
+        "rule_used": "LEVEL_V1 RETEST_CONFIRMED & strike_oi=ce,pe -> BUY_PE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+        "market_structure": {
+          "allowed": true,
+          "ready": true,
+          "reason": "Confirmed level event with sufficient room",
+          "source": "INDEX_5M_OHLC",
+          "day_range_points": 95.95000000000073,
+          "min_body_fraction": 0.4,
+          "min_close_fraction": 0.6,
+          "confirm_window_sec": 600,
+          "confirmation_age_seconds": 0.0,
+          "levels": {
+            "previous_day_high": 23389.15,
+            "previous_day_low": 23286.6,
+            "day_high": 23410.75,
+            "day_low": 23314.8,
+            "opening_high": 23402.95,
+            "opening_low": 23314.8,
+            "range_high_before_confirmation": 23410.75,
+            "range_low_before_confirmation": 23314.8,
+            "range_high_before_breakout": 23410.75,
+            "range_low_before_breakout": 23314.8
+          },
+          "put_oi_wall": {
+            "strike": 23300.0,
+            "oi": 23652135.0,
+            "change_from_previous_close": 0.0
+          },
+          "call_oi_wall": {
+            "strike": 23400.0,
+            "oi": 22404785.0,
+            "change_from_previous_close": 0.0
+          },
+          "opening_trend": null,
+          "put_oi_buildup": null,
+          "call_oi_buildup": null,
+          "nearest_put_oi_level": {
+            "strike": 23350.0,
+            "oi": 18576480.0,
+            "change_from_previous_close": 0.0
+          },
+          "nearest_call_oi_level": {
+            "strike": 23400.0,
+            "oi": 22404785.0,
+            "change_from_previous_close": 0.0
+          },
+          "swing_levels": [
+            23385.8,
+            23410.75
+          ],
+          "confirmation_close": 23382.9,
+          "entry_levels": [
+            23286.6,
+            23300.0,
+            23314.8,
+            23385.8,
+            23389.15,
+            23400.0,
+            23402.95,
+            23410.75
+          ],
+          "setup": "RETEST_CONFIRMED",
+          "trigger_level": 23400.0,
+          "next_opposing_level": 23314.8,
+          "room_points": 68.10000000000218,
+          "structural_risk_points": 17.099999999998545,
+          "structure_rr": 3.982456140351344,
+          "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+          "level_reference_age_seconds": 300.0,
+          "strike_oi_confirmation": [
+            {
+              "strike": 23400.0,
+              "side": "ce",
+              "oi": 23095020.0,
+              "change_from_previous_day": null,
+              "change_over_5m": 690235.0,
+              "premium_change_over_5m": -5.5
+            },
+            {
+              "strike": 23400.0,
+              "side": "pe",
+              "oi": 20474415.0,
+              "change_from_previous_day": null,
+              "change_over_5m": -61035.0,
+              "premium_change_over_5m": 5.450000000000003
+            }
+          ],
+          "oi_confirmation_strike": 23400.0,
+          "direction_checks": {
+            "BUY_CE": {
+              "allowed": false,
+              "reason": "Price has not held directional confirmation",
+              "trigger_level": null,
+              "setup": null,
+              "room_points": null,
+              "structure_rr": null,
+              "oi_confirmed_levels": []
+            },
+            "BUY_PE": {
+              "allowed": true,
+              "reason": "Confirmed level event with sufficient room",
+              "trigger_level": 23400.0,
+              "setup": "RETEST_CONFIRMED",
+              "room_points": 68.10000000000218,
+              "structure_rr": 3.982456140351344,
+              "oi_confirmed_levels": [
+                23300.0,
+                23400.0
+              ]
+            }
+          }
+        }
+      },
+      {
+        "timestamp": "2026-10-07 11:23:00",
+        "exit_timestamp": "2026-10-07 11:26:00",
+        "index": "NIFTY",
+        "contract": "22650_PE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 22681.3,
+        "oi_diff_lakhs": 15.99,
+        "entry_price": 130.3,
+        "exit_price": 123.75,
+        "gross_pnl": -425.75,
+        "net_pnl": -490.25,
+        "r_multiple": -1.07,
+        "learning_r_multiple": -1.232102,
+        "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+        "state_vec": [
+          -0.3198,
+          -0.0755,
+          0.6518,
+          -0.8,
+          0.6,
+          -1.5,
+          -0.41,
+          -0.4736,
+          0.0,
+          0.5
+        ],
+        "exit_reason": "INITIAL_SL_HIT",
+        "rule_used": "LEVEL_V1 RETEST_CONFIRMED & strike_oi=ce -> BUY_PE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+        "market_structure": {
+          "allowed": true,
+          "ready": true,
+          "reason": "Confirmed level event with sufficient room",
+          "source": "INDEX_5M_OHLC",
+          "day_range_points": 132.54999999999927,
+          "min_body_fraction": 0.4,
+          "min_close_fraction": 0.6,
+          "confirm_window_sec": 600,
+          "confirmation_age_seconds": 180.0,
+          "levels": {
+            "previous_day_high": 22776.1,
+            "previous_day_low": 22561.6,
+            "day_high": 22710.8,
+            "day_low": 22578.25,
+            "opening_high": 22692.95,
+            "opening_low": 22600.45,
+            "range_high_before_confirmation": 22710.8,
+            "range_low_before_confirmation": 22578.25,
+            "range_high_before_breakout": 22710.8,
+            "range_low_before_breakout": 22578.25
+          },
+          "put_oi_wall": {
+            "strike": 22600.0,
+            "oi": 10951980.0,
+            "change_from_previous_close": 0.0
+          },
+          "call_oi_wall": {
+            "strike": 22700.0,
+            "oi": 8960640.0,
+            "change_from_previous_close": 0.0
+          },
+          "opening_trend": null,
+          "put_oi_buildup": null,
+          "call_oi_buildup": null,
+          "nearest_put_oi_level": {
+            "strike": 22650.0,
+            "oi": 4791345.0,
+            "change_from_previous_close": 0.0
+          },
+          "nearest_call_oi_level": {
+            "strike": 22700.0,
+            "oi": 8960640.0,
+            "change_from_previous_close": 0.0
+          },
+          "swing_levels": [
+            22578.25,
+            22585.05,
+            22623.25,
+            22627.35,
+            22634.3,
+            22701.6,
+            22710.8
+          ],
+          "confirmation_close": 22678.4,
+          "entry_levels": [
+            22561.6,
+            22578.25,
+            22585.05,
+            22600.0,
+            22600.45,
+            22623.25,
+            22627.35,
+            22634.3,
+            22692.95,
+            22700.0,
+            22701.6,
+            22710.8,
+            22776.1
+          ],
+          "setup": "RETEST_CONFIRMED",
+          "trigger_level": 22700.0,
+          "next_opposing_level": 22634.3,
+          "room_points": 47.0,
+          "structural_risk_points": 18.700000000000728,
+          "structure_rr": 2.5133689839571214,
+          "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+          "level_reference_age_seconds": 300.0,
+          "strike_oi_confirmation": [
+            {
+              "strike": 22700.0,
+              "side": "ce",
+              "oi": 9017385.0,
+              "change_from_previous_day": null,
+              "change_over_5m": 56745.0,
+              "premium_change_over_5m": -3.200000000000017
+            }
+          ],
+          "oi_confirmation_strike": 22700.0,
+          "direction_checks": {
+            "BUY_CE": {
+              "allowed": false,
+              "reason": "Price has not held directional confirmation",
+              "trigger_level": null,
+              "setup": null,
+              "room_points": null,
+              "structure_rr": null,
+              "oi_confirmed_levels": []
+            },
+            "BUY_PE": {
+              "allowed": true,
+              "reason": "Confirmed level event with sufficient room",
+              "trigger_level": 22700.0,
+              "setup": "RETEST_CONFIRMED",
+              "room_points": 47.0,
+              "structure_rr": 2.5133689839571214,
+              "oi_confirmed_levels": [
+                22700.0
+              ]
+            }
+          }
+        }
+      },
+      {
+        "timestamp": "2026-10-14 13:05:00",
+        "exit_timestamp": "2026-10-14 13:07:00",
+        "index": "NIFTY",
+        "contract": "22600_PE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 22611.9,
+        "oi_diff_lakhs": 5.7,
+        "entry_price": 148.2,
+        "exit_price": 167.7,
+        "gross_pnl": 1267.5,
+        "net_pnl": 1203.0,
+        "r_multiple": 3.17,
+        "learning_r_multiple": 3.008686,
+        "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+        "state_vec": [
+          -0.114,
+          -0.0281,
+          -2.0,
+          -0.8,
+          1.0,
+          -1.5,
+          -2.0,
+          -0.8267,
+          0.0,
+          0.0
+        ],
+        "exit_reason": "DAILY_NET_PROFIT_TARGET",
+        "rule_used": "LEVEL_V1 BREAKOUT_HOLD & strike_oi=ce,pe -> BUY_PE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+        "market_structure": {
+          "allowed": true,
+          "ready": true,
+          "reason": "Confirmed level event with sufficient room",
+          "source": "INDEX_5M_OHLC",
+          "day_range_points": 152.40000000000146,
+          "min_body_fraction": 0.4,
+          "min_close_fraction": 0.6,
+          "confirm_window_sec": 600,
+          "confirmation_age_seconds": 0.0,
+          "levels": {
+            "previous_day_high": 22721.95,
+            "previous_day_low": 22288.45,
+            "day_high": 22757.95,
+            "day_low": 22605.55,
+            "opening_high": 22752.3,
+            "opening_low": 22663.8,
+            "range_high_before_confirmation": 22757.95,
+            "range_low_before_confirmation": 22651.8,
+            "range_high_before_breakout": 22757.95,
+            "range_low_before_breakout": 22655.35
+          },
+          "put_oi_wall": {
+            "strike": 22700.0,
+            "oi": 11070215.0,
+            "change_from_previous_close": 0.0
+          },
+          "call_oi_wall": {
+            "strike": 22700.0,
+            "oi": 10835240.0,
+            "change_from_previous_close": 0.0
+          },
+          "opening_trend": null,
+          "put_oi_buildup": null,
+          "call_oi_buildup": null,
+          "nearest_put_oi_level": {
+            "strike": 22600.0,
+            "oi": 7662525.0,
+            "change_from_previous_close": 0.0
+          },
+          "nearest_call_oi_level": {
+            "strike": 22650.0,
+            "oi": 2596750.0,
+            "change_from_previous_close": 0.0
+          },
+          "swing_levels": [
+            22655.35,
+            22674.8,
+            22695.65,
+            22711.7,
+            22729.6,
+            22739.4,
+            22742.5,
+            22747.2,
+            22757.95
+          ],
+          "confirmation_close": 22611.7,
+          "entry_levels": [
+            22288.45,
+            22655.35,
+            22663.8,
+            22674.8,
+            22695.65,
+            22700.0,
+            22711.7,
+            22721.95,
+            22729.6,
+            22739.4,
+            22742.5,
+            22747.2,
+            22752.3,
+            22757.95
+          ],
+          "setup": "BREAKOUT_HOLD",
+          "trigger_level": 22700.0,
+          "next_opposing_level": 22288.45,
+          "room_points": 323.4500000000007,
+          "structural_risk_points": 88.09999999999854,
+          "structure_rr": 3.6713961407492177,
+          "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+          "level_reference_age_seconds": 300.0,
+          "strike_oi_confirmation": [
+            {
+              "strike": 22700.0,
+              "side": "ce",
+              "oi": 11504675.0,
+              "change_from_previous_day": null,
+              "change_over_5m": 669435.0,
+              "premium_change_over_5m": -22.89999999999999
+            },
+            {
+              "strike": 22700.0,
+              "side": "pe",
+              "oi": 9492405.0,
+              "change_from_previous_day": null,
+              "change_over_5m": -1577810.0,
+              "premium_change_over_5m": 36.75
+            }
+          ],
+          "oi_confirmation_strike": 22700.0,
+          "direction_checks": {
+            "BUY_CE": {
+              "allowed": false,
+              "reason": "Price has not held directional confirmation",
+              "trigger_level": null,
+              "setup": null,
+              "room_points": null,
+              "structure_rr": null,
+              "oi_confirmed_levels": []
+            },
+            "BUY_PE": {
+              "allowed": true,
+              "reason": "Confirmed level event with sufficient room",
+              "trigger_level": 22700.0,
+              "setup": "BREAKOUT_HOLD",
+              "room_points": 323.4500000000007,
+              "structure_rr": 3.6713961407492177,
+              "oi_confirmed_levels": [
+                22700.0
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "limitations": [
+      "1-minute execution OHLC; adverse 0.1% slippage and stop-first ambiguity handling",
+      "Same day, exact strike, WEEK expiryCode 1; prices never synthesized",
+      "Only ATM +/-3 coverage; missing held-strike bars invalidate outcomes",
+      "Partial ATM +/-3 chain and missing previous-day OI cannot reproduce the full historical chain",
+      "Current dynamic sizing, no additional research risk ceiling",
+      "Independent fresh learning per candidate; online learning continues chronologically"
+    ],
+    "current_policy_notes": [
+      "Dynamic learning-based lots; no additional research risk cap",
+      "Shared daily net liquidation helper; conservative stop-first OHLC ambiguity",
+      "25-minute time exit at first eligible bar open using prior peak",
+      "Close-time cooldown; actual intrabar exit time is unknown",
+      "09:15-14:45 IST session; last one-minute execution candle starts 14:44; after-cutoff candles cannot affect exits or coverage."
+    ],
+    "source_result": "E:\\Options-TradingBot-Gemini\\dhan_hist_cache\\nifty_regime_review_20261023\\current_20261023_182902_slippage_0.1\\result.json"
+  },
+  "direction_audit_20261023": {
+    "method": "Last closed five-minute candle direction and cash movement from entry-minute open to exit-minute close. The exit-minute close is a diagnostic proxy, not the actual intrabar fill-time underlying price.",
+    "rows": [
+      {
+        "entry": "2026-08-28 12:50:00",
+        "side": "CE",
+        "net": -470.75,
+        "setup": "RETEST_CONFIRMED",
+        "trigger_level": 24100.0,
+        "rule": "LEVEL_V1 RETEST_CONFIRMED & strike_oi=ce,pe -> BUY_CE",
+        "confirmation_open": 24105.8,
+        "confirmation_close": 24109.8,
+        "confirmation_direction_matches": true,
+        "underlying_entry_open": 24109.65,
+        "exit_minute_underlying_close": 24096.45,
+        "signed_underlying_points_to_exit_minute_close": -13.2,
+        "previous_session_close": 24090.85,
+        "underlying_change_from_previous_close_points": 18.8
+      },
+      {
+        "entry": "2026-09-09 10:25:00",
+        "side": "CE",
+        "net": -256.25,
+        "setup": "BREAKOUT_HOLD",
+        "trigger_level": 23500.0,
+        "rule": "LEVEL_V1 BREAKOUT_HOLD & strike_oi=ce,pe -> BUY_CE",
+        "confirmation_open": 23518.25,
+        "confirmation_close": 23537.8,
+        "confirmation_direction_matches": true,
+        "underlying_entry_open": 23538.7,
+        "exit_minute_underlying_close": 23533.6,
+        "signed_underlying_points_to_exit_minute_close": -5.1,
+        "previous_session_close": 23635.1,
+        "underlying_change_from_previous_close_points": -96.4
+      },
+      {
+        "entry": "2026-09-21 10:05:00",
+        "side": "PE",
+        "net": -249.75,
+        "setup": "RETEST_CONFIRMED",
+        "trigger_level": 23400.0,
+        "rule": "LEVEL_V1 RETEST_CONFIRMED & strike_oi=ce,pe -> BUY_PE",
+        "confirmation_open": 23394.85,
+        "confirmation_close": 23382.9,
+        "confirmation_direction_matches": true,
+        "underlying_entry_open": 23382.5,
+        "exit_minute_underlying_close": 23381.05,
+        "signed_underlying_points_to_exit_minute_close": 1.45,
+        "previous_session_close": 23346.4,
+        "underlying_change_from_previous_close_points": 36.1
+      },
+      {
+        "entry": "2026-10-07 11:23:00",
+        "side": "PE",
+        "net": -474.0,
+        "setup": "RETEST_CONFIRMED",
+        "trigger_level": 22700.0,
+        "rule": "LEVEL_V1 RETEST_CONFIRMED & strike_oi=ce -> BUY_PE",
+        "confirmation_open": 22691.45,
+        "confirmation_close": 22678.4,
+        "confirmation_direction_matches": true,
+        "underlying_entry_open": 22681.3,
+        "exit_minute_underlying_close": 22689.7,
+        "signed_underlying_points_to_exit_minute_close": -8.4,
+        "previous_session_close": 22776.1,
+        "underlying_change_from_previous_close_points": -94.8
+      },
+      {
+        "entry": "2026-10-14 13:05:00",
+        "side": "PE",
+        "net": 1203.0,
+        "setup": "BREAKOUT_HOLD",
+        "trigger_level": 22700.0,
+        "rule": "LEVEL_V1 BREAKOUT_HOLD & strike_oi=ce,pe -> BUY_PE",
+        "confirmation_open": 22669.0,
+        "confirmation_close": 22611.7,
+        "confirmation_direction_matches": true,
+        "underlying_entry_open": 22611.9,
+        "exit_minute_underlying_close": 22585.45,
+        "signed_underlying_points_to_exit_minute_close": 26.45,
+        "previous_session_close": 22721.95,
+        "underlying_change_from_previous_close_points": -110.05
+      }
+    ],
+    "all_confirmation_candles_match_selected_side": true
+  },
+  "cap8_current_implementation_20261023": {
+    "provenance": {
+      "run_completed_ist": "2026-10-23T19:46:06",
+      "source_sha256": {
+        "dhan_bot_engine.py": "253d3246e582f23f7b4d80cd0e9efb1a3e3993af431d6008960f873c89818adb",
+        "dhan_dynamic_fno_stock_bot.py": "3411787d4987626173bc0e029a56d2dd2cf8bc484114f62f13d6c23b4fafe61a",
+        "nifty_research.py": "9989c9a829909dd21c3d5e80262e8c1cbd9ef61dd62e2522836aac58292edbde",
+        "nifty_market_structure.py": "120edf807a346b35e1ef6aa7587c22c4c2be762aa5af04c5be14818ab0a6a5b2",
+        "nifty_oi.py": "747e7cdbfde86cb66bbcdc39d5146c01354d2f901c13b4b37537aab49b9411ae",
+        "index_option_replay.py": "6cdbd1bdae3ea6b5f54df2aed9e1ded754fd31c027be16f2bbe37956cdff3ba6",
+        "stock_option_policy.py": "1132d598199bc46a3dac0f9c23d57233850811d0aa4acfe0a0ba068b380f8df0",
+        "stock_option_signals.py": "007e51e1c91f98c4b0cc837fc2d484380a0a6dbd8d7cc45f95e74844f900d07d",
+        "dhan_hist_cache/nifty_regime_review_20261023/run.py": "9ce2dce6382cb09c6cb72e47964199d9e7c873956d7e8c9acb5ab1cf22b7c2b0",
+        "dhan_hist_cache/stock_regime_review_20261023/run.py": "13a0c61154555eb50a0b638e31607f9b8af4e72febff3faaaf47f1b07bec0a9c"
+      },
+      "caps": {
+        "nifty": 8,
+        "stock_options": 2
+      },
+      "session_ist": "09:15-14:45",
+      "end_exclusive": "2026-10-23",
+      "parameter_search": false,
+      "charges": "Existing implementation models; historical bid/ask not available",
+      "full_strategy_validated": false,
+      "production_state_unchanged": true
+    },
+    "scenarios": {
+      "0.1": {
+        "summary": {
+          "calendar_days": 60,
+          "from_inclusive": "2026-08-24",
+          "to_exclusive": "2026-10-23",
+          "sessions": 41,
+          "trades": 5,
+          "gross": 74.75,
+          "net": -247.75,
+          "charges": 322.5,
+          "win_rate_pct": 20.0,
+          "closed_trade_drawdown": 1450.75,
+          "slippage_pct": 0.1,
+          "zero_trade_days": 36,
+          "unvalidated_attempts": 0,
+          "status": "PARTIAL_CHAIN_RESEARCH_NOT_FULL_STRATEGY_VALIDATION",
+          "source_result": "E:\\Options-TradingBot-Gemini\\dhan_hist_cache\\nifty_regime_review_20261023\\current_20261023_193933_slippage_0.1\\result.json"
+        },
+        "trades": [
+          {
+            "timestamp": "2026-08-28 12:50:00",
+            "exit_timestamp": "2026-08-28 12:59:00",
+            "index": "NIFTY",
+            "contract": "24150_CE",
+            "lots": 1,
+            "qty": 65,
+            "spot_at_entry": 24109.65,
+            "oi_diff_lakhs": 122.75,
+            "entry_price": 102.55,
+            "exit_price": 96.3,
+            "gross_pnl": -406.25,
+            "net_pnl": -470.75,
+            "r_multiple": -1.02,
+            "learning_r_multiple": -1.181945,
+            "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+            "state_vec": [
+              -2.455,
+              -0.2594,
+              1.6953,
+              1.0,
+              -0.8,
+              1.5,
+              0.162,
+              0.3897,
+              0.0,
+              0.0
+            ],
+            "exit_reason": "INITIAL_SL_HIT",
+            "rule_used": "LEVEL_V1 RETEST_CONFIRMED & strike_oi=ce,pe -> BUY_CE",
+            "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+            "market_structure": {
+              "allowed": true,
+              "ready": true,
+              "reason": "Confirmed level event with sufficient room",
+              "source": "INDEX_5M_OHLC",
+              "day_range_points": 111.45000000000073,
+              "min_body_fraction": 0.4,
+              "min_close_fraction": 0.6,
+              "confirm_window_sec": 600,
+              "confirmation_age_seconds": 0.0,
+              "levels": {
+                "previous_day_high": 24297.45,
+                "previous_day_low": 24090.85,
+                "day_high": 24188.3,
+                "day_low": 24076.85,
+                "opening_high": 24158.25,
+                "opening_low": 24106.55,
+                "range_high_before_confirmation": 24188.3,
+                "range_low_before_confirmation": 24076.85,
+                "range_high_before_breakout": 24188.3,
+                "range_low_before_breakout": 24076.85
+              },
+              "put_oi_wall": {
+                "strike": 24100.0,
+                "oi": 14069835.0,
+                "change_from_previous_close": 0.0
+              },
+              "call_oi_wall": {
+                "strike": 24200.0,
+                "oi": 21589035.0,
+                "change_from_previous_close": 0.0
+              },
+              "opening_trend": null,
+              "put_oi_buildup": null,
+              "call_oi_buildup": null,
+              "nearest_put_oi_level": {
+                "strike": 24100.0,
+                "oi": 14069835.0,
+                "change_from_previous_close": 0.0
+              },
+              "nearest_call_oi_level": {
+                "strike": 24150.0,
+                "oi": 13465335.0,
+                "change_from_previous_close": 0.0
+              },
+              "swing_levels": [
+                24076.85,
+                24077.0,
+                24092.85,
+                24109.65,
+                24130.4,
+                24136.15,
+                24141.5,
+                24141.55,
+                24158.25,
+                24166.05,
+                24166.25,
+                24170.6,
+                24188.3
+              ],
+              "confirmation_close": 24109.8,
+              "entry_levels": [
+                24076.85,
+                24077.0,
+                24090.85,
+                24092.85,
+                24100.0,
+                24106.55,
+                24109.65,
+                24130.4,
+                24136.15,
+                24141.5,
+                24141.55,
+                24158.25,
+                24166.05,
+                24166.25,
+                24170.6,
+                24188.3,
+                24200.0,
+                24297.45
+              ],
+              "setup": "RETEST_CONFIRMED",
+              "trigger_level": 24100.0,
+              "next_opposing_level": 24130.4,
+              "room_points": 20.75,
+              "structural_risk_points": 9.650000000001455,
+              "structure_rr": 2.150259067357189,
+              "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+              "level_reference_age_seconds": 300.0,
+              "strike_oi_confirmation": [
+                {
+                  "strike": 24100.0,
+                  "side": "ce",
+                  "oi": 11638185.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": -123565.0,
+                  "premium_change_over_5m": 3.700000000000003
+                },
+                {
+                  "strike": 24100.0,
+                  "side": "pe",
+                  "oi": 14411150.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": 341315.0,
+                  "premium_change_over_5m": -3.450000000000003
+                }
+              ],
+              "oi_confirmation_strike": 24100.0,
+              "direction_checks": {
+                "BUY_CE": {
+                  "allowed": true,
+                  "reason": "Confirmed level event with sufficient room",
+                  "trigger_level": 24100.0,
+                  "setup": "RETEST_CONFIRMED",
+                  "room_points": 20.75,
+                  "structure_rr": 2.150259067357189,
+                  "oi_confirmed_levels": [
+                    24100.0,
+                    24200.0
+                  ]
+                },
+                "BUY_PE": {
+                  "allowed": false,
+                  "reason": "Price has not held directional confirmation",
+                  "trigger_level": null,
+                  "setup": null,
+                  "room_points": null,
+                  "structure_rr": null,
+                  "oi_confirmed_levels": []
+                }
+              }
+            }
+          },
+          {
+            "timestamp": "2026-09-09 10:25:00",
+            "exit_timestamp": "2026-09-09 10:31:00",
+            "index": "NIFTY",
+            "contract": "23550_CE",
+            "lots": 1,
+            "qty": 65,
+            "spot_at_entry": 23538.7,
+            "oi_diff_lakhs": -105.9,
+            "entry_price": 150.75,
+            "exit_price": 147.8,
+            "gross_pnl": -191.75,
+            "net_pnl": -256.25,
+            "r_multiple": -0.48,
+            "learning_r_multiple": -0.64146,
+            "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+            "state_vec": [
+              2.118,
+              0.6856,
+              2.0,
+              1.0,
+              -0.8,
+              1.5,
+              0.876,
+              0.1553,
+              1.0,
+              0.5
+            ],
+            "exit_reason": "INITIAL_SL_HIT",
+            "rule_used": "LEVEL_V1 BREAKOUT_HOLD & strike_oi=ce,pe -> BUY_CE",
+            "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+            "market_structure": {
+              "allowed": true,
+              "ready": true,
+              "reason": "Confirmed level event with sufficient room",
+              "source": "INDEX_5M_OHLC",
+              "day_range_points": 82.64999999999782,
+              "min_body_fraction": 0.4,
+              "min_close_fraction": 0.6,
+              "confirm_window_sec": 600,
+              "confirmation_age_seconds": 0.0,
+              "levels": {
+                "previous_day_high": 23758.95,
+                "previous_day_low": 23623.1,
+                "day_high": 23549.3,
+                "day_low": 23466.65,
+                "opening_high": 23536.5,
+                "opening_low": 23477.55,
+                "range_high_before_confirmation": 23536.5,
+                "range_low_before_confirmation": 23466.65,
+                "range_high_before_breakout": 23536.5,
+                "range_low_before_breakout": 23466.65
+              },
+              "put_oi_wall": {
+                "strike": 23500.0,
+                "oi": 11980540.0,
+                "change_from_previous_close": 0.0
+              },
+              "call_oi_wall": {
+                "strike": 23500.0,
+                "oi": 10393370.0,
+                "change_from_previous_close": 0.0
+              },
+              "opening_trend": null,
+              "put_oi_buildup": null,
+              "call_oi_buildup": null,
+              "nearest_put_oi_level": {
+                "strike": 23500.0,
+                "oi": 11980540.0,
+                "change_from_previous_close": 0.0
+              },
+              "nearest_call_oi_level": {
+                "strike": 23550.0,
+                "oi": 4862650.0,
+                "change_from_previous_close": 0.0
+              },
+              "swing_levels": [
+                23466.65,
+                23533.45
+              ],
+              "confirmation_close": 23537.8,
+              "entry_levels": [
+                23466.65,
+                23477.55,
+                23500.0,
+                23533.45,
+                23536.5,
+                23623.1,
+                23758.95
+              ],
+              "setup": "BREAKOUT_HOLD",
+              "trigger_level": 23500.0,
+              "next_opposing_level": 23623.1,
+              "room_points": 84.39999999999782,
+              "structural_risk_points": 38.70000000000073,
+              "structure_rr": 2.1808785529714787,
+              "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+              "level_reference_age_seconds": 300.0,
+              "strike_oi_confirmation": [
+                {
+                  "strike": 23500.0,
+                  "side": "ce",
+                  "oi": 8168225.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": -2225145.0,
+                  "premium_change_over_5m": 17.75
+                },
+                {
+                  "strike": 23500.0,
+                  "side": "pe",
+                  "oi": 13782600.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": 1802060.0,
+                  "premium_change_over_5m": -9.450000000000003
+                }
+              ],
+              "oi_confirmation_strike": 23500.0,
+              "direction_checks": {
+                "BUY_CE": {
+                  "allowed": true,
+                  "reason": "Confirmed level event with sufficient room",
+                  "trigger_level": 23500.0,
+                  "setup": "BREAKOUT_HOLD",
+                  "room_points": 84.39999999999782,
+                  "structure_rr": 2.1808785529714787,
+                  "oi_confirmed_levels": [
+                    23500.0
+                  ]
+                },
+                "BUY_PE": {
+                  "allowed": false,
+                  "reason": "Price has not held directional confirmation",
+                  "trigger_level": null,
+                  "setup": null,
+                  "room_points": null,
+                  "structure_rr": null,
+                  "oi_confirmed_levels": []
+                }
+              }
+            }
+          },
+          {
+            "timestamp": "2026-09-21 10:05:00",
+            "exit_timestamp": "2026-09-21 10:46:00",
+            "index": "NIFTY",
+            "contract": "23350_PE",
+            "lots": 1,
+            "qty": 65,
+            "spot_at_entry": 23382.9,
+            "oi_diff_lakhs": 0.32,
+            "entry_price": 59.5,
+            "exit_price": 56.65,
+            "gross_pnl": -185.25,
+            "net_pnl": -249.75,
+            "r_multiple": -0.46,
+            "learning_r_multiple": -0.620162,
+            "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+            "state_vec": [
+              -0.0064,
+              -0.0006,
+              -2.0,
+              -0.8,
+              1.0,
+              -1.5,
+              -0.478,
+              -0.4803,
+              0.0,
+              0.5
+            ],
+            "exit_reason": "INITIAL_SL_HIT",
+            "rule_used": "LEVEL_V1 RETEST_CONFIRMED & strike_oi=ce,pe -> BUY_PE",
+            "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+            "market_structure": {
+              "allowed": true,
+              "ready": true,
+              "reason": "Confirmed level event with sufficient room",
+              "source": "INDEX_5M_OHLC",
+              "day_range_points": 95.95000000000073,
+              "min_body_fraction": 0.4,
+              "min_close_fraction": 0.6,
+              "confirm_window_sec": 600,
+              "confirmation_age_seconds": 0.0,
+              "levels": {
+                "previous_day_high": 23389.15,
+                "previous_day_low": 23286.6,
+                "day_high": 23410.75,
+                "day_low": 23314.8,
+                "opening_high": 23402.95,
+                "opening_low": 23314.8,
+                "range_high_before_confirmation": 23410.75,
+                "range_low_before_confirmation": 23314.8,
+                "range_high_before_breakout": 23410.75,
+                "range_low_before_breakout": 23314.8
+              },
+              "put_oi_wall": {
+                "strike": 23300.0,
+                "oi": 23652135.0,
+                "change_from_previous_close": 0.0
+              },
+              "call_oi_wall": {
+                "strike": 23400.0,
+                "oi": 22404785.0,
+                "change_from_previous_close": 0.0
+              },
+              "opening_trend": null,
+              "put_oi_buildup": null,
+              "call_oi_buildup": null,
+              "nearest_put_oi_level": {
+                "strike": 23350.0,
+                "oi": 18576480.0,
+                "change_from_previous_close": 0.0
+              },
+              "nearest_call_oi_level": {
+                "strike": 23400.0,
+                "oi": 22404785.0,
+                "change_from_previous_close": 0.0
+              },
+              "swing_levels": [
+                23385.8,
+                23410.75
+              ],
+              "confirmation_close": 23382.9,
+              "entry_levels": [
+                23286.6,
+                23300.0,
+                23314.8,
+                23385.8,
+                23389.15,
+                23400.0,
+                23402.95,
+                23410.75
+              ],
+              "setup": "RETEST_CONFIRMED",
+              "trigger_level": 23400.0,
+              "next_opposing_level": 23314.8,
+              "room_points": 68.10000000000218,
+              "structural_risk_points": 17.099999999998545,
+              "structure_rr": 3.982456140351344,
+              "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+              "level_reference_age_seconds": 300.0,
+              "strike_oi_confirmation": [
+                {
+                  "strike": 23400.0,
+                  "side": "ce",
+                  "oi": 23095020.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": 690235.0,
+                  "premium_change_over_5m": -5.5
+                },
+                {
+                  "strike": 23400.0,
+                  "side": "pe",
+                  "oi": 20474415.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": -61035.0,
+                  "premium_change_over_5m": 5.450000000000003
+                }
+              ],
+              "oi_confirmation_strike": 23400.0,
+              "direction_checks": {
+                "BUY_CE": {
+                  "allowed": false,
+                  "reason": "Price has not held directional confirmation",
+                  "trigger_level": null,
+                  "setup": null,
+                  "room_points": null,
+                  "structure_rr": null,
+                  "oi_confirmed_levels": []
+                },
+                "BUY_PE": {
+                  "allowed": true,
+                  "reason": "Confirmed level event with sufficient room",
+                  "trigger_level": 23400.0,
+                  "setup": "RETEST_CONFIRMED",
+                  "room_points": 68.10000000000218,
+                  "structure_rr": 3.982456140351344,
+                  "oi_confirmed_levels": [
+                    23300.0,
+                    23400.0
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "timestamp": "2026-10-07 11:23:00",
+            "exit_timestamp": "2026-10-07 11:26:00",
+            "index": "NIFTY",
+            "contract": "22650_PE",
+            "lots": 1,
+            "qty": 65,
+            "spot_at_entry": 22681.3,
+            "oi_diff_lakhs": 15.99,
+            "entry_price": 130.05,
+            "exit_price": 123.75,
+            "gross_pnl": -409.5,
+            "net_pnl": -474.0,
+            "r_multiple": -1.02,
+            "learning_r_multiple": -1.180659,
+            "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+            "state_vec": [
+              -0.3198,
+              -0.0755,
+              0.6518,
+              -0.8,
+              0.6,
+              -1.5,
+              -0.41,
+              -0.4736,
+              0.0,
+              0.5
+            ],
+            "exit_reason": "INITIAL_SL_HIT",
+            "rule_used": "LEVEL_V1 RETEST_CONFIRMED & strike_oi=ce -> BUY_PE",
+            "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+            "market_structure": {
+              "allowed": true,
+              "ready": true,
+              "reason": "Confirmed level event with sufficient room",
+              "source": "INDEX_5M_OHLC",
+              "day_range_points": 132.54999999999927,
+              "min_body_fraction": 0.4,
+              "min_close_fraction": 0.6,
+              "confirm_window_sec": 600,
+              "confirmation_age_seconds": 180.0,
+              "levels": {
+                "previous_day_high": 22776.1,
+                "previous_day_low": 22561.6,
+                "day_high": 22710.8,
+                "day_low": 22578.25,
+                "opening_high": 22692.95,
+                "opening_low": 22600.45,
+                "range_high_before_confirmation": 22710.8,
+                "range_low_before_confirmation": 22578.25,
+                "range_high_before_breakout": 22710.8,
+                "range_low_before_breakout": 22578.25
+              },
+              "put_oi_wall": {
+                "strike": 22600.0,
+                "oi": 10951980.0,
+                "change_from_previous_close": 0.0
+              },
+              "call_oi_wall": {
+                "strike": 22700.0,
+                "oi": 8960640.0,
+                "change_from_previous_close": 0.0
+              },
+              "opening_trend": null,
+              "put_oi_buildup": null,
+              "call_oi_buildup": null,
+              "nearest_put_oi_level": {
+                "strike": 22650.0,
+                "oi": 4791345.0,
+                "change_from_previous_close": 0.0
+              },
+              "nearest_call_oi_level": {
+                "strike": 22700.0,
+                "oi": 8960640.0,
+                "change_from_previous_close": 0.0
+              },
+              "swing_levels": [
+                22578.25,
+                22585.05,
+                22623.25,
+                22627.35,
+                22634.3,
+                22701.6,
+                22710.8
+              ],
+              "confirmation_close": 22678.4,
+              "entry_levels": [
+                22561.6,
+                22578.25,
+                22585.05,
+                22600.0,
+                22600.45,
+                22623.25,
+                22627.35,
+                22634.3,
+                22692.95,
+                22700.0,
+                22701.6,
+                22710.8,
+                22776.1
+              ],
+              "setup": "RETEST_CONFIRMED",
+              "trigger_level": 22700.0,
+              "next_opposing_level": 22634.3,
+              "room_points": 47.0,
+              "structural_risk_points": 18.700000000000728,
+              "structure_rr": 2.5133689839571214,
+              "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+              "level_reference_age_seconds": 300.0,
+              "strike_oi_confirmation": [
+                {
+                  "strike": 22700.0,
+                  "side": "ce",
+                  "oi": 9017385.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": 56745.0,
+                  "premium_change_over_5m": -3.200000000000017
+                }
+              ],
+              "oi_confirmation_strike": 22700.0,
+              "direction_checks": {
+                "BUY_CE": {
+                  "allowed": false,
+                  "reason": "Price has not held directional confirmation",
+                  "trigger_level": null,
+                  "setup": null,
+                  "room_points": null,
+                  "structure_rr": null,
+                  "oi_confirmed_levels": []
+                },
+                "BUY_PE": {
+                  "allowed": true,
+                  "reason": "Confirmed level event with sufficient room",
+                  "trigger_level": 22700.0,
+                  "setup": "RETEST_CONFIRMED",
+                  "room_points": 47.0,
+                  "structure_rr": 2.5133689839571214,
+                  "oi_confirmed_levels": [
+                    22700.0
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "timestamp": "2026-10-14 13:05:00",
+            "exit_timestamp": "2026-10-14 13:07:00",
+            "index": "NIFTY",
+            "contract": "22600_PE",
+            "lots": 1,
+            "qty": 65,
+            "spot_at_entry": 22611.9,
+            "oi_diff_lakhs": 5.7,
+            "entry_price": 147.9,
+            "exit_price": 167.4,
+            "gross_pnl": 1267.5,
+            "net_pnl": 1203.0,
+            "r_multiple": 3.17,
+            "learning_r_multiple": 3.008686,
+            "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+            "state_vec": [
+              -0.114,
+              -0.0281,
+              -2.0,
+              -0.8,
+              1.0,
+              -1.5,
+              -2.0,
+              -0.8267,
+              0.0,
+              0.0
+            ],
+            "exit_reason": "DAILY_NET_PROFIT_TARGET",
+            "rule_used": "LEVEL_V1 BREAKOUT_HOLD & strike_oi=ce,pe -> BUY_PE",
+            "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+            "market_structure": {
+              "allowed": true,
+              "ready": true,
+              "reason": "Confirmed level event with sufficient room",
+              "source": "INDEX_5M_OHLC",
+              "day_range_points": 152.40000000000146,
+              "min_body_fraction": 0.4,
+              "min_close_fraction": 0.6,
+              "confirm_window_sec": 600,
+              "confirmation_age_seconds": 0.0,
+              "levels": {
+                "previous_day_high": 22721.95,
+                "previous_day_low": 22288.45,
+                "day_high": 22757.95,
+                "day_low": 22605.55,
+                "opening_high": 22752.3,
+                "opening_low": 22663.8,
+                "range_high_before_confirmation": 22757.95,
+                "range_low_before_confirmation": 22651.8,
+                "range_high_before_breakout": 22757.95,
+                "range_low_before_breakout": 22655.35
+              },
+              "put_oi_wall": {
+                "strike": 22700.0,
+                "oi": 11070215.0,
+                "change_from_previous_close": 0.0
+              },
+              "call_oi_wall": {
+                "strike": 22700.0,
+                "oi": 10835240.0,
+                "change_from_previous_close": 0.0
+              },
+              "opening_trend": null,
+              "put_oi_buildup": null,
+              "call_oi_buildup": null,
+              "nearest_put_oi_level": {
+                "strike": 22600.0,
+                "oi": 7662525.0,
+                "change_from_previous_close": 0.0
+              },
+              "nearest_call_oi_level": {
+                "strike": 22650.0,
+                "oi": 2596750.0,
+                "change_from_previous_close": 0.0
+              },
+              "swing_levels": [
+                22655.35,
+                22674.8,
+                22695.65,
+                22711.7,
+                22729.6,
+                22739.4,
+                22742.5,
+                22747.2,
+                22757.95
+              ],
+              "confirmation_close": 22611.7,
+              "entry_levels": [
+                22288.45,
+                22655.35,
+                22663.8,
+                22674.8,
+                22695.65,
+                22700.0,
+                22711.7,
+                22721.95,
+                22729.6,
+                22739.4,
+                22742.5,
+                22747.2,
+                22752.3,
+                22757.95
+              ],
+              "setup": "BREAKOUT_HOLD",
+              "trigger_level": 22700.0,
+              "next_opposing_level": 22288.45,
+              "room_points": 323.4500000000007,
+              "structural_risk_points": 88.09999999999854,
+              "structure_rr": 3.6713961407492177,
+              "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+              "level_reference_age_seconds": 300.0,
+              "strike_oi_confirmation": [
+                {
+                  "strike": 22700.0,
+                  "side": "ce",
+                  "oi": 11504675.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": 669435.0,
+                  "premium_change_over_5m": -22.89999999999999
+                },
+                {
+                  "strike": 22700.0,
+                  "side": "pe",
+                  "oi": 9492405.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": -1577810.0,
+                  "premium_change_over_5m": 36.75
+                }
+              ],
+              "oi_confirmation_strike": 22700.0,
+              "direction_checks": {
+                "BUY_CE": {
+                  "allowed": false,
+                  "reason": "Price has not held directional confirmation",
+                  "trigger_level": null,
+                  "setup": null,
+                  "room_points": null,
+                  "structure_rr": null,
+                  "oi_confirmed_levels": []
+                },
+                "BUY_PE": {
+                  "allowed": true,
+                  "reason": "Confirmed level event with sufficient room",
+                  "trigger_level": 22700.0,
+                  "setup": "BREAKOUT_HOLD",
+                  "room_points": 323.4500000000007,
+                  "structure_rr": 3.6713961407492177,
+                  "oi_confirmed_levels": [
+                    22700.0
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "daily": [
+          {
+            "day": "2026-08-24",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-08-25",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-08-26",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-08-27",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-08-28",
+            "gross": -406.25,
+            "net": -470.75,
+            "trades": 1,
+            "unvalidated": false,
+            "eligible_entries": 1,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-08-31",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-09-01",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-09-02",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-09-03",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-09-04",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-09-07",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-09-08",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-09-09",
+            "gross": -191.75,
+            "net": -256.25,
+            "trades": 1,
+            "unvalidated": false,
+            "eligible_entries": 1,
+            "rule_status_counts": {
+              "CANDIDATE": 8
+            }
+          },
+          {
+            "day": "2026-09-10",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 8
+            }
+          },
+          {
+            "day": "2026-09-11",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 8
+            }
+          },
+          {
+            "day": "2026-09-15",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 8
+            }
+          },
+          {
+            "day": "2026-09-16",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 8
+            }
+          },
+          {
+            "day": "2026-09-17",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 8
+            }
+          },
+          {
+            "day": "2026-09-18",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 8
+            }
+          },
+          {
+            "day": "2026-09-21",
+            "gross": -185.25,
+            "net": -249.75,
+            "trades": 1,
+            "unvalidated": false,
+            "eligible_entries": 1,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-09-22",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-09-23",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-09-24",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-09-25",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-09-28",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-09-29",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-09-30",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-10-01",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-10-05",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-10-06",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-10-07",
+            "gross": -409.5,
+            "net": -474.0,
+            "trades": 1,
+            "unvalidated": false,
+            "eligible_entries": 1,
+            "rule_status_counts": {
+              "CANDIDATE": 8,
+              "PRUNED": 1
+            }
+          },
+          {
+            "day": "2026-10-08",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 8,
+              "PRUNED": 1
+            }
+          },
+          {
+            "day": "2026-10-09",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 8,
+              "PRUNED": 1
+            }
+          },
+          {
+            "day": "2026-10-12",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-10-13",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-10-14",
+            "gross": 1267.5,
+            "net": 1203.0,
+            "trades": 1,
+            "unvalidated": false,
+            "eligible_entries": 1,
+            "rule_status_counts": {
+              "CANDIDATE": 10
+            }
+          },
+          {
+            "day": "2026-10-15",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 10
+            }
+          },
+          {
+            "day": "2026-10-16",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 10
+            }
+          },
+          {
+            "day": "2026-10-19",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 10
+            }
+          },
+          {
+            "day": "2026-10-21",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 10
+            }
+          },
+          {
+            "day": "2026-10-22",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 10
+            }
+          }
+        ]
+      },
+      "0.3": {
+        "summary": {
+          "calendar_days": 60,
+          "from_inclusive": "2026-08-24",
+          "to_exclusive": "2026-10-23",
+          "sessions": 41,
+          "trades": 5,
+          "gross": 19.5,
+          "net": -303.0,
+          "charges": 322.5,
+          "win_rate_pct": 20.0,
+          "closed_trade_drawdown": 1506.0,
+          "slippage_pct": 0.3,
+          "zero_trade_days": 36,
+          "unvalidated_attempts": 0,
+          "status": "PARTIAL_CHAIN_RESEARCH_NOT_FULL_STRATEGY_VALIDATION",
+          "source_result": "E:\\Options-TradingBot-Gemini\\dhan_hist_cache\\nifty_regime_review_20261023\\current_20261023_193933_slippage_0.3\\result.json"
+        },
+        "trades": [
+          {
+            "timestamp": "2026-08-28 12:50:00",
+            "exit_timestamp": "2026-08-28 12:58:00",
+            "index": "NIFTY",
+            "contract": "24150_CE",
+            "lots": 1,
+            "qty": 65,
+            "spot_at_entry": 24109.65,
+            "oi_diff_lakhs": 122.75,
+            "entry_price": 102.75,
+            "exit_price": 96.3,
+            "gross_pnl": -419.25,
+            "net_pnl": -483.75,
+            "r_multiple": -1.05,
+            "learning_r_multiple": -1.211538,
+            "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+            "state_vec": [
+              -2.455,
+              -0.2594,
+              1.6953,
+              1.0,
+              -0.8,
+              1.5,
+              0.162,
+              0.3897,
+              0.0,
+              0.0
+            ],
+            "exit_reason": "INITIAL_SL_HIT",
+            "rule_used": "LEVEL_V1 RETEST_CONFIRMED & strike_oi=ce,pe -> BUY_CE",
+            "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+            "market_structure": {
+              "allowed": true,
+              "ready": true,
+              "reason": "Confirmed level event with sufficient room",
+              "source": "INDEX_5M_OHLC",
+              "day_range_points": 111.45000000000073,
+              "min_body_fraction": 0.4,
+              "min_close_fraction": 0.6,
+              "confirm_window_sec": 600,
+              "confirmation_age_seconds": 0.0,
+              "levels": {
+                "previous_day_high": 24297.45,
+                "previous_day_low": 24090.85,
+                "day_high": 24188.3,
+                "day_low": 24076.85,
+                "opening_high": 24158.25,
+                "opening_low": 24106.55,
+                "range_high_before_confirmation": 24188.3,
+                "range_low_before_confirmation": 24076.85,
+                "range_high_before_breakout": 24188.3,
+                "range_low_before_breakout": 24076.85
+              },
+              "put_oi_wall": {
+                "strike": 24100.0,
+                "oi": 14069835.0,
+                "change_from_previous_close": 0.0
+              },
+              "call_oi_wall": {
+                "strike": 24200.0,
+                "oi": 21589035.0,
+                "change_from_previous_close": 0.0
+              },
+              "opening_trend": null,
+              "put_oi_buildup": null,
+              "call_oi_buildup": null,
+              "nearest_put_oi_level": {
+                "strike": 24100.0,
+                "oi": 14069835.0,
+                "change_from_previous_close": 0.0
+              },
+              "nearest_call_oi_level": {
+                "strike": 24150.0,
+                "oi": 13465335.0,
+                "change_from_previous_close": 0.0
+              },
+              "swing_levels": [
+                24076.85,
+                24077.0,
+                24092.85,
+                24109.65,
+                24130.4,
+                24136.15,
+                24141.5,
+                24141.55,
+                24158.25,
+                24166.05,
+                24166.25,
+                24170.6,
+                24188.3
+              ],
+              "confirmation_close": 24109.8,
+              "entry_levels": [
+                24076.85,
+                24077.0,
+                24090.85,
+                24092.85,
+                24100.0,
+                24106.55,
+                24109.65,
+                24130.4,
+                24136.15,
+                24141.5,
+                24141.55,
+                24158.25,
+                24166.05,
+                24166.25,
+                24170.6,
+                24188.3,
+                24200.0,
+                24297.45
+              ],
+              "setup": "RETEST_CONFIRMED",
+              "trigger_level": 24100.0,
+              "next_opposing_level": 24130.4,
+              "room_points": 20.75,
+              "structural_risk_points": 9.650000000001455,
+              "structure_rr": 2.150259067357189,
+              "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+              "level_reference_age_seconds": 300.0,
+              "strike_oi_confirmation": [
+                {
+                  "strike": 24100.0,
+                  "side": "ce",
+                  "oi": 11638185.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": -123565.0,
+                  "premium_change_over_5m": 3.700000000000003
+                },
+                {
+                  "strike": 24100.0,
+                  "side": "pe",
+                  "oi": 14411150.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": 341315.0,
+                  "premium_change_over_5m": -3.450000000000003
+                }
+              ],
+              "oi_confirmation_strike": 24100.0,
+              "direction_checks": {
+                "BUY_CE": {
+                  "allowed": true,
+                  "reason": "Confirmed level event with sufficient room",
+                  "trigger_level": 24100.0,
+                  "setup": "RETEST_CONFIRMED",
+                  "room_points": 20.75,
+                  "structure_rr": 2.150259067357189,
+                  "oi_confirmed_levels": [
+                    24100.0,
+                    24200.0
+                  ]
+                },
+                "BUY_PE": {
+                  "allowed": false,
+                  "reason": "Price has not held directional confirmation",
+                  "trigger_level": null,
+                  "setup": null,
+                  "room_points": null,
+                  "structure_rr": null,
+                  "oi_confirmed_levels": []
+                }
+              }
+            }
+          },
+          {
+            "timestamp": "2026-09-09 10:25:00",
+            "exit_timestamp": "2026-09-09 10:31:00",
+            "index": "NIFTY",
+            "contract": "23550_CE",
+            "lots": 1,
+            "qty": 65,
+            "spot_at_entry": 23538.7,
+            "oi_diff_lakhs": -105.9,
+            "entry_price": 151.05,
+            "exit_price": 147.8,
+            "gross_pnl": -211.25,
+            "net_pnl": -275.75,
+            "r_multiple": -0.53,
+            "learning_r_multiple": -0.691822,
+            "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+            "state_vec": [
+              2.118,
+              0.6856,
+              2.0,
+              1.0,
+              -0.8,
+              1.5,
+              0.876,
+              0.1553,
+              1.0,
+              0.5
+            ],
+            "exit_reason": "INITIAL_SL_HIT",
+            "rule_used": "LEVEL_V1 BREAKOUT_HOLD & strike_oi=ce,pe -> BUY_CE",
+            "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+            "market_structure": {
+              "allowed": true,
+              "ready": true,
+              "reason": "Confirmed level event with sufficient room",
+              "source": "INDEX_5M_OHLC",
+              "day_range_points": 82.64999999999782,
+              "min_body_fraction": 0.4,
+              "min_close_fraction": 0.6,
+              "confirm_window_sec": 600,
+              "confirmation_age_seconds": 0.0,
+              "levels": {
+                "previous_day_high": 23758.95,
+                "previous_day_low": 23623.1,
+                "day_high": 23549.3,
+                "day_low": 23466.65,
+                "opening_high": 23536.5,
+                "opening_low": 23477.55,
+                "range_high_before_confirmation": 23536.5,
+                "range_low_before_confirmation": 23466.65,
+                "range_high_before_breakout": 23536.5,
+                "range_low_before_breakout": 23466.65
+              },
+              "put_oi_wall": {
+                "strike": 23500.0,
+                "oi": 11980540.0,
+                "change_from_previous_close": 0.0
+              },
+              "call_oi_wall": {
+                "strike": 23500.0,
+                "oi": 10393370.0,
+                "change_from_previous_close": 0.0
+              },
+              "opening_trend": null,
+              "put_oi_buildup": null,
+              "call_oi_buildup": null,
+              "nearest_put_oi_level": {
+                "strike": 23500.0,
+                "oi": 11980540.0,
+                "change_from_previous_close": 0.0
+              },
+              "nearest_call_oi_level": {
+                "strike": 23550.0,
+                "oi": 4862650.0,
+                "change_from_previous_close": 0.0
+              },
+              "swing_levels": [
+                23466.65,
+                23533.45
+              ],
+              "confirmation_close": 23537.8,
+              "entry_levels": [
+                23466.65,
+                23477.55,
+                23500.0,
+                23533.45,
+                23536.5,
+                23623.1,
+                23758.95
+              ],
+              "setup": "BREAKOUT_HOLD",
+              "trigger_level": 23500.0,
+              "next_opposing_level": 23623.1,
+              "room_points": 84.39999999999782,
+              "structural_risk_points": 38.70000000000073,
+              "structure_rr": 2.1808785529714787,
+              "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+              "level_reference_age_seconds": 300.0,
+              "strike_oi_confirmation": [
+                {
+                  "strike": 23500.0,
+                  "side": "ce",
+                  "oi": 8168225.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": -2225145.0,
+                  "premium_change_over_5m": 17.75
+                },
+                {
+                  "strike": 23500.0,
+                  "side": "pe",
+                  "oi": 13782600.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": 1802060.0,
+                  "premium_change_over_5m": -9.450000000000003
+                }
+              ],
+              "oi_confirmation_strike": 23500.0,
+              "direction_checks": {
+                "BUY_CE": {
+                  "allowed": true,
+                  "reason": "Confirmed level event with sufficient room",
+                  "trigger_level": 23500.0,
+                  "setup": "BREAKOUT_HOLD",
+                  "room_points": 84.39999999999782,
+                  "structure_rr": 2.1808785529714787,
+                  "oi_confirmed_levels": [
+                    23500.0
+                  ]
+                },
+                "BUY_PE": {
+                  "allowed": false,
+                  "reason": "Price has not held directional confirmation",
+                  "trigger_level": null,
+                  "setup": null,
+                  "room_points": null,
+                  "structure_rr": null,
+                  "oi_confirmed_levels": []
+                }
+              }
+            }
+          },
+          {
+            "timestamp": "2026-09-21 10:05:00",
+            "exit_timestamp": "2026-09-21 10:45:00",
+            "index": "NIFTY",
+            "contract": "23350_PE",
+            "lots": 1,
+            "qty": 65,
+            "spot_at_entry": 23382.9,
+            "oi_diff_lakhs": 0.32,
+            "entry_price": 59.6,
+            "exit_price": 56.65,
+            "gross_pnl": -191.75,
+            "net_pnl": -256.25,
+            "r_multiple": -0.48,
+            "learning_r_multiple": -0.64146,
+            "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+            "state_vec": [
+              -0.0064,
+              -0.0006,
+              -2.0,
+              -0.8,
+              1.0,
+              -1.5,
+              -0.478,
+              -0.4803,
+              0.0,
+              0.5
+            ],
+            "exit_reason": "INITIAL_SL_HIT",
+            "rule_used": "LEVEL_V1 RETEST_CONFIRMED & strike_oi=ce,pe -> BUY_PE",
+            "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+            "market_structure": {
+              "allowed": true,
+              "ready": true,
+              "reason": "Confirmed level event with sufficient room",
+              "source": "INDEX_5M_OHLC",
+              "day_range_points": 95.95000000000073,
+              "min_body_fraction": 0.4,
+              "min_close_fraction": 0.6,
+              "confirm_window_sec": 600,
+              "confirmation_age_seconds": 0.0,
+              "levels": {
+                "previous_day_high": 23389.15,
+                "previous_day_low": 23286.6,
+                "day_high": 23410.75,
+                "day_low": 23314.8,
+                "opening_high": 23402.95,
+                "opening_low": 23314.8,
+                "range_high_before_confirmation": 23410.75,
+                "range_low_before_confirmation": 23314.8,
+                "range_high_before_breakout": 23410.75,
+                "range_low_before_breakout": 23314.8
+              },
+              "put_oi_wall": {
+                "strike": 23300.0,
+                "oi": 23652135.0,
+                "change_from_previous_close": 0.0
+              },
+              "call_oi_wall": {
+                "strike": 23400.0,
+                "oi": 22404785.0,
+                "change_from_previous_close": 0.0
+              },
+              "opening_trend": null,
+              "put_oi_buildup": null,
+              "call_oi_buildup": null,
+              "nearest_put_oi_level": {
+                "strike": 23350.0,
+                "oi": 18576480.0,
+                "change_from_previous_close": 0.0
+              },
+              "nearest_call_oi_level": {
+                "strike": 23400.0,
+                "oi": 22404785.0,
+                "change_from_previous_close": 0.0
+              },
+              "swing_levels": [
+                23385.8,
+                23410.75
+              ],
+              "confirmation_close": 23382.9,
+              "entry_levels": [
+                23286.6,
+                23300.0,
+                23314.8,
+                23385.8,
+                23389.15,
+                23400.0,
+                23402.95,
+                23410.75
+              ],
+              "setup": "RETEST_CONFIRMED",
+              "trigger_level": 23400.0,
+              "next_opposing_level": 23314.8,
+              "room_points": 68.10000000000218,
+              "structural_risk_points": 17.099999999998545,
+              "structure_rr": 3.982456140351344,
+              "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+              "level_reference_age_seconds": 300.0,
+              "strike_oi_confirmation": [
+                {
+                  "strike": 23400.0,
+                  "side": "ce",
+                  "oi": 23095020.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": 690235.0,
+                  "premium_change_over_5m": -5.5
+                },
+                {
+                  "strike": 23400.0,
+                  "side": "pe",
+                  "oi": 20474415.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": -61035.0,
+                  "premium_change_over_5m": 5.450000000000003
+                }
+              ],
+              "oi_confirmation_strike": 23400.0,
+              "direction_checks": {
+                "BUY_CE": {
+                  "allowed": false,
+                  "reason": "Price has not held directional confirmation",
+                  "trigger_level": null,
+                  "setup": null,
+                  "room_points": null,
+                  "structure_rr": null,
+                  "oi_confirmed_levels": []
+                },
+                "BUY_PE": {
+                  "allowed": true,
+                  "reason": "Confirmed level event with sufficient room",
+                  "trigger_level": 23400.0,
+                  "setup": "RETEST_CONFIRMED",
+                  "room_points": 68.10000000000218,
+                  "structure_rr": 3.982456140351344,
+                  "oi_confirmed_levels": [
+                    23300.0,
+                    23400.0
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "timestamp": "2026-10-07 11:23:00",
+            "exit_timestamp": "2026-10-07 11:26:00",
+            "index": "NIFTY",
+            "contract": "22650_PE",
+            "lots": 1,
+            "qty": 65,
+            "spot_at_entry": 22681.3,
+            "oi_diff_lakhs": 15.99,
+            "entry_price": 130.3,
+            "exit_price": 123.75,
+            "gross_pnl": -425.75,
+            "net_pnl": -490.25,
+            "r_multiple": -1.07,
+            "learning_r_multiple": -1.232102,
+            "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+            "state_vec": [
+              -0.3198,
+              -0.0755,
+              0.6518,
+              -0.8,
+              0.6,
+              -1.5,
+              -0.41,
+              -0.4736,
+              0.0,
+              0.5
+            ],
+            "exit_reason": "INITIAL_SL_HIT",
+            "rule_used": "LEVEL_V1 RETEST_CONFIRMED & strike_oi=ce -> BUY_PE",
+            "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+            "market_structure": {
+              "allowed": true,
+              "ready": true,
+              "reason": "Confirmed level event with sufficient room",
+              "source": "INDEX_5M_OHLC",
+              "day_range_points": 132.54999999999927,
+              "min_body_fraction": 0.4,
+              "min_close_fraction": 0.6,
+              "confirm_window_sec": 600,
+              "confirmation_age_seconds": 180.0,
+              "levels": {
+                "previous_day_high": 22776.1,
+                "previous_day_low": 22561.6,
+                "day_high": 22710.8,
+                "day_low": 22578.25,
+                "opening_high": 22692.95,
+                "opening_low": 22600.45,
+                "range_high_before_confirmation": 22710.8,
+                "range_low_before_confirmation": 22578.25,
+                "range_high_before_breakout": 22710.8,
+                "range_low_before_breakout": 22578.25
+              },
+              "put_oi_wall": {
+                "strike": 22600.0,
+                "oi": 10951980.0,
+                "change_from_previous_close": 0.0
+              },
+              "call_oi_wall": {
+                "strike": 22700.0,
+                "oi": 8960640.0,
+                "change_from_previous_close": 0.0
+              },
+              "opening_trend": null,
+              "put_oi_buildup": null,
+              "call_oi_buildup": null,
+              "nearest_put_oi_level": {
+                "strike": 22650.0,
+                "oi": 4791345.0,
+                "change_from_previous_close": 0.0
+              },
+              "nearest_call_oi_level": {
+                "strike": 22700.0,
+                "oi": 8960640.0,
+                "change_from_previous_close": 0.0
+              },
+              "swing_levels": [
+                22578.25,
+                22585.05,
+                22623.25,
+                22627.35,
+                22634.3,
+                22701.6,
+                22710.8
+              ],
+              "confirmation_close": 22678.4,
+              "entry_levels": [
+                22561.6,
+                22578.25,
+                22585.05,
+                22600.0,
+                22600.45,
+                22623.25,
+                22627.35,
+                22634.3,
+                22692.95,
+                22700.0,
+                22701.6,
+                22710.8,
+                22776.1
+              ],
+              "setup": "RETEST_CONFIRMED",
+              "trigger_level": 22700.0,
+              "next_opposing_level": 22634.3,
+              "room_points": 47.0,
+              "structural_risk_points": 18.700000000000728,
+              "structure_rr": 2.5133689839571214,
+              "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+              "level_reference_age_seconds": 300.0,
+              "strike_oi_confirmation": [
+                {
+                  "strike": 22700.0,
+                  "side": "ce",
+                  "oi": 9017385.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": 56745.0,
+                  "premium_change_over_5m": -3.200000000000017
+                }
+              ],
+              "oi_confirmation_strike": 22700.0,
+              "direction_checks": {
+                "BUY_CE": {
+                  "allowed": false,
+                  "reason": "Price has not held directional confirmation",
+                  "trigger_level": null,
+                  "setup": null,
+                  "room_points": null,
+                  "structure_rr": null,
+                  "oi_confirmed_levels": []
+                },
+                "BUY_PE": {
+                  "allowed": true,
+                  "reason": "Confirmed level event with sufficient room",
+                  "trigger_level": 22700.0,
+                  "setup": "RETEST_CONFIRMED",
+                  "room_points": 47.0,
+                  "structure_rr": 2.5133689839571214,
+                  "oi_confirmed_levels": [
+                    22700.0
+                  ]
+                }
+              }
+            }
+          },
+          {
+            "timestamp": "2026-10-14 13:05:00",
+            "exit_timestamp": "2026-10-14 13:07:00",
+            "index": "NIFTY",
+            "contract": "22600_PE",
+            "lots": 1,
+            "qty": 65,
+            "spot_at_entry": 22611.9,
+            "oi_diff_lakhs": 5.7,
+            "entry_price": 148.2,
+            "exit_price": 167.7,
+            "gross_pnl": 1267.5,
+            "net_pnl": 1203.0,
+            "r_multiple": 3.17,
+            "learning_r_multiple": 3.008686,
+            "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+            "state_vec": [
+              -0.114,
+              -0.0281,
+              -2.0,
+              -0.8,
+              1.0,
+              -1.5,
+              -2.0,
+              -0.8267,
+              0.0,
+              0.0
+            ],
+            "exit_reason": "DAILY_NET_PROFIT_TARGET",
+            "rule_used": "LEVEL_V1 BREAKOUT_HOLD & strike_oi=ce,pe -> BUY_PE",
+            "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH",
+            "market_structure": {
+              "allowed": true,
+              "ready": true,
+              "reason": "Confirmed level event with sufficient room",
+              "source": "INDEX_5M_OHLC",
+              "day_range_points": 152.40000000000146,
+              "min_body_fraction": 0.4,
+              "min_close_fraction": 0.6,
+              "confirm_window_sec": 600,
+              "confirmation_age_seconds": 0.0,
+              "levels": {
+                "previous_day_high": 22721.95,
+                "previous_day_low": 22288.45,
+                "day_high": 22757.95,
+                "day_low": 22605.55,
+                "opening_high": 22752.3,
+                "opening_low": 22663.8,
+                "range_high_before_confirmation": 22757.95,
+                "range_low_before_confirmation": 22651.8,
+                "range_high_before_breakout": 22757.95,
+                "range_low_before_breakout": 22655.35
+              },
+              "put_oi_wall": {
+                "strike": 22700.0,
+                "oi": 11070215.0,
+                "change_from_previous_close": 0.0
+              },
+              "call_oi_wall": {
+                "strike": 22700.0,
+                "oi": 10835240.0,
+                "change_from_previous_close": 0.0
+              },
+              "opening_trend": null,
+              "put_oi_buildup": null,
+              "call_oi_buildup": null,
+              "nearest_put_oi_level": {
+                "strike": 22600.0,
+                "oi": 7662525.0,
+                "change_from_previous_close": 0.0
+              },
+              "nearest_call_oi_level": {
+                "strike": 22650.0,
+                "oi": 2596750.0,
+                "change_from_previous_close": 0.0
+              },
+              "swing_levels": [
+                22655.35,
+                22674.8,
+                22695.65,
+                22711.7,
+                22729.6,
+                22739.4,
+                22742.5,
+                22747.2,
+                22757.95
+              ],
+              "confirmation_close": 22611.7,
+              "entry_levels": [
+                22288.45,
+                22655.35,
+                22663.8,
+                22674.8,
+                22695.65,
+                22700.0,
+                22711.7,
+                22721.95,
+                22729.6,
+                22739.4,
+                22742.5,
+                22747.2,
+                22752.3,
+                22757.95
+              ],
+              "setup": "BREAKOUT_HOLD",
+              "trigger_level": 22700.0,
+              "next_opposing_level": 22288.45,
+              "room_points": 323.4500000000007,
+              "structural_risk_points": 88.09999999999854,
+              "structure_rr": 3.6713961407492177,
+              "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V1",
+              "level_reference_age_seconds": 300.0,
+              "strike_oi_confirmation": [
+                {
+                  "strike": 22700.0,
+                  "side": "ce",
+                  "oi": 11504675.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": 669435.0,
+                  "premium_change_over_5m": -22.89999999999999
+                },
+                {
+                  "strike": 22700.0,
+                  "side": "pe",
+                  "oi": 9492405.0,
+                  "change_from_previous_day": null,
+                  "change_over_5m": -1577810.0,
+                  "premium_change_over_5m": 36.75
+                }
+              ],
+              "oi_confirmation_strike": 22700.0,
+              "direction_checks": {
+                "BUY_CE": {
+                  "allowed": false,
+                  "reason": "Price has not held directional confirmation",
+                  "trigger_level": null,
+                  "setup": null,
+                  "room_points": null,
+                  "structure_rr": null,
+                  "oi_confirmed_levels": []
+                },
+                "BUY_PE": {
+                  "allowed": true,
+                  "reason": "Confirmed level event with sufficient room",
+                  "trigger_level": 22700.0,
+                  "setup": "BREAKOUT_HOLD",
+                  "room_points": 323.4500000000007,
+                  "structure_rr": 3.6713961407492177,
+                  "oi_confirmed_levels": [
+                    22700.0
+                  ]
+                }
+              }
+            }
+          }
+        ],
+        "daily": [
+          {
+            "day": "2026-08-24",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-08-25",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-08-26",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-08-27",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-08-28",
+            "gross": -419.25,
+            "net": -483.75,
+            "trades": 1,
+            "unvalidated": false,
+            "eligible_entries": 1,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-08-31",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-09-01",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-09-02",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-09-03",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-09-04",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-09-07",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-09-08",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 7
+            }
+          },
+          {
+            "day": "2026-09-09",
+            "gross": -211.25,
+            "net": -275.75,
+            "trades": 1,
+            "unvalidated": false,
+            "eligible_entries": 1,
+            "rule_status_counts": {
+              "CANDIDATE": 8
+            }
+          },
+          {
+            "day": "2026-09-10",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 8
+            }
+          },
+          {
+            "day": "2026-09-11",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 8
+            }
+          },
+          {
+            "day": "2026-09-15",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 8
+            }
+          },
+          {
+            "day": "2026-09-16",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 8
+            }
+          },
+          {
+            "day": "2026-09-17",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 8
+            }
+          },
+          {
+            "day": "2026-09-18",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 8
+            }
+          },
+          {
+            "day": "2026-09-21",
+            "gross": -191.75,
+            "net": -256.25,
+            "trades": 1,
+            "unvalidated": false,
+            "eligible_entries": 1,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-09-22",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-09-23",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-09-24",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-09-25",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-09-28",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-09-29",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-09-30",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-10-01",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-10-05",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-10-06",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-10-07",
+            "gross": -425.75,
+            "net": -490.25,
+            "trades": 1,
+            "unvalidated": false,
+            "eligible_entries": 1,
+            "rule_status_counts": {
+              "CANDIDATE": 8,
+              "PRUNED": 1
+            }
+          },
+          {
+            "day": "2026-10-08",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 8,
+              "PRUNED": 1
+            }
+          },
+          {
+            "day": "2026-10-09",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 8,
+              "PRUNED": 1
+            }
+          },
+          {
+            "day": "2026-10-12",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-10-13",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 9
+            }
+          },
+          {
+            "day": "2026-10-14",
+            "gross": 1267.5,
+            "net": 1203.0,
+            "trades": 1,
+            "unvalidated": false,
+            "eligible_entries": 1,
+            "rule_status_counts": {
+              "CANDIDATE": 10
+            }
+          },
+          {
+            "day": "2026-10-15",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 10
+            }
+          },
+          {
+            "day": "2026-10-16",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 10
+            }
+          },
+          {
+            "day": "2026-10-19",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 10
+            }
+          },
+          {
+            "day": "2026-10-21",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 10
+            }
+          },
+          {
+            "day": "2026-10-22",
+            "gross": 0.0,
+            "net": 0.0,
+            "trades": 0,
+            "unvalidated": false,
+            "eligible_entries": 0,
+            "rule_status_counts": {
+              "CANDIDATE": 10
+            }
+          }
+        ]
+      }
+    }
+  }
 }

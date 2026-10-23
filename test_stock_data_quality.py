@@ -34,7 +34,7 @@ class HistoricalDataTests(unittest.TestCase):
         self.client.session=MagicMock()
         self.sleep=patch("dhan_dynamic_fno_stock_bot.time.sleep")
         self.sleep.start();self.addCleanup(self.sleep.stop)
-        self.stamp=datetime(2026,9,18,15,25,tzinfo=IST).timestamp()
+        self.stamp=datetime(2026,9,18,14,40,tzinfo=IST).timestamp()
 
     def fetch(self):
         return self.client.fetch_intraday_candles("1",from_date="2026-09-18",to_date="2026-09-19",use_cache=True)
@@ -48,6 +48,16 @@ class HistoricalDataTests(unittest.TestCase):
         stored=json.loads(next(Path(self.folder.name).glob("history_v2_*.json")).read_text())
         self.assertEqual(stored["version"],2)
         self.assertIn("received_epoch",stored)
+
+    def test_missing_after_1445_does_not_mark_active_session_tail_missing(self):
+        self.client.session.post.return_value=response(candles(self.stamp))
+        self.assertIsNotNone(self.fetch())
+        self.assertEqual(self.client.history_events, [])
+
+    def test_missing_before_1445_remains_a_coverage_warning(self):
+        self.client.session.post.return_value=response(candles(self.stamp-300))
+        self.assertIsNotNone(self.fetch())
+        self.assertEqual(self.client.history_events[-1]['reason'], 'partial_session_tail')
 
     def test_partial_final_cache_is_refetched_instead_of_frozen(self):
         self.client.session.post.return_value=response(candles(self.stamp))
@@ -165,7 +175,7 @@ class FreshnessTests(unittest.TestCase):
 
 
 class BacktestCoverageTests(unittest.TestCase):
-    def run_case(self, missing, partial=False):
+    def run_case(self, missing, partial=False, scored=False):
         class End(datetime):
             @classmethod
             def now(cls,tz=None):return cls(2026,9,19,tzinfo=tz)
@@ -176,6 +186,9 @@ class BacktestCoverageTests(unittest.TestCase):
         client=MagicMock()
         client.fetch_intraday_candles.return_value=previous
         client.fetch_rolling_stock_option.return_value=None if missing else {**latest,"timestamp":[latest["timestamp"][0]+300],"open":[2],"strike":[1000]}
+        if scored:
+            client.fetch_rolling_stock_option.return_value={"timestamp":[latest['timestamp'][0]+300],
+                "open":[100],"high":[120],"low":[100],"close":[115],"strike":[1000]}
         client.history_events=[{"reason":"request_error"}] if missing else []
         client.history_coverage=[]
         if partial:
@@ -185,11 +198,43 @@ class BacktestCoverageTests(unittest.TestCase):
             client.fetch_intraday_candles.side_effect=fetch_partial
         with patch.object(bot,"datetime",End),patch.object(bot,"DhanStockOptionsClient",return_value=client), \
              patch.object(bot.DynamicStockOptionsUniverse,"load_universe",return_value={"1":{"symbol":"TEST","eq_security_id":"1","fno_lot_size":100}}), \
-             patch.object(bot,"evaluate_stock_setup",return_value={"opt_type":"CE"}),patch.object(bot,"atomic_write_json"):
+             patch.object(bot,"evaluate_stock_setup",return_value={"opt_type":"CE","scanner":"TEST"}),patch.object(bot,"atomic_write_json"):
             ledger=bot.run_stock_options_historical_backtest(5,0,bot.DynamicStrategyConfig({},argparse.Namespace()),MagicMock())
             if partial:
                 client.fetch_rolling_stock_option.assert_called_once()
             return ledger
+
+    def test_current_replay_matches_five_day_live_history(self):
+        class End(datetime):
+            @classmethod
+            def now(cls,tz=None):return cls(2026,9,19,tzinfo=tz)
+        data={k:[] for k in ('timestamp','open','high','low','close','volume')}
+        for day in range(8,19):
+            price=103 if day==18 else 100
+            values=(datetime(2026,9,day,10,tzinfo=IST).timestamp(),price,price+1,price-1,price,1000)
+            for k,v in zip(data,values):data[k].append(v)
+        client=MagicMock();client.fetch_intraday_candles.return_value=data
+        client.history_events=[];client.history_coverage=[];observed=[]
+        def evaluate(prefix,as_of,*args,**kwargs):
+            observed.append((prefix,as_of));return None
+        with patch.object(bot,'datetime',End),patch.object(bot,'DhanStockOptionsClient',return_value=client), \
+             patch.object(bot.DynamicStockOptionsUniverse,'load_universe',return_value={'1':{'symbol':'TEST','eq_security_id':'1','fno_lot_size':100}}), \
+             patch.object(bot,'evaluate_stock_setup',side_effect=evaluate),patch.object(bot,'atomic_write_json'):
+            result=bot.run_stock_options_historical_backtest(5,0,bot.DynamicStrategyConfig({},argparse.Namespace()),MagicMock(),current_implementation=True)
+        self.assertEqual(client.fetch_intraday_candles.call_args.kwargs['from_date'],'2026-09-09')
+        self.assertEqual(result['entry_configuration']['signal_lookback_calendar_days'],5)
+        self.assertEqual(len(observed),1)
+        prefix,as_of=observed[0]
+        self.assertEqual(datetime.fromtimestamp(prefix['timestamp'][0],IST).day,13)
+        self.assertTrue(all(t+300<=as_of for t in prefix['timestamp']))
+
+    def test_scored_five_minute_rolling_prices_require_contract_verification(self):
+        result=self.run_case(False,scored=True)
+        self.assertEqual(result['total_trades'],1)
+        self.assertTrue(result['data_coverage_complete'])
+        self.assertFalse(result['price_identity_validated'])
+        self.assertEqual(result['status'],'INCOMPLETE_DATA')
+        self.assertEqual(result['trades'][0]['data_source'],'ROLLING_ATM_5M_UNVERIFIED_CONTRACT_IDENTITY')
 
     def test_history_warning_allows_setups_but_marks_report_incomplete(self):
         ledger=self.run_case(False,partial=True)

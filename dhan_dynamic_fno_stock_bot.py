@@ -17,11 +17,14 @@ from datetime import datetime, timedelta, time as dtime, timezone
 from typing import Dict, Any, List, Optional
 import requests
 from collections import Counter
+from bisect import bisect_left
 from pathlib import Path
 from stock_option_signals import evaluate_stock_setup
 from stock_option_policy import premium_plan, rank_candidates, DailyTradeGate, stock_reentry_reason
 
 IST = timezone(timedelta(hours=5, minutes=30))
+SESSION_START_TIME = dtime(9, 15)
+SESSION_END_TIME = dtime(14, 45)
 
 try:
     from telegram_notifier import TelegramNotifier
@@ -157,13 +160,15 @@ class DynamicStrategyConfig:
         self.no_progress_bars = int(env.get("STOCK_OPT_NO_PROGRESS_BARS", 5))
         self.max_premium = float(env.get("STOCK_OPT_MAX_PREMIUM", 1000))
         self.confirm_window_sec = int(env.get("STOCK_OPT_CONFIRM_WINDOW_SEC", 600))
+        self.poll_interval_sec = float(env.get("STOCK_OPT_POLL_INTERVAL_SEC", 4))
         self.gate_dir = "stock_option_daily_entries"
         self.enable_opening_trend=env.get("STOCK_OPT_OPENING_TREND","false").strip().lower()=="true"
         self.extend_rupee_target=env.get("STOCK_OPT_EXTEND_RUPEE_TARGET","false").strip().lower()=="true"
         self.reentry_after_loss=env.get("STOCK_OPT_REENTRY_AFTER_LOSS","false").strip().lower()=="true"
         numbers = (self.target_pct, self.stop_pct, self.min_rr_target, self.slippage_pct,
                    self.max_spread_pct, self.rupee_target, self.rupee_max_risk,
-                   self.min_delta, self.max_delta, self.max_theta_pct_per_day, self.max_premium)
+                   self.min_delta, self.max_delta, self.max_theta_pct_per_day, self.max_premium,
+                   self.poll_interval_sec)
         if not all(math.isfinite(v) for v in numbers):
             raise ValueError("Stock option settings must be finite")
         if not (3 <= self.target_pct <= 20 and 0.5 <= self.stop_pct <= 10 and self.min_rr_target >= 1.2
@@ -173,6 +178,7 @@ class DynamicStrategyConfig:
                 and 0 < self.min_delta < self.max_delta <= 1 and self.min_days_to_expiry >= 4
                 and self.max_theta_pct_per_day > 0 and self.max_premium >= 3
                 and 300 <= self.confirm_window_sec <= 900
+                and 3 <= self.poll_interval_sec <= 5
                 and 1 <= self.no_progress_bars <= self.max_hold_bars_5m):
             raise ValueError("Invalid stock-option target, risk, Greek or entry limits")
 
@@ -424,13 +430,15 @@ class DhanStockOptionsClient:
             step = int(payload["interval"])*60
             for previous, current in zip(data["timestamp"],data["timestamp"][1:]):
                 if (datetime.fromtimestamp(previous,IST).date() == datetime.fromtimestamp(current,IST).date()
+                        and SESSION_START_TIME <= datetime.fromtimestamp(previous,IST).time().replace(tzinfo=None)
+                        < datetime.fromtimestamp(current,IST).time().replace(tzinfo=None) < SESSION_END_TIME
                         and current-previous != step):
                     self._history_issue(payload,start,end,"internal_bar_gap",previous_bar=previous,next_bar=current)
                     break
             if (endpoint == "intraday" and payload["exchangeSegment"] == "NSE_EQ" and final
                     and end.hour == end.minute == end.second == 0):
                 last = datetime.fromtimestamp(data["timestamp"][-1],IST)
-                expected_last = last.replace(hour=15,minute=30,second=0,microsecond=0)-timedelta(seconds=step)
+                expected_last = last.replace(hour=SESSION_END_TIME.hour,minute=SESSION_END_TIME.minute,second=0,microsecond=0)-timedelta(seconds=step)
                 if last < expected_last:
                     self._history_issue(payload,start,end,"partial_session_tail",last_bar=last.isoformat())
             return data
@@ -464,6 +472,9 @@ class DhanStockOptionsClient:
                 self._history_issue(payload, start, end, "circuit_open")
                 return None
         for attempt in range(2):
+            service = getattr(self, "before_market_request", None)
+            if service:
+                service()
             time.sleep(max(0, 0.65 - (time.monotonic() - self.history_request_at)))
             self.history_request_at = time.monotonic()
             retry = False
@@ -546,6 +557,7 @@ class DhanStockOptionsClient:
         self.last_chart_ts = 0.0
         self.last_quote_ts = 0.0
         self.last_chain_ts = 0.0
+        self.before_market_request = None
         self.history_events = []
         self.history_coverage = []
         self.history_failure_streak = 0
@@ -582,6 +594,8 @@ class DhanStockOptionsClient:
         return {}
 
     def _pace_quote(self):
+        if self.before_market_request:
+            self.before_market_request()
         time.sleep(max(0, 1.05 - (time.monotonic() - self.last_quote_ts)))
         self.last_quote_ts = time.monotonic()
 
@@ -590,6 +604,8 @@ class DhanStockOptionsClient:
         if not expiry:
             self.logger.warning("Invalid option expiry; skipping chain request")
             return {}
+        if self.before_market_request:
+            self.before_market_request()
         time.sleep(max(0, 3.05 - (time.monotonic() - self.last_chain_ts)))
         self.last_chain_ts = time.monotonic()
         try:
@@ -806,6 +822,9 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         except (KeyError, TypeError, ValueError):
             last_trade_age = None
         return {**sig, **plan, "opt_ltp": ask, "bid": bid, "spread_pct": spread,
+                "quoted_spread_points": ask-bid,
+                "spread_fraction_of_initial_risk": (ask-bid)/(ask-plan["initial_sl"]),
+                "bid_room_to_initial_stop": bid-plan["initial_sl"],
                 "dte": dte, "theta_pct_per_day": theta_pct, "expected_move_gain": net_gain,
                 "strong_mover": strong_mover, "spread_limit_pct": spread_limit,
                 "confirmation_age_seconds": age_after_close, "confirm_window_sec": window,
@@ -845,6 +864,16 @@ def close_paper_position(ledger, pos, price, reason, now):
                data_source="PAPER_BID_ASK", entry_id=pos["entry_id"])
     rec['learning_risk_rs']=round(float(pos.get('expected_net_risk',pos['opt_1r']*qty+fees)),2)
     rec['learning_r_multiple']=round(rec['net_pnl']/rec['learning_risk_rs'],6) if rec['learning_risk_rs']>0 else None
+    # Preserve decision-time evidence when the daily gate closes its position.
+    # These fields are observations, not relaxed entry criteria or new signals.
+    rec['entry_diagnostics']={k:pos[k] for k in (
+        'signal_timestamp','conf_close','conf_high','conf_low','atr_5m','day_change_pct',
+        'ema10_15m','ema10_15m_slope','higher_timeframe_aligned',
+        'vwap','bid','opt_ltp','spread_pct','quoted_spread_points',
+        'spread_fraction_of_initial_risk','bid_room_to_initial_stop',
+        'initial_sl','rupee_target_price','expected_net_rr','expected_net_risk',
+        'delta','theta','gamma','iv','iv_range_low','iv_range_high','dte',
+        'quote_age_seconds','greeks_receipt_age_seconds','confirmation_age_seconds') if k in pos}
     # Idempotent if interrupted between ledger save and closing the daily record.
     if not any(t.get("entry_id") == pos["entry_id"] for t in ledger["trades"]):
         ledger["trades"].append(rec)
@@ -875,7 +904,7 @@ def paper_exit(pos, quote, now, cfg):
         reason = "RUPEE_TARGET"
     elif bid >= pos["hard_target_price"]:
         reason = "PREMIUM_TARGET"
-    elif now.time().replace(tzinfo=None) >= dtime(15, 25):
+    elif now.time().replace(tzinfo=None) >= SESSION_END_TIME:
         reason = "EOD_SQUAREOFF"
     elif elapsed >= cfg.no_progress_bars * 300 and pos["peak_bid"] < pos["entry_price"] + jump:
         reason = "NO_PROGRESS"
@@ -913,13 +942,30 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                 cfg.max_daily_trades, cfg.rupee_target, cfg.rupee_max_risk)
     logger.info("Entry profile: gap continuation %s | cash-target extension %s | maximum %d lots",
                 cfg.enable_opening_trend,cfg.extend_rupee_target,cfg.max_lots)
-    try:
-        while True:
+    logger.info("Market quote refresh: %.1fs; position checks also run between screening requests",
+                cfg.poll_interval_sec)
+    market_quotes = {}
+    next_refresh = 0.0
+    servicing = False
+
+    def service_market_data():
+        # Synchronous cooperation keeps ledger/order ownership on this thread.
+        # A slow HTTP request can exceed the cadence; never overlap requests to
+        # try to catch up. The guard prevents quote pacing from recursing here.
+        nonlocal market_quotes, next_refresh, servicing
+        if servicing or time.monotonic() < next_refresh:
+            return
+        servicing = True
+        next_refresh = time.monotonic() + cfg.poll_interval_sec
+        try:
             now = datetime.now(IST)
-            if now.strftime("%Y-%m-%d") != today or now.weekday() >= 5 or now.time().replace(tzinfo=None) >= dtime(15, 30):
+            if now.strftime("%Y-%m-%d") != today or now.weekday() >= 5 or (now.time().replace(tzinfo=None) >= SESSION_END_TIME and not positions):
                 return
             if positions:
                 quotes = client.fetch_option_quotes([p["opt_security_id"] for p in positions])
+                # Receipt timestamps are stamped after HTTP completes. Using
+                # the pre-request time would give fresh depth a negative age.
+                now = datetime.now(IST)
                 for pos in positions[:]:
                     decision = paper_exit(pos, quotes.get(str(pos["opt_security_id"]), {}), now, cfg)
                     if decision:
@@ -930,32 +976,46 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                         if telegram:
                             telegram.exited(rec)
                     else:
-                        # JSON restores tuples as lists; normalize before comparing.
                         state = (pos["current_sl"], pos["peak_bid"])
                         if state != tuple(pos.get("persisted_state") or ()):
                             pos["persisted_state"] = state
                             gate.update_position(today, pos["slot"], pos)
+            if SESSION_START_TIME <= now.time().replace(tzinfo=None) < SESSION_END_TIME:
+                # Clear a failed refresh instead of reusing an older scan quote.
+                market_quotes = client.fetch_batch_ohlc(list(universe)).get("NSE_EQ", {})
+        finally:
+            servicing = False
+
+    client.before_market_request = service_market_data
+    try:
+        while True:
+            now = datetime.now(IST)
+            if now.strftime("%Y-%m-%d") != today or now.weekday() >= 5 or (now.time().replace(tzinfo=None) >= SESSION_END_TIME and not positions):
+                return
+            service_market_data()
             completed = [] if scan_once else [t for t in ledger["trades"] if str(t.get("timestamp", "")).startswith(today)]
             consumed = 0 if scan_once else max(gate.count_entries(today), len(completed)+len(positions))
             if consumed >= cfg.max_daily_trades or len(positions) >= cfg.max_concurrent:
                 if not positions:
                     return
-                time.sleep(1.1)
+                time.sleep(max(0.05, next_refresh-time.monotonic()))
                 continue
-            if not dtime(9, 30) <= now.time().replace(tzinfo=None) <= dtime(14, 30):
+            if not SESSION_START_TIME <= now.time().replace(tzinfo=None) < SESSION_END_TIME:
                 if scan_once or (now.hour >= 14 and not positions):
                     return
-                time.sleep(2)
+                time.sleep(cfg.poll_interval_sec)
                 continue
             wallet = cfg.initial_capital if scan_once else ledger["virtual_balance_net"]
             wallet -= sum(p["entry_price"]*p["qty"] + p["estimated_costs"] for p in positions)
-            quotes = client.fetch_batch_ohlc(list(universe)).get("NSE_EQ", {})
-            shortlist = shortlist_movers(quotes, cfg)
+            shortlist = shortlist_movers(market_quotes, cfg)
             signals = []
             candidates = []
             used_symbols = {p["symbol"] for p in positions}
             if not cfg.reentry_after_loss:used_symbols|={t['symbol'] for t in completed}
             for change, sec_id, ltp in shortlist:
+                service_market_data()
+                if datetime.now(IST).strftime("%Y-%m-%d") != today or datetime.now(IST).time().replace(tzinfo=None) >= SESSION_END_TIME:
+                    break
                 if sec_id not in universe or universe[sec_id]["symbol"] in used_symbols:
                     continue
                 if cfg.reentry_after_loss:
@@ -988,6 +1048,22 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
             capacity = min(cfg.max_concurrent-len(positions), cfg.max_daily_trades-consumed)
             entered = 0
             for best in ranked:
+                service_market_data()
+                # Screening can now close a position. Recalculate cash and
+                # reserved slots before qualification and never reuse its funds
+                # or its symbol based on a stale scan-start snapshot.
+                completed = [t for t in ledger["trades"] if str(t.get("timestamp", "")).startswith(today)]
+                consumed = max(gate.count_entries(today), len(completed)+len(positions))
+                if consumed >= cfg.max_daily_trades or len(positions) >= cfg.max_concurrent:
+                    break
+                if any(p["symbol"] == best["symbol"] for p in positions):
+                    continue
+                if cfg.reentry_after_loss:
+                    if stock_reentry_reason(best["symbol"], completed, time.time(), best.get("signal_timestamp")):
+                        continue
+                elif any(t["symbol"] == best["symbol"] for t in completed):
+                    continue
+                wallet = ledger["virtual_balance_net"] - sum(p["entry_price"]*p["qty"] + p["estimated_costs"] for p in positions)
                 if entered >= capacity:
                     break
                 current = client.fetch_batch_ohlc([best["eq_security_id"]]).get("NSE_EQ", {}).get(str(best["eq_security_id"]), {})
@@ -1011,7 +1087,7 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                 if not best:
                     logger.info("[OPTSTK RECHECK REJECT] %s | %s", symbol, reasons[0] if reasons else "Unspecified rejection")
                 now = datetime.now(IST)
-                if not best or now.time().replace(tzinfo=None) > dtime(14, 30):
+                if not best or now.time().replace(tzinfo=None) >= SESSION_END_TIME:
                     continue
                 refreshed=rank_candidates([best],ledger.get('trades',[]),now.timestamp())
                 if not refreshed:
@@ -1044,14 +1120,17 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                         telegram.position(pos, entry=True)
             if live_mode and gate.count_entries(today):
                 return
-            time.sleep(1.1 if positions else 30)
+            time.sleep(max(0.05, next_refresh-time.monotonic()))
     finally:
+        client.before_market_request = None
         if telegram:
             telegram.close()
 
 
 def simulate_fixed_premium_trade(entry_ts, bars, qty, cfg):
     """Real OHLC only. Reject missing bars/rolling-strike changes; stop first on ties."""
+    if not SESSION_START_TIME <= datetime.fromtimestamp(entry_ts, IST).time().replace(tzinfo=None) < SESSION_END_TIME:
+        return None
     first = bars.get(entry_ts)
     if not first or first.get("strike", 0) <= 0 or not 3 <= first.get("open", 0) <= cfg.max_premium:
         return None
@@ -1072,11 +1151,15 @@ def simulate_fixed_premium_trade(entry_ts, bars, qty, cfg):
         price, reason = None, None
         # Existing stop first; a newly raised trail only applies to following bars.
         # OHLC does not establish whether the high preceded the low.
-        if l <= stop:
+        if o <= stop:
+            price, reason = o, "TRAIL_STOP" if stop > plan["initial_sl"] else "PREMIUM_STOP"
+        elif o >= target:
+            price, reason = target, "RUPEE_TARGET"
+        elif l <= stop:
             price, reason = min(o, stop), "TRAIL_STOP" if stop > plan["initial_sl"] else "PREMIUM_STOP"
         elif h >= target:
             price, reason = target, "RUPEE_TARGET"
-        elif datetime.fromtimestamp(ts, IST).time().replace(tzinfo=None) >= dtime(15,25):
+        elif datetime.fromtimestamp(ts+300, IST).time().replace(tzinfo=None) >= SESSION_END_TIME:
             price, reason = c, "EOD_SQUAREOFF"
         else:
             peak = max(peak, h)
@@ -1095,7 +1178,7 @@ def simulate_fixed_premium_trade(entry_ts, bars, qty, cfg):
     return None
 
 
-def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
+def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current_implementation=False):
     env = load_dotenv_file(".env")
     client = DhanStockOptionsClient(env.get("DHAN_CLIENT_ID", ""), env.get("DHAN_ACCESS_TOKEN", ""), logger)
     universe = DynamicStockOptionsUniverse.load_universe(logger, cfg.min_days_to_expiry)
@@ -1108,7 +1191,7 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
     frames, snapshots, signals = {}, {}, {}
     for stock in stocks:
         sec = stock["eq_security_id"]
-        candles = client.fetch_intraday_candles(sec, interval="5", from_date=start.strftime("%Y-%m-%d"),
+        candles = client.fetch_intraday_candles(sec, interval="5", from_date=(start-timedelta(days=5) if current_implementation else start).strftime("%Y-%m-%d"),
                                                 to_date=end.strftime("%Y-%m-%d"), use_cache=True)
         # Evaluate available setups; retain coverage issues in the final report.
         if not candles or not candles.get("timestamp"):
@@ -1117,18 +1200,26 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
         last_day, prev_close, last_close = None, None, None
         for i, ts in enumerate(candles["timestamp"]):
             ts = int(ts)
-            if ts < start.timestamp() or ts+300 > end.timestamp():
+            if ts < start.timestamp():
+                if current_implementation:
+                    last_day=datetime.fromtimestamp(ts+300,IST).date()
+                    last_close=float(candles['close'][i])
                 continue
+            if ts+300 > end.timestamp():continue
             dt = datetime.fromtimestamp(ts+300, IST)
             day = dt.date()
             if day != last_day:
                 prev_close, last_day = last_close, day
             last_close = float(candles["close"][i])
-            if prev_close is None or not dtime(9, 30) <= dt.time().replace(tzinfo=None) <= dtime(14, 30):
+            if prev_close is None or not SESSION_START_TIME <= dt.time().replace(tzinfo=None) < SESSION_END_TIME:
                 continue
             snapshots.setdefault(ts+300, {})[sec] = {"last_price": last_close, "ohlc": {"close": prev_close}}
-            # Slice to already-closed bars; identical setup evaluator to live scanning.
-            prefix = {k: v[:i+1] for k, v in candles.items() if isinstance(v, list)}
+            # Live scans shortlist by day move before evaluating candle history.
+            if abs((last_close/prev_close-1)*100)<cfg.min_day_change_pct:continue
+            # The current scanner requests five calendar days from midnight.
+            # Do not give its replay an expanding multi-month EMA warmup.
+            lower=bisect_left(candles['timestamp'],(dt-timedelta(days=5)).replace(hour=0,minute=0,second=0,microsecond=0).timestamp()) if current_implementation else 0
+            prefix = {k: v[lower:i+1] for k, v in candles.items() if isinstance(v, list)}
             sig = evaluate_stock_setup(prefix, ts+300, cfg.min_day_change_pct, cfg.ema_period,
                                         enable_opening_trend=cfg.enable_opening_trend,confirm_window_sec=cfg.confirm_window_sec)
             if sig:
@@ -1136,7 +1227,8 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
     ledger = {"mode": "BACKTEST", "initial_capital": cfg.initial_capital, "trades": [],
               "entry_configuration":{"opening_trend":cfg.enable_opening_trend,"extend_rupee_target":cfg.extend_rupee_target,
                   "rupee_target":cfg.rupee_target,"rupee_max_risk":cfg.rupee_max_risk,"max_lots":cfg.max_lots,
-                  "min_net_rr":cfg.min_rr_target,"max_spread_pct":cfg.max_spread_pct,"confirm_window_sec":cfg.confirm_window_sec},
+                  "min_net_rr":cfg.min_rr_target,"max_spread_pct":cfg.max_spread_pct,"confirm_window_sec":cfg.confirm_window_sec,
+                  "signal_lookback_calendar_days":5 if current_implementation else None},
               "limitations": ["Current universe and lot sizes; historical membership not reconstructed",
                               "Five-minute OHLC lacks bid/ask and intrabar path; modeled slippage, not verified fills",
                               "Missing bars or rolling ATM strike changes are unvalidated, never synthetic",
@@ -1161,9 +1253,14 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
                 if not cfg.reentry_after_loss:continue
                 history=[t for t in ledger['trades'] if t.get('symbol')==stock['symbol']]
                 if not history or stock_reentry_reason(stock['symbol'],history,ts,sig['signal_timestamp']):continue
-            key = (sec, sig["opt_type"])
+            # Fetch the execution date's five-day block, rather than every
+            # option date in the study for each shortlisted symbol. Missing
+            # unrelated dates must not exhaust retries before this entry.
+            window_start = start + timedelta(days=((datetime.fromtimestamp(ts, IST)-start).days//5)*5)
+            window_end = min(window_start+timedelta(days=5), end)
+            key = (sec, sig["opt_type"], window_start.date().isoformat())
             if key not in option_maps:
-                raw = client.fetch_rolling_stock_option(sec, sig["opt_type"], start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
+                raw = client.fetch_rolling_stock_option(sec, sig["opt_type"], window_start.strftime("%Y-%m-%d"), window_end.strftime("%Y-%m-%d"))
                 option_maps[key] = {int(t): {k: float(raw[k][i] or 0) for k in ("open", "high", "low", "close", "strike")}
                                     for i, t in enumerate(raw["timestamp"])} if raw and all(k in raw for k in ("timestamp", "open", "high", "low", "close", "strike")) else {}
             bars = option_maps[key]
@@ -1215,20 +1312,23 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
                 "timestamp": datetime.fromtimestamp(ts, IST).strftime("%Y-%m-%d %H:%M:%S"),
                 "gross_pnl": gross, "charges": fees, "net_pnl": round(gross-fees, 2),
                 "scanner":best['scanner'],"learning_risk_rs":best.get('expected_net_risk',sim['opt_1r']*qty+fees),
-                "data_source": "REAL_OPTION_OHLC_MODELED_FILLS"})
+                "data_source": "ROLLING_ATM_5M_UNVERIFIED_CONTRACT_IDENTITY"})
     update_ledger_metrics(ledger)
     ledger["unvalidated_candidates_or_outcomes"] = skipped
     ledger["stock_coverage"] = len(frames)
     events = client.history_events
     complete = not events and not skipped and len(frames) == len(stocks)
-    ledger.update(status="COMPLETED_EXIT_REPLAY" if complete else "INCOMPLETE_DATA",
+    identity_unverified = bool(ledger["trades"])
+    ledger["limitations"].append("Five-minute rolling bars may disagree with one-minute prices for the labeled strike; scored contract prices require cross-interval verification")
+    ledger.update(status="COMPLETED_EXIT_REPLAY" if complete and not identity_unverified else "INCOMPLETE_DATA",
                   data_coverage_complete=complete, full_strategy_validated=False,
+                  price_identity_validated=False,
                   data_rejection_counts=dict(data_skips), strategy_rejection_counts=dict(strategy_rejections),
                   historical_data_issues=events, historical_data_coverage=client.history_coverage, stock_universe_requested=len(stocks),
                   period={"from_inclusive":start.isoformat(),"to_exclusive":end.isoformat()})
     atomic_write_json("stock_fno_backtest_ledger.json", ledger)
-    if not complete:
-        logger.error("BACKTEST INCOMPLETE: %d history issues, %d unvalidated signals/outcomes. Recorded P&L is not a validated strategy result.",len(events),skipped)
+    if not complete or identity_unverified:
+        logger.error("BACKTEST INCOMPLETE: %d history issues, %d unvalidated signals/outcomes; fixed-contract price identity verified: %s. Recorded P&L is provisional.",len(events),skipped,not identity_unverified)
     logger.info("Selective backtest: %d trades, %d unvalidated candidates/outcomes | net Rs.%+.2f | avg net win/loss ratio %s",
                 ledger["total_trades"], skipped, ledger["net_profit_after_charges"], ledger["net_win_to_loss_ratio"])
     logger.info("Saved separate stock_fno_backtest_ledger.json. Replay does not validate historical Greeks, strike selection or intrabar execution.")
@@ -1250,7 +1350,7 @@ if __name__ == "__main__":
     if args.reset_ledger and os.path.exists(LEDGER_FILE):
         os.remove(LEDGER_FILE)
     if args.backtest_days > 0:
-        result = run_stock_options_historical_backtest(args.backtest_days, args.max_stocks, strat_cfg, log)
+        result = run_stock_options_historical_backtest(args.backtest_days, args.max_stocks, strat_cfg, log, current_implementation=True)
         if result["status"] == "INCOMPLETE_DATA":
             raise SystemExit(2)
     else:

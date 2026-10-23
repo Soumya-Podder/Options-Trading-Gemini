@@ -79,3 +79,57 @@ An isolation error was found during review: the shared trade recorder wrote rese
 Limitations include one-minute intrabar uncertainty, simplified modeled charges/slippage, incomplete historical full-chain OI, raw OI units, expiry-series assumptions within each session, and no exchange timestamp on live option-chain OI. These backtests do not establish live fills or consistent future returns.
 
 Official API reference: https://dhanhq.co/docs/v2/expired-options-data/.
+
+## Current implementation audit — 23 October 2026
+
+The current-policy replay uses the shared daily net-liquidation helper inside an
+open trade, current dynamic lot selection, the existing daily trade/loss limits,
+net-outcome learning and timestamp-based cooldowns. It does not apply the older
+fixed-lot research cap. The 25-minute time stop uses the peak known before the
+first eligible bar opens. Threshold crossings use adverse tick-rounded fills;
+an ambiguous stop/target candle takes the existing stop first. Partial targets
+and daily liquidation count partial P&L and charges once.
+
+Signals use one-minute observations with already-closed five-minute structure,
+not a second duplicate analyzer update. A fresh chronological state starts on
+17 July; 30/60-calendar-day evaluations end on 22 October. The declared 0.1% and
+0.3% slippage runs are sensitivity cases, not a parameter optimization. Market
+inputs are still an ATM +/-3 rolling subset without complete historical chain,
+previous-day OI, bid/ask depth or verified expiry identity. Accordingly the output
+is classified as partial-chain research even when held-strike execution bars
+have no missing observations. See the existing entry-continuation report for
+current results and underlying source hashes.
+
+
+## Trading window and historical coverage
+
+The requested trading window is 09:15-14:45 IST. Nifty stops new entries before
+14:45 and requests square-off at 14:45. The stock engine monitors from 09:15,
+accepts entries only before 14:45 after closed-candle confirmation, and exits
+paper positions at 14:45 using fresh executable quotes. The supervisor allows
+one minute for shutdown after the cutoff. Live stock super-order submissions
+still hand exit ownership to the broker; their existing early-return behavior
+does not provide an independently verified timed broker liquidation.
+
+Replay execution and coverage checks require only bars through 14:45: the last
+five-minute candle starts at 14:40, and the last one-minute candle at 14:44.
+Missing 15:15-15:25 bars are not active-session exit gaps. Prior-session close
+and indicator warmup may still require earlier historical context; a missing
+actual exchange close remains a separate input limitation. Monitoring from
+09:15 does not manufacture an entry before the required candles have closed.
+
+Stock option replay retrieves only the five-day block containing a candidate's
+execution date, instead of downloading every option date in the study for each
+new symbol and side. Raw historical gaps remain unfilled and unvalidated.
+
+
+## Entry/exit audit correction
+
+The 23 October review found 11 stock rolling entry-price disagreements and 14
+first-candle OHLC disagreements against exact-strike minute series across 73
+previously scored entries. Older five-minute stock P&L and policy comparisons
+are provisional. The existing report contains a 70-opportunity minute-path
+diagnostic with explicit selection and sample limits, not full strategy
+validation. No experimental trading policy was promoted. Stock close records
+now retain spread/stop geometry, Greeks, quote/signal ages and 15m EMA context.
+Nifty entries retain LTP/bid/ask evidence. All 207 regression checks pass.

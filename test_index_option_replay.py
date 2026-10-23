@@ -17,6 +17,30 @@ class ReplayTests(unittest.TestCase):
             index="NIFTY",lots=kwargs.pop("lots",1),lot_size=65,exit_fills=fills,**kwargs)
         return result,fills
 
+    def test_current_daily_target_uses_shared_net_helper(self):
+        def check(entry,remaining,fills,bid):
+            return bot.daily_target_reached(-400,{'entry_price':entry,'qty':remaining,'lots':2,'exit_fills':fills},bid)
+        result,fills=self.replay([(100,100,100,100),(100,120,99,119)],lots=2,
+            session_profit_check=check,current_session_policy=True)
+        self.assertEqual(result[3],'DAILY_NET_PROFIT_TARGET')
+        self.assertEqual(len(fills),2)
+        gross=sum((f['price']-100)*f['qty'] for f in fills)
+        self.assertGreaterEqual(-400+gross-(40+2*24.5+20),1200)
+        self.assertEqual(fills[0]['price'],110)
+
+    def test_current_daily_target_cannot_override_same_bar_stop(self):
+        check=lambda e,q,f,b:bot.daily_target_reached(0,{'entry_price':e,'qty':q,'lots':1,'exit_fills':f},b)
+        result,_=self.replay([(100,100,100,100),(100,130,90,125)],
+            session_profit_check=check,current_session_policy=True)
+        self.assertEqual(result[3],'INITIAL_SL_HIT')
+
+    def test_current_time_exit_uses_peak_known_before_bar(self):
+        bars=[(100,100.5,99.5,100)]*5+[(101,150,100,140)]
+        result,_=self.replay(bars,entry_at_open=True,current_session_policy=True)
+        self.assertEqual(result[0],5)
+        self.assertEqual(result[1],101)
+        self.assertEqual(result[3],'THETA_TIME_STOP')
+
     def test_gap_through_stop_uses_opening_price(self):
         result,_=self.replay([(100,100,100,100),(80,90,75,85)])
         self.assertEqual(result[1],80)
@@ -61,6 +85,18 @@ class ReplayTests(unittest.TestCase):
     def test_truncated_session_cannot_be_scored(self):
         with self.assertRaisesRegex(bot.ReplayDataError,"History ends before session close"):
             self.replay([(100,101,99,100)],entry_at_open=True,require_session_end=True)
+
+    def test_1445_cutoff_does_not_need_after_cutoff_option_prices(self):
+        start=int(datetime(2026,10,22,14,40).timestamp())
+        result,_=self.replay([(100,101,99,100)],timestamps=[start],
+                             entry_at_open=True,require_session_end=True)
+        self.assertEqual(result[3], 'EOD_SQUAREOFF')
+
+    def test_bar_after_1445_cannot_change_exit_or_invalidate_it(self):
+        start=int(datetime(2026,10,22,14,40).timestamp())
+        result,_=self.replay([(100,101,99,100),(float('nan'),)*4],
+                             timestamps=[start,start+300],entry_at_open=True,require_session_end=True)
+        self.assertEqual((result[1],result[3]), (100,'EOD_SQUAREOFF'))
 
     def test_next_day_open_is_not_an_exit_for_a_missing_session_tail(self):
         start=int(datetime(2026,10,22,10).timestamp())

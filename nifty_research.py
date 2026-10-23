@@ -321,6 +321,8 @@ def run_candidate(config, sessions, legs, underlying, out, previous_analyzer, ex
     ledger={'initial_capital':30000.0,'virtual_balance_gross':30000.0,'virtual_balance_net':30000.0,
             'profit_without_charges':0.0,'net_profit_after_charges':0.0,'trades':[]}
     daily=[];unvalidated=[];entry_rejections=Counter()
+    current=config.get('current_implementation',False)
+    slippage=config.get('slippage_pct',0.1)
     original_stop=bot.INDICES_CONFIG['NIFTY']['sl_points']
     bot.INDICES_CONFIG['NIFTY']['sl_points']=config['stop']
     signal_minutes=config.get('signal_minutes',5)
@@ -342,11 +344,13 @@ def run_candidate(config, sessions, legs, underlying, out, previous_analyzer, ex
                     continue
                 c=[legs['CALL'][k][t] for k in ('ATM','ATM+1','ATM+2')]
                 p=[legs['PUT'][k][t] for k in ('ATM','ATM-1','ATM-2')]
-                analysis=analyzer.evaluate_snapshot('NIFTY',c[0]['spot'],[int(r['strike']) for r in c],
-                    [int(r['strike']) for r in p],int(sum(r['oi'] for r in c)),int(sum(r['oi'] for r in p)),
-                    sum(r['close'] for r in c),sum(r['close'] for r in p),sum(r['iv'] for r in c),
-                    sum(r['iv'] for r in p),c[0]['close'],p[0]['close'],
-                    **({'live_ts':t+60} if signal_minutes==1 else {}))
+                analysis={}
+                if not current or config['entry'] not in ('oi_same_contract','level_oi'):
+                    analysis=analyzer.evaluate_snapshot('NIFTY',c[0]['spot'],[int(r['strike']) for r in c],
+                        [int(r['strike']) for r in p],int(sum(r['oi'] for r in c)),int(sum(r['oi'] for r in p)),
+                        sum(r['close'] for r in c),sum(r['close'] for r in p),sum(r['iv'] for r in c),
+                        sum(r['iv'] for r in p),c[0]['close'],p[0]['close'],
+                        **({'live_ts':t+60} if signal_minutes==1 else {}))
                 if config['entry'] in ('oi_same_contract','level_oi'):
                     oc={}
                     for side,side_key in (('CALL','ce'),('PUT','pe')):
@@ -389,7 +393,7 @@ def run_candidate(config, sessions, legs, underlying, out, previous_analyzer, ex
                 if config.get("daily_profit_target") is not None and day_net>=config["daily_profit_target"]:continue
                 if blocked or i<=skip_until or count>=config.get('max_trades',bot.MAX_TRADES_PER_DAY) or losses>=bot.MAX_CONSECUTIVE_LOSSES_PER_DAY:continue
                 signal_time=datetime.fromtimestamp(t+signal_minutes*60,IST)
-                if signal_time.time()<bot.dtime(9,25) or signal_time.time()>bot.LAST_ENTRY_TIME:continue
+                if signal_time.time()<(bot.SESSION_START_TIME if current else bot.dtime(9,25)) or signal_time.time()>bot.LAST_ENTRY_TIME:continue
                 if config.get('static'):
                     brain.recent_losing_states.clear()
                     for rule in brain.rules.values():rule['status']='CANDIDATE'
@@ -406,10 +410,10 @@ def run_candidate(config, sessions, legs, underlying, out, previous_analyzer, ex
                 if not math.isfinite(fixed['open'][j]):
                     unvalidated.append({'day':day,'time':signal_time.isoformat(),'reason':'Selected contract absent at executable entry','strike':strike})
                     blocked=True;continue
-                entry=math.ceil(fixed['open'][j]*1.001*20-1e-9)/20
+                entry=math.ceil(fixed['open'][j]*(1+slippage/100)*20-1e-9)/20
                 lots=config.get('fixed_lots') or (1 if config.get('static') else brain.compute_lots('NIFTY',sig,entry,ledger['virtual_balance_net'],losses))
                 # Explicit research risk ceiling, never increase lots to hit P&L.
-                lots=min(lots,max(1,int(1000//(config['stop']*65))))
+                if not current:lots=min(lots,max(1,int(1000//(config['stop']*65))))
                 if entry*lots*65>ledger['virtual_balance_net'] or ledger['virtual_balance_net']<=0:continue
                 fills=[]
                 try:
@@ -420,7 +424,10 @@ def run_candidate(config, sessions, legs, underlying, out, previous_analyzer, ex
                         exit_i,exit_price,r,reason=bot.evaluate_real_option_trade_bars(j,side=='CALL',execution_stamps,
                             fixed['open'],fixed['high'],fixed['low'],fixed['close'],fixed['strike'],config['stop'],
                             interval_min=5 if execution_legs is None else 1,index='NIFTY',lots=lots,lot_size=65,exit_fills=fills,
-                            entry_at_open=True,expected_strike=strike,slippage_pct=0.1,require_session_end=True)
+                            entry_at_open=True,expected_strike=strike,slippage_pct=slippage,require_session_end=True,
+                            session_profit_check=(lambda entry,remaining,done,bid:bot.daily_target_reached(day_net,
+                                {'entry_price':entry,'qty':remaining,'lots':lots,'exit_fills':done},bid)) if current else None,
+                            current_session_policy=current)
                 except bot.ReplayDataError as error:
                     unvalidated.append({'day':day,'time':signal_time.isoformat(),'reason':error.reason,'strike':strike})
                     blocked=True;count+=1;continue
@@ -428,25 +435,36 @@ def run_candidate(config, sessions, legs, underlying, out, previous_analyzer, ex
                     datetime.fromtimestamp(execution_stamps[exit_i],IST).strftime('%Y-%m-%d %H:%M:%S'),'NIFTY',int(strike),
                     'CE' if side=='CALL' else 'PE',lots,lots*65,c[0]['spot'],analysis['diff_ce_minus_pe_lakhs'],
                     entry,exit_price,r,reason,sig,analysis['state_vec'],'ACTUAL_STRIKE_STITCHED_RESEARCH',fills,
-                    ledger_path=str(out/'paper_trade_ledger.json'))
+                    ledger_path=str(out/'paper_trade_ledger.json'),market_structure=analysis.get('market_structure'))
                 day_gross+=gross;day_net+=ledger['trades'][-1]['net_pnl']
                 net_loss=ledger['trades'][-1]['net_pnl']<=0
                 count+=1;losses=losses+1 if net_loss else 0
                 # Next signal closes at bar i+1, so avoid signals formed before exit.
-                exit_signal_i=exit_i if execution_legs is None else exit_i//signal_minutes
-                skip_until=exit_signal_i+max(1,(bot.POST_SL_COOLDOWN_MINUTES if net_loss else bot.POST_WIN_COOLDOWN_MINUTES)//signal_minutes)
+                if current:
+                    # Exit-minute close is the earliest known completion time.
+                    ready=execution_stamps[exit_i]+60+(bot.POST_SL_COOLDOWN_MINUTES if net_loss else bot.POST_WIN_COOLDOWN_MINUTES)*60
+                    skip_until=max(-1,math.ceil((ready-stamps[0])/(signal_minutes*60))-2)
+                else:
+                    exit_signal_i=exit_i if execution_legs is None else exit_i//signal_minutes
+                    skip_until=exit_signal_i+max(1,(bot.POST_SL_COOLDOWN_MINUTES if net_loss else bot.POST_WIN_COOLDOWN_MINUTES)//signal_minutes)
             daily.append({'day':day,'gross':round(day_gross,2),'net':round(day_net,2),'trades':count,
                           'unvalidated':blocked,'eligible_entries':eligible,
                           'rule_status_counts':dict(Counter(r.get('status') for r in brain.rules.values()))})
     finally:bot.INDICES_CONFIG['NIFTY']['sl_points']=original_stop
     result={'config':config,'daily':daily,'unvalidated':unvalidated,'ledger':ledger,
             'execution_interval_minutes':5 if execution_legs is None else 1,
+            'full_strategy_validated':False,
+            'session_rules_match_current':current,
+            'current_policy_notes':(['Dynamic learning-based lots; no additional research risk cap',
+                'Shared daily net liquidation helper; conservative stop-first OHLC ambiguity',
+                '25-minute time exit at first eligible bar open using prior peak',
+                'Close-time cooldown; actual intrabar exit time is unknown'] if current else []),
             'entry_rejection_observations':dict(entry_rejections),
-            'limitations':[f'{5 if execution_legs is None else 1}-minute execution OHLC; adverse 0.1% slippage and stop-first ambiguity handling',
+            'limitations':[f'{5 if execution_legs is None else 1}-minute execution OHLC; adverse {slippage}% slippage and stop-first ambiguity handling',
                            'Same day, exact strike, WEEK expiryCode 1; prices never synthesized',
                            'Only ATM +/-3 coverage; missing held-strike bars invalidate outcomes',
-                           'Three rolling strikes per side approximate OI walls, not full historical chain',
-                           'Research maximum estimated initial gross stop risk Rs.1,000; gaps can exceed this',
+                           'Partial ATM +/-3 chain and missing previous-day OI cannot reproduce the full historical chain',
+                           ('Current dynamic sizing, no additional research risk ceiling' if current else 'Research maximum estimated initial gross stop risk Rs.1,000; gaps can exceed this'),
                            'Independent fresh learning per candidate; online learning continues chronologically']}
     write(out/'result.json',result)
     return result

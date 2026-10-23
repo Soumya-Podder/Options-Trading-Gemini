@@ -74,6 +74,8 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(s["hard_target_price"], 110)
         self.assertEqual(s["initial_sl"], 99)
         self.assertGreaterEqual(s["expected_net_rr"], 1.2)
+        self.assertAlmostEqual(s["spread_fraction_of_initial_risk"], 0.05)
+        self.assertAlmostEqual(s["bid_room_to_initial_stop"], 0.95)
 
     def test_wide_spread_stale_depth_or_insufficient_size_rejected(self):
         for edit in (lambda q: q["depth"]["buy"][0].update(price=97),
@@ -159,6 +161,13 @@ class IntegrationTests(unittest.TestCase):
         sim = bot.simulate_fixed_premium_trade(ts, bars, 500, self.cfg)
         self.assertLess(sim["exit_price"], 98)
 
+    def test_gap_above_target_precedes_later_same_bar_stop(self):
+        ts,bars=self.bars()
+        bars[ts+300].update(open=112,high=115,low=98,close=100)
+        result=bot.simulate_fixed_premium_trade(ts,bars,500,self.cfg)
+        self.assertEqual(result['exit_reason'], 'RUPEE_TARGET')
+        self.assertGreater(result['exit_price'],result['entry_price'])
+
     def test_missing_or_different_strike_is_unvalidated(self):
         ts, bars = self.bars()
         del bars[ts+300]
@@ -206,6 +215,7 @@ class IntegrationTests(unittest.TestCase):
         gate.count_entries.return_value=2
         calls=[]
         def evaluate(position,*args):
+            self.assertGreaterEqual(args[1].timestamp(), args[0]['received_epoch'])
             calls.append(1)
             if len(calls)==2:
                 position["peak_bid"]=101
@@ -213,7 +223,11 @@ class IntegrationTests(unittest.TestCase):
                 return 101,"TIME_EXIT"
             return None
         client=MagicMock()
-        client.fetch_option_quotes.return_value={"11":{}}
+        def fresh_depth(*args):
+            received=clock.now.return_value.replace(second=clock.now.return_value.second+1)
+            clock.now.return_value=received
+            return {"11":{"received_epoch":received.timestamp()}}
+        client.fetch_option_quotes.side_effect=fresh_depth
         with patch.object(bot,"datetime") as clock, \
              patch.object(bot,"load_dotenv_file",return_value={"DHAN_CLIENT_ID":"test","DHAN_ACCESS_TOKEN":"test"}), \
              patch.object(bot,"DhanStockOptionsClient",return_value=client), \
@@ -313,6 +327,24 @@ class IntegrationTests(unittest.TestCase):
         pos["entry_epoch"] -= self.cfg.no_progress_bars*300
         self.assertEqual(bot.paper_exit(pos,quote(100),self.now,self.cfg)[1],"NO_PROGRESS")
 
+    def test_paper_position_exits_at_1445_with_fresh_depth(self):
+        cutoff=self.now.replace(hour=14,minute=45)
+        plan=self.cfg.plan(100,500)
+        pos={**plan,'entry_price':100,'entry_epoch':cutoff.timestamp()-60,
+             'current_sl':plan['initial_sl']}
+        quote=copy.deepcopy(self.quote)
+        quote['received_epoch']=cutoff.timestamp()
+        decision=bot.paper_exit(pos,quote,cutoff,self.cfg)
+        self.assertEqual(decision[1], 'EOD_SQUAREOFF')
+
+    def test_stock_replay_closes_at_1445_without_later_bars(self):
+        stamp=self.now.replace(hour=14,minute=40,second=0,microsecond=0).timestamp()
+        bars={stamp:{'open':100,'high':100.1,'low':99.9,'close':100,'strike':100}}
+        result=bot.simulate_fixed_premium_trade(stamp,bars,500,self.cfg)
+        self.assertEqual(result['exit_reason'], 'EOD_SQUAREOFF')
+        self.assertTrue(result['exit_timestamp'].endswith('14:45:00'))
+        self.assertIsNone(bot.simulate_fixed_premium_trade(stamp+300,bars,500,self.cfg))
+
     def test_real_delta_selects_strike_instead_of_distance(self):
         stock = {"symbol":"TEST","strike_step":10,"fno_lot_size":500,"nearest_expiry":"2026-11-26",
             "strikes_map":{"100.00":{"CE":{"security_id":"1","trading_symbol":"ATM"}},
@@ -333,7 +365,28 @@ class IntegrationTests(unittest.TestCase):
     def test_paper_entry_uses_next_valid_candidate_and_persists_position(self):
         self.run_ranked_session(True,live=False)
 
-    def run_ranked_session(self, reject_top, live=True):
+    def test_long_screen_refreshes_universe_between_candidates(self):
+        self.run_ranked_session(False, slow_screen=True)
+
+    def test_market_poll_interval_is_bounded_to_three_to_five_seconds(self):
+        self.assertEqual(bot.DynamicStrategyConfig({}, argparse.Namespace()).poll_interval_sec, 4)
+        for seconds in (3, 5):
+            self.assertEqual(bot.DynamicStrategyConfig({"STOCK_OPT_POLL_INTERVAL_SEC":str(seconds)}, argparse.Namespace()).poll_interval_sec, seconds)
+        for seconds in (0, 2.9, 5.1, float("nan")):
+            with self.assertRaises(ValueError):
+                bot.DynamicStrategyConfig({"STOCK_OPT_POLL_INTERVAL_SEC":str(seconds)}, argparse.Namespace())
+
+    def test_market_request_hook_keeps_quote_rate_limit(self):
+        from unittest.mock import MagicMock
+        client = bot.DhanStockOptionsClient("test", "test", logging.getLogger("test"))
+        client.before_market_request = MagicMock()
+        client.last_quote_ts = 10
+        with patch.object(bot.time,"monotonic",return_value=10.5), patch.object(bot.time,"sleep") as sleep:
+            client._pace_quote()
+        client.before_market_request.assert_called_once_with()
+        self.assertAlmostEqual(sleep.call_args.args[0], 0.55)
+
+    def run_ranked_session(self, reject_top, live=True, slow_screen=False):
         from unittest.mock import MagicMock
         cfg = self.cfg
         cfg.initial_capital = 200000
@@ -348,7 +401,10 @@ class IntegrationTests(unittest.TestCase):
         client.place_option_super_order.return_value = "order-id"
         universe = {str(i):{"symbol":name} for i,name in enumerate(("AAA","BBB","CCC"),1)}
         attempts = {}
+        elapsed = [100.0]
         def verify(client,stock,*args,**kwargs):
+            if slow_screen:
+                elapsed[0] += 5
             name=stock["symbol"]
             attempts[name]=attempts.get(name,0)+1
             if reject_top and name in ("AAA","BBB") and attempts[name]>1:
@@ -364,11 +420,15 @@ class IntegrationTests(unittest.TestCase):
                  patch.object(bot,"shortlist_movers",return_value=[(3,str(i),100) for i in range(1,4)]), \
                  patch.object(bot,"verify_live_scanx_and_resolve_stock_option",side_effect=verify), \
                  patch.object(bot,"qualify_quote",side_effect=lambda sig,*args,**kwargs: sig), \
+                 patch.object(bot.time,"monotonic",side_effect=lambda: elapsed[0]), \
                  patch.object(bot.time,"sleep",side_effect=lambda *_: setattr(clock.now,"return_value",self.now.replace(day=23))), \
                  patch.object(bot,"TelegramNotifier",None):
                 clock.now.return_value = self.now
                 bot.run_dynamic_stock_options_session(live,False,cfg,logging.getLogger("test"))
             expected=1 if reject_top else 2
+            if slow_screen:
+                universe_refreshes = [call for call in client.fetch_batch_ohlc.call_args_list if call.args[0] == list(universe)]
+                self.assertGreaterEqual(len(universe_refreshes), 3)
             self.assertEqual(client.place_option_super_order.call_count,expected if live else 0)
             if reject_top and live:
                 self.assertEqual(client.place_option_super_order.call_args.args[0],"CCC")
@@ -391,10 +451,13 @@ class IntegrationTests(unittest.TestCase):
         ledger = {"initial_capital":60000, "trades":[]}
         pos = {"symbol":"TEST", "contract":"TEST_CE", "opt_type":"CE", "scanner":"TEST", "qty":500,
                "entry_price":100, "opt_1r":0.5, "entry_ts":"2026-10-22 11:00:00", "entry_id":"unique"}
+        pos.update(spread_fraction_of_initial_risk=0.4, bid_room_to_initial_stop=0.3, delta=0.6)
         with tempfile.TemporaryDirectory() as folder, patch.object(bot, "LEDGER_FILE", str(Path(folder)/"ledger.json")):
             bot.close_paper_position(ledger, pos, 103, "PREMIUM_TARGET", self.now)
             bot.close_paper_position(ledger, pos, 103, "PREMIUM_TARGET", self.now)
             self.assertEqual(len(ledger["trades"]), 1)
+            self.assertEqual(ledger['trades'][0]['entry_diagnostics']['spread_fraction_of_initial_risk'],0.4)
+            self.assertEqual(ledger['trades'][0]['entry_diagnostics']['delta'],0.6)
 
 
 if __name__ == "__main__":

@@ -110,3 +110,67 @@ Official references:
 - https://dhanhq.co/docs/v2/expired-options-data/
 - https://dhanhq.co/docs/v2/market-quote/
 - https://dhanhq.co/docs/v2/option-chain/
+
+## Current-implementation replay audit
+
+Live stock quotes refresh on a four-second schedule, configurable through
+`STOCK_OPT_POLL_INTERVAL_SEC` within 3-5 seconds. The previous 30-second idle
+sleep is removed. During a long shortlist scan, the same thread refreshes the
+universe quote batch and checks open paper positions between candidates and
+before chart, chain and quote requests. Entry cash and daily capacity are
+rechecked after these position checks. This avoids concurrent ledger writes or
+orders. Full chain/Greek qualification remains selective; all stock chains are
+not fetched every four seconds. Five-minute confirmation still uses closed bars.
+
+Nifty already polls its option chain with a 3.6-second minimum gap. Stock quote
+requests retain a 1.05-second minimum gap and stock chains a 3.05-second gap.
+These are nominal schedules: synchronous HTTP latency, endpoint pacing and
+429/error backoff can extend refresh times. Market polling stops under existing
+session cutoffs and entry limits when no position requires management.
+
+The stock backtest CLI now requests five extra calendar days for signal warmup,
+then uses the same rolling five-calendar-day history window as the live scanner.
+An expanding multi-month EMA history is not substituted. All stocks in the current
+universe can be requested with `--max-stocks 0`; current membership and lot sizes
+still do not reconstruct historical membership. Below-threshold scanner moves
+are discarded before the expensive candle evaluator, as in live scanning.
+
+The isolated 23 October study checks every expected five-minute bar against
+observed Nifty session dates and retains missing-bar details. Historical depth,
+Greeks, chain IV range and delta-selected strikes remain unavailable, so an
+exit-policy result stays explicitly short of full strategy validation. All
+production paper ledgers and learning state are hash-checked for isolation.
+
+
+## Trading window and historical coverage
+
+The requested trading window is 09:15-14:45 IST. Nifty stops new entries before
+14:45 and requests square-off at 14:45. The stock engine monitors from 09:15,
+accepts entries only before 14:45 after closed-candle confirmation, and exits
+paper positions at 14:45 using fresh executable quotes. The supervisor allows
+one minute for shutdown after the cutoff. Live stock super-order submissions
+still hand exit ownership to the broker; their existing early-return behavior
+does not provide an independently verified timed broker liquidation.
+
+Replay execution and coverage checks require only bars through 14:45: the last
+five-minute candle starts at 14:40, and the last one-minute candle at 14:44.
+Missing 15:15-15:25 bars are not active-session exit gaps. Prior-session close
+and indicator warmup may still require earlier historical context; a missing
+actual exchange close remains a separate input limitation. Monitoring from
+09:15 does not manufacture an entry before the required candles have closed.
+
+Stock option replay retrieves only the five-day block containing a candidate's
+execution date, instead of downloading every option date in the study for each
+new symbol and side. Raw historical gaps remain unfilled and unvalidated.
+
+
+## Entry/exit audit correction
+
+The 23 October review found 11 stock rolling entry-price disagreements and 14
+first-candle OHLC disagreements against exact-strike minute series across 73
+previously scored entries. Older five-minute stock P&L and policy comparisons
+are provisional. The existing report contains a 70-opportunity minute-path
+diagnostic with explicit selection and sample limits, not full strategy
+validation. No experimental trading policy was promoted. Stock close records
+now retain spread/stop geometry, Greeks, quote/signal ages and 15m EMA context.
+Nifty entries retain LTP/bid/ask evidence. All 207 regression checks pass.

@@ -4,12 +4,12 @@ DhanHQ v4.9.1 Final Production Real-Data Backtest & Live Paper/Order Engine
 ===========================================================================
 Upgrades in v4.9.1 (Based on Oct 19 Live Session Audit):
 1. Restored `MarketMicrostructureAnalyzer.evaluate_chain` method for live Option Chain parsing.
-2. Extended Intraday Window to 03:30 PM IST:
-   - `LAST_ENTRY_TIME = dtime(15, 25)` and `EOD_SQUAREOFF_TIME = dtime(15, 30)`.
+2. User trading window 09:15-14:45 IST:
+   - `LAST_ENTRY_TIME = dtime(14, 44)` and `EOD_SQUAREOFF_TIME = dtime(14, 45)`.
 3. Zero HTTP 429 Rate-Limit Flooding:
    - Stamps `self.last_oc_ts = time.time()` AFTER each HTTP response (minimum 3.6s gap).
    - Automatically backs off 15s and widens polling interval if Dhan returns HTTP 429 (805).
-   - Immediately stops Dhan API polling once daily trade limit (4), consecutive loss breaker (2),
+   - Immediately stops Dhan API polling once daily entry limit (8), consecutive loss breaker (2),
      or `LAST_ENTRY_TIME` is reached with no open trade.
 4. 6-Minute Post-Win Cooldown (`POST_WIN_COOLDOWN_MINUTES = 6`):
    - Prevents 9-second same-candle whipsaw re-entries right after a trailing profit exit.
@@ -77,12 +77,42 @@ PRUNE_COOLDOWN_DAYS = 5
 MAX_PRUNE_CYCLES = 3
 DAILY_PROFIT_TARGET_RS = 1200.0
 MIN_OI_WALL_ROOM_POINTS = 25.0
-MAX_TRADES_PER_DAY = 6
+MAX_TRADES_PER_DAY = 8
 MAX_CONSECUTIVE_LOSSES_PER_DAY = 2
 POST_SL_COOLDOWN_MINUTES = 15
 POST_WIN_COOLDOWN_MINUTES = 6
-LAST_ENTRY_TIME = dtime(15, 25)      # Takes new trades up until 03:25 PM IST
-EOD_SQUAREOFF_TIME = dtime(15, 30)   # Squares off any open trade at 03:30 PM IST
+SESSION_START_TIME = dtime(9, 15)
+LAST_ENTRY_TIME = dtime(14, 44)     # No new position at the 14:45 hard exit.
+EOD_SQUAREOFF_TIME = dtime(14, 45)
+
+
+def index_entries_today(ledger, day):
+    """Count consumed entries, including an open or interrupted submission."""
+    closed=sum(str(t.get("timestamp", "")).startswith(day) for t in ledger.get("trades", []))
+    active=ledger.get("active_position") or {}
+    pending=ledger.get("pending_entry") or {}
+    outstanding=(str(active.get("entry_ts", "")).startswith(day) or pending.get("day")==day)
+    saved=int(ledger.get("daily_entry_counts", {}).get(day, 0))
+    if saved<0:
+        raise ValueError("Invalid saved index daily entry count")
+    return max(saved, closed+int(outstanding))
+
+
+def reserve_index_entry(ledger, day, details, ledger_path="paper_trade_ledger.json"):
+    """Persist a consumed slot before an order; ambiguous slots stay consumed."""
+    count=index_entries_today(ledger, day)
+    if count>=MAX_TRADES_PER_DAY or ledger.get("pending_entry") or ledger.get("active_position"):
+        return False
+    token=f"{day}:{count+1}"
+    ledger.setdefault("daily_entry_counts", {})[day]=count+1
+    ledger["pending_entry"]={"day":day,"token":token,"details":details}
+    atomic_write_json(ledger_path, ledger)
+    # The JSON writer can exhaust Windows replace retries. Never submit an
+    # order unless the reservation can actually be read from disk.
+    saved=SelfLearningBrain._load_json(ledger_path, {})
+    if saved.get("pending_entry", {}).get("token")!=token or index_entries_today(saved, day)<count+1:
+        raise OSError("Index entry reservation was not persisted; order not submitted")
+    return True
 
 
 def setup_logger() -> logging.Logger:
@@ -945,12 +975,13 @@ def evaluate_real_option_trade_bars(
     entry_idx, is_ce, timestamps, opens, highs, lows, closes, strikes,
     sl_points, interval_min=5, index="", lots=1, lot_size=1, exit_fills=None,
     entry_at_open=False, expected_strike=None, slippage_pct=0.0,
-    require_session_end=False,
+    require_session_end=False, session_profit_check=None, current_session_policy=False,
 ):
     return replay_option_trade(entry_idx,is_ce,timestamps,opens,highs,lows,closes,
         strikes,sl_points,interval_min,index,lots,lot_size,exit_fills,
         nifty_target_quantities(index,lots,lot_size),update_ratchet_sl,
-        EOD_SQUAREOFF_TIME,entry_at_open,expected_strike,slippage_pct,require_session_end)
+        EOD_SQUAREOFF_TIME,entry_at_open,expected_strike,slippage_pct,require_session_end,
+        session_profit_check,current_session_policy)
 
 
 def record_closed_trade(
@@ -1012,7 +1043,7 @@ def record_closed_trade(
     if exit_fills:
         trade_record["exit_fills"] = exit_fills
         trade_record["exit_price"] = round(exit_price,4)
-        ledger.pop("active_position",None)
+    ledger.pop("active_position",None)
     if market_structure is not None:
         trade_record["market_structure"]=market_structure
     ledger["trades"].append(trade_record)
@@ -1184,6 +1215,7 @@ def run_real_historical_backtest(
                     pe_iv=pe_iv_sum,
                     atm_ce_ltp=atm_ce_close,
                     atm_pe_ltp=atm_pe_close,
+                    live_ts=ts_val+interval_min*60,
                 )
                 if idx_name=="NIFTY":
                     historical_chain={}
@@ -1192,13 +1224,13 @@ def run_real_historical_backtest(
                             if "strike" in data and i<len(data["strike"]):
                                 strike=str(float(data["strike"][i]))
                                 historical_chain.setdefault(strike,{})[side]={"oi":data["oi"][i],"last_price":data["close"][i]}
-                    _,analysis["oi_analysis"]=replay_oi.assess(historical_chain,spot,ts_val+300,idx_name)
-                    structure=apply_nifty_level_entry(analysis,structure_candles,historical_chain,ts_val+300,
+                    _,analysis["oi_analysis"]=replay_oi.assess(historical_chain,spot,ts_val+interval_min*60,idx_name)
+                    structure=apply_nifty_level_entry(analysis,structure_candles,historical_chain,ts_val+interval_min*60,
                         enable_opening_trend=env.get('NIFTY_OPENING_TREND','false').strip().lower()=='true',
                         enable_price_levels=env.get('NIFTY_PRICE_LEVEL_CONFIRMATION','false').strip().lower()=='true')
                     structure["oi_source"]="ROLLING_STRIKES_SUBSET_NOT_FULL_CHAIN"
                     analysis["market_structure"]=structure
-                    if dtime(9,40)<=datetime.fromtimestamp(ts_val+300).time()<=LAST_ENTRY_TIME:
+                    if dtime(9,40)<=datetime.fromtimestamp(ts_val+interval_min*60).time()<=LAST_ENTRY_TIME:
                         structure_counts["checked"]+=1
                         structure_counts["unavailable" if not structure["ready"] else "allowed" if structure["allowed"] else "rejected"]+=1
                 last_view_by_index[idx_name] = analysis
@@ -1206,7 +1238,7 @@ def run_real_historical_backtest(
                 if i <= skip_until_idx:
                     continue
 
-                dt = datetime.fromtimestamp(ts_val)
+                dt = datetime.fromtimestamp(ts_val+interval_min*60)
                 day_str = dt.strftime("%Y-%m-%d")
                 day_key = (idx_name, day_str)
                 if day_key not in daily_stats:
@@ -1214,7 +1246,7 @@ def run_real_historical_backtest(
                     brain.unmute_new_day(day_str)
 
                 d_stat = daily_stats[day_key]
-                if dt.time() < dtime(9, 20) or dt.time() > LAST_ENTRY_TIME:
+                if dt.time() < SESSION_START_TIME or dt.time() > LAST_ENTRY_TIME:
                     continue
                 if d_stat.get("unvalidated_position") or d_stat["trades"] >= MAX_TRADES_PER_DAY or d_stat["consec_losses"] >= MAX_CONSECUTIVE_LOSSES_PER_DAY:
                     continue
@@ -1261,6 +1293,9 @@ def run_real_historical_backtest(
                     interval_min=interval_min,
                     index=idx_name, lots=lots, lot_size=cfg["lot_size"], exit_fills=exit_fills,
                     entry_at_open=True,expected_strike=strike_val,slippage_pct=0.1,require_session_end=True,
+                    session_profit_check=lambda entry,remaining,done,bid:daily_target_reached(d_stat['net_pnl'],
+                        {'entry_price':entry,'qty':remaining,'lots':lots,'exit_fills':done},bid),
+                    current_session_policy=True,
                     )
                 except ReplayDataError as error:
                     # Do not score an invented exit or assume an unresolved position
@@ -1408,6 +1443,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
     # Restore today's trade count and consecutive losses if script is restarted mid-day
     today_trades_list = [t for t in ledger.get("trades", []) if str(t.get("timestamp", "")).startswith(today_str)]
     day_trades = len(today_trades_list)
+    day_entries = index_entries_today(ledger, today_str)
     day_net_pnl = round(sum(float(t.get("net_pnl",0.0)) for t in today_trades_list), 2)
     consec_losses = 0
     for t in reversed(today_trades_list):
@@ -1419,8 +1455,8 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
     expiries = {name:dhan.fetch_nearest_expiry(INDICES_CONFIG[name]["security_id"], "IDX_I") or today_str
                 for name in selected_indices}
     logger.info(
-        f"Started 09:10-15:30 IST Live Session | Mode: {'LIVE' if live_mode else 'PAPER'} "
-        f"| Expiries: {expiries} | Today Trades So Far: {day_trades}/{MAX_TRADES_PER_DAY}"
+        f"Started 09:15-14:45 IST Live Session | Mode: {'LIVE' if live_mode else 'PAPER'} "
+        f"| Expiries: {expiries} | Entries Today: {day_entries}/{MAX_TRADES_PER_DAY} | Closed: {day_trades}"
     )
 
     telemetry_state: Dict[str, Any] = {
@@ -1431,6 +1467,10 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
     }
 
     telegram = TelegramNotifier(env, logger, "LIVE" if live_mode else "PAPER")
+    if ledger.get("pending_entry"):
+        logger.error("Unresolved index entry reservation; reconcile it before new entries. Daily slot remains consumed.")
+        telegram.close()
+        return
     active_pos: Optional[Dict[str, Any]] = None
     saved_partial = ledger.get("active_position")
     if saved_partial:
@@ -1444,7 +1484,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
             return
         active_pos = saved_partial.copy()
         active_pos["entry_dt"] = datetime.strptime(active_pos["entry_ts"], "%Y-%m-%d %H:%M:%S")
-        logger.info("Resuming Nifty paper remainder after target 1: Qty %d", active_pos["qty"])
+        logger.info("Resuming saved index paper position: Qty %d", active_pos["qty"])
     cooldown_until: Optional[datetime] = None
     cycle = 0
     last_structure_log=None
@@ -1453,10 +1493,10 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
 
     while True:
         now = datetime.now()
-        if now.time() >= dtime(15, 45):
-            logger.info("03:45 PM IST reached. Session complete.")
+        if now.time() >= EOD_SQUAREOFF_TIME and active_pos is None:
+            logger.info("02:45 PM IST cutoff reached. Session complete.")
             break
-        if now.time() < dtime(9, 10):
+        if now.time() < SESSION_START_TIME:
             time.sleep(10)
             continue
 
@@ -1464,12 +1504,12 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
         # or entry cutoff time is reached and no position is open.
         if active_pos is None and (
             day_net_pnl >= DAILY_PROFIT_TARGET_RS
-            or day_trades >= MAX_TRADES_PER_DAY
+            or day_entries >= MAX_TRADES_PER_DAY
             or consec_losses >= MAX_CONSECUTIVE_LOSSES_PER_DAY
             or now.time() > LAST_ENTRY_TIME
         ):
             logger.info(
-                f"Daily session target/cutoff reached (Trades: {day_trades}/{MAX_TRADES_PER_DAY}, "
+                f"Daily session target/cutoff reached (Entries: {day_entries}/{MAX_TRADES_PER_DAY}, "
                 f"Consec Losses: {consec_losses}/{MAX_CONSECUTIVE_LOSSES_PER_DAY}, "
                 f"Net today: Rs.{day_net_pnl:+.2f}/{DAILY_PROFIT_TARGET_RS:.0f}, "
                 f"Time: {now.strftime('%H:%M:%S')}). Stopping Dhan API polling."
@@ -1479,6 +1519,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
         idx_name = active_pos["index"] if active_pos else selected_indices[cycle % len(selected_indices)]
         cfg = INDICES_CONFIG[idx_name]
         raw_oc = dhan.fetch_option_chain(cfg["security_id"], cfg["exchange_segment"], expiries[idx_name])
+        chain_received_epoch = time.time()
 
         if raw_oc:
             view = analyzer.evaluate_chain(idx_name, raw_oc,expiry=expiries[idx_name])
@@ -1504,6 +1545,9 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                 if log_key!=last_structure_log:
                     logger.info("[NIFTY STRUCTURE] %s",json.dumps(structure,sort_keys=True))
                     last_structure_log=log_key
+            # HTTP waits may cross the cutoff. Use receipt-time wall clock for
+            # entries and exits instead of the time captured before fetching.
+            now = datetime.now()
             telemetry_state["indices"][idx_name] = view
             telemetry_state["updated_at"] = now.strftime("%H:%M:%S")
             telemetry_state["api_poll_interval_sec"] = round(dhan.oc_poll_gap, 1)
@@ -1615,9 +1659,9 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     active_pos = None
 
             elif (
-                dtime(9, 20) <= now.time() <= LAST_ENTRY_TIME
+                SESSION_START_TIME <= now.time() <= LAST_ENTRY_TIME
                 and day_net_pnl < DAILY_PROFIT_TARGET_RS
-                and day_trades < MAX_TRADES_PER_DAY
+                and day_entries < MAX_TRADES_PER_DAY
                 and consec_losses < MAX_CONSECUTIVE_LOSSES_PER_DAY
                 and (cooldown_until is None or now >= cooldown_until)
             ):
@@ -1638,13 +1682,27 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             consec_losses,
                         )
                         qty = lots * cfg["lot_size"]
-                        if live_mode and sec_id:
-                            dhan.place_market_order(
+                        entry_node=raw_oc.get("oc",{}).get(f"{strike_k:.6f}",raw_oc.get("oc",{}).get(str(strike_k),{})).get("ce" if is_ce else "pe",{})
+                        view.setdefault("market_structure",{})["entry_quote"]={
+                            "received_epoch":chain_received_epoch,"decision_epoch":time.time(),
+                            "modeled_entry_price_basis":"LAST_TRADE_PRICE",
+                            **{k:entry_node.get(k) for k in ("last_price","top_bid_price","top_ask_price","top_bid_quantity","top_ask_quantity")}}
+                        if live_mode and not sec_id:
+                            logger.error("Missing option security ID; no entry submitted.")
+                            continue
+                        if not reserve_index_entry(ledger,today_str,{"index":idx_name,"security_id":sec_id,"option_type":opt_type,"qty":qty,"entry_ts":now.strftime("%Y-%m-%d %H:%M:%S")},ledger_path):
+                            continue
+                        day_entries=index_entries_today(ledger,today_str)
+                        if live_mode:
+                            entry_order=dhan.place_market_order(
                                 security_id=sec_id,
                                 exchange_segment=cfg["fno_segment"],
                                 transaction_type="BUY",
                                 quantity=qty,
                             )
+                            if not entry_order or entry_order=="None":
+                                logger.error("Entry submission unconfirmed; slot remains consumed. Reconcile before restarting.")
+                                break
                         init_sl = round(entry_p - cfg["sl_points"], 2)
                         active_pos = {
                             "index": idx_name,
@@ -1669,6 +1727,10 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         split = nifty_target_quantities(idx_name,lots,cfg["lot_size"])
                         if split:
                             active_pos.update(original_qty=qty,target_one_qty=split[0],target_one_done=False,exit_fills=[])
+                        ledger["mode"]="LIVE" if live_mode else "PAPER"
+                        ledger["active_position"]={k:v for k,v in active_pos.items() if k!="entry_dt"}
+                        ledger.pop("pending_entry",None)
+                        atomic_write_json(ledger_path,ledger)
                         telegram.position(active_pos, entry=True)
                         logger.info(
                             f"[{'LIVE' if live_mode else 'PAPER'} ENTRY] {idx_name} {strike_k} {opt_type} "
@@ -1677,7 +1739,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         )
 
             if idx_name=="NIFTY":
-                view["execution_context"]={"open_position":bool(active_pos),"closed_trades_today":day_trades,
+                view["execution_context"]={"open_position":bool(active_pos),"closed_trades_today":day_trades,"entries_today":day_entries,"daily_entry_cap":MAX_TRADES_PER_DAY,
                     "consecutive_net_losses":consec_losses,"realized_net_today":day_net_pnl,
                     "cooldown_until":cooldown_until.isoformat() if cooldown_until else None}
                 # Observe one decision per closed candle/readiness state, without

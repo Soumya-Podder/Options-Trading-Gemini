@@ -204,6 +204,9 @@ def evaluate_stock_setup(
         "spot_ltp": latest["close"],
         "day_change_pct": day_change_pct,
         "ema10_15m": ema_value,
+        "ema10_15m_slope": ema_value-previous_ema,
+        "higher_timeframe_aligned": ((ema_value>previous_ema and latest["close"]>ema_value)
+                                     if bullish else (ema_value<previous_ema and latest["close"]<ema_value)),
         "conf_high": latest["high"],
         "conf_low": latest["low"],
         "atr_5m": atr_5m,
