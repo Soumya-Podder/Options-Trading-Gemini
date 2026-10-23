@@ -1,0 +1,23 @@
+{
+  "purpose": "Predeclared comparison of the four maximum-wall trigger set against adding nearest mapped put/call OI levels. No parameter sweep.",
+  "config": {
+    "name": "level_entry",
+    "stop": 6.15,
+    "entry": "level_oi",
+    "signal_minutes": 1,
+    "fixed_lots": 1,
+    "max_trades": 6,
+    "daily_profit_target": 1200
+  },
+  "periods_calendar_days": [
+    30,
+    60
+  ],
+  "end_exclusive": "2026-10-15",
+  "limitations": [
+    "Previously examined dates, exploratory comparison, not untouched validation",
+    "Historical OI is a relative-strike subset without previous-day OI",
+    "Same-expiry assumption; full-chain buildup cannot be reconstructed",
+    "One-minute adverse-slippage replay; daily stop applies to realized net only, not the intratrade daily-profit exit"
+  ]
+}

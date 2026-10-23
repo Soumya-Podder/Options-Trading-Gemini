@@ -1,0 +1,133 @@
+{
+  "results": [
+    {
+      "security_id": "13",
+      "symbol": "ABB",
+      "counts": {
+        "observations": 240,
+        "baseline_signals": 0,
+        "opening_trend_signals": 0
+      },
+      "added": []
+    },
+    {
+      "security_id": "25",
+      "symbol": "ADANIENT",
+      "counts": {
+        "observations": 240,
+        "baseline_signals": 0,
+        "opening_trend_signals": 0
+      },
+      "added": []
+    },
+    {
+      "security_id": "157",
+      "symbol": "APOLLOHOSP",
+      "counts": {
+        "observations": 240,
+        "baseline_signals": 0,
+        "opening_trend_signals": 0
+      },
+      "added": []
+    },
+    {
+      "security_id": "212",
+      "symbol": "ASHOKLEY",
+      "counts": {
+        "observations": 240,
+        "baseline_signals": 0,
+        "opening_trend_signals": 0
+      },
+      "added": []
+    },
+    {
+      "security_id": "236",
+      "symbol": "ASIANPAINT",
+      "counts": {
+        "observations": 240,
+        "baseline_signals": 0,
+        "opening_trend_signals": 0
+      },
+      "added": []
+    },
+    {
+      "security_id": "275",
+      "symbol": "AUROPHARMA",
+      "counts": {
+        "observations": 240,
+        "baseline_signals": 0,
+        "opening_trend_signals": 0
+      },
+      "added": []
+    },
+    {
+      "security_id": "305",
+      "symbol": "BAJAJHLDNG",
+      "counts": {
+        "observations": 240,
+        "baseline_signals": 0,
+        "opening_trend_signals": 0
+      },
+      "added": []
+    },
+    {
+      "security_id": "317",
+      "symbol": "BAJFINANCE",
+      "counts": {
+        "observations": 240,
+        "baseline_signals": 0,
+        "opening_trend_signals": 1
+      },
+      "added": [
+        {
+          "time": "2026-10-05T09:50:00+05:30",
+          "side": "CE",
+          "scanner": "TREND_CONSOLIDATION_BREAK_CE"
+        }
+      ]
+    },
+    {
+      "security_id": "324",
+      "symbol": "ANGELONE",
+      "counts": {
+        "observations": 240,
+        "baseline_signals": 1,
+        "opening_trend_signals": 4
+      },
+      "added": [
+        {
+          "time": "2026-09-24T09:40:00+05:30",
+          "side": "PE",
+          "scanner": "OPENING_GAP_BREAK_PE"
+        },
+        {
+          "time": "2026-10-12T10:30:00+05:30",
+          "side": "CE",
+          "scanner": "TREND_CONSOLIDATION_BREAK_CE"
+        },
+        {
+          "time": "2026-10-15T09:45:00+05:30",
+          "side": "CE",
+          "scanner": "OPENING_GAP_BREAK_CE"
+        }
+      ]
+    },
+    {
+      "security_id": "342",
+      "symbol": "CAMS",
+      "counts": {
+        "observations": 240,
+        "baseline_signals": 0,
+        "opening_trend_signals": 0
+      },
+      "added": []
+    }
+  ],
+  "total_baseline_signals": 1,
+  "total_updated_signals": 5,
+  "limitations": [
+    "Underlying signal observations, not unique trades or guaranteed opportunities",
+    "Historical option depth, Greeks, current membership and complete option execution unavailable",
+    "Same previously cached dates; no untouched validation claim"
+  ]
+}

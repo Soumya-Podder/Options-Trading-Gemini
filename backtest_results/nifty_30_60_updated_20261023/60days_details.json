@@ -1,0 +1,637 @@
+{
+  "config": {
+    "name": "updated_current_rules",
+    "stop": 6.15,
+    "entry": "oi_same_contract",
+    "signal_minutes": 1,
+    "max_trades": 6,
+    "structure": true,
+    "daily_profit_target": 1500
+  },
+  "daily": [
+    {
+      "day": "2026-08-17",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {}
+    },
+    {
+      "day": "2026-08-18",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {}
+    },
+    {
+      "day": "2026-08-19",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {}
+    },
+    {
+      "day": "2026-08-20",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {}
+    },
+    {
+      "day": "2026-08-21",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {}
+    },
+    {
+      "day": "2026-08-24",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {}
+    },
+    {
+      "day": "2026-08-25",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {}
+    },
+    {
+      "day": "2026-08-26",
+      "gross": 412.75,
+      "net": 348.25,
+      "trades": 1,
+      "unvalidated": false,
+      "eligible_entries": 1,
+      "rule_status_counts": {
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-08-27",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-08-28",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-08-31",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-01",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-02",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-03",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-04",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-07",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-08",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-09",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-10",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-11",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-15",
+      "gross": 1300.0,
+      "net": 1235.5,
+      "trades": 1,
+      "unvalidated": false,
+      "eligible_entries": 1,
+      "rule_status_counts": {
+        "ACTIVE": 1
+      }
+    },
+    {
+      "day": "2026-09-16",
+      "gross": -208.0,
+      "net": -272.5,
+      "trades": 1,
+      "unvalidated": false,
+      "eligible_entries": 1,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-17",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-18",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-21",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-22",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-23",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-24",
+      "gross": -188.5,
+      "net": -253.0,
+      "trades": 1,
+      "unvalidated": false,
+      "eligible_entries": 1,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-25",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 1
+      }
+    },
+    {
+      "day": "2026-09-28",
+      "gross": -185.25,
+      "net": -249.75,
+      "trades": 1,
+      "unvalidated": false,
+      "eligible_entries": 1,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 2
+      }
+    },
+    {
+      "day": "2026-09-29",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 2
+      }
+    },
+    {
+      "day": "2026-09-30",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 2
+      }
+    },
+    {
+      "day": "2026-10-01",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 2
+      }
+    },
+    {
+      "day": "2026-10-05",
+      "gross": -406.25,
+      "net": -470.75,
+      "trades": 1,
+      "unvalidated": false,
+      "eligible_entries": 1,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 2
+      }
+    },
+    {
+      "day": "2026-10-06",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 2
+      }
+    },
+    {
+      "day": "2026-10-07",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 2
+      }
+    },
+    {
+      "day": "2026-10-08",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 2
+      }
+    },
+    {
+      "day": "2026-10-09",
+      "gross": -409.5,
+      "net": -474.0,
+      "trades": 1,
+      "unvalidated": false,
+      "eligible_entries": 1,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 3
+      }
+    },
+    {
+      "day": "2026-10-12",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 3
+      }
+    },
+    {
+      "day": "2026-10-13",
+      "gross": 1066.0,
+      "net": 1001.5,
+      "trades": 1,
+      "unvalidated": false,
+      "eligible_entries": 1,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 3
+      }
+    },
+    {
+      "day": "2026-10-14",
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated": false,
+      "eligible_entries": 0,
+      "rule_status_counts": {
+        "ACTIVE": 1,
+        "CANDIDATE": 3
+      }
+    }
+  ],
+  "unvalidated": [],
+  "ledger": {
+    "initial_capital": 30000.0,
+    "virtual_balance_gross": 31381.25,
+    "virtual_balance_net": 30865.25,
+    "profit_without_charges": 1381.25,
+    "net_profit_after_charges": 865.25,
+    "trades": [
+      {
+        "timestamp": "2026-08-26 11:55:00",
+        "exit_timestamp": "2026-08-26 12:14:00",
+        "index": "NIFTY",
+        "contract": "24250_PE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 24286.1,
+        "oi_diff_lakhs": 129.96,
+        "entry_price": 66.65,
+        "exit_price": 73.0,
+        "gross_pnl": 412.75,
+        "net_pnl": 348.25,
+        "r_multiple": 1.03,
+        "exit_reason": "ASYMMETRIC_TRAIL_PROFIT",
+        "rule_used": "IF wall=CALL_SIDE_GT_50L & ce=SHORT_BUILDUP & pe=SHORT_COVERING & ctrl=BUYERS_AND_CALL_WRITERS_ALIGNED & dom=BEARS_DOMINATING -> BUY_PE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH"
+      },
+      {
+        "timestamp": "2026-09-15 09:54:00",
+        "exit_timestamp": "2026-09-15 09:58:00",
+        "index": "NIFTY",
+        "contract": "23400_PE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 23412.1,
+        "oi_diff_lakhs": 320.83,
+        "entry_price": 53.0,
+        "exit_price": 73.0,
+        "gross_pnl": 1300.0,
+        "net_pnl": 1235.5,
+        "r_multiple": 3.25,
+        "exit_reason": "ASYMMETRIC_TRAIL_PROFIT",
+        "rule_used": "IF wall=CALL_SIDE_GT_50L & ce=SHORT_BUILDUP & pe=SHORT_COVERING & ctrl=BUYERS_AND_CALL_WRITERS_ALIGNED & dom=BEARS_DOMINATING -> BUY_PE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH"
+      },
+      {
+        "timestamp": "2026-09-16 10:45:00",
+        "exit_timestamp": "2026-09-16 10:46:00",
+        "index": "NIFTY",
+        "contract": "23250_CE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 23248.6,
+        "oi_diff_lakhs": -108.05,
+        "entry_price": 180.15,
+        "exit_price": 176.95,
+        "gross_pnl": -208.0,
+        "net_pnl": -272.5,
+        "r_multiple": -0.52,
+        "exit_reason": "INITIAL_SL_HIT",
+        "rule_used": "IF wall=PUT_SIDE_GT_50L & ce=SHORT_COVERING & pe=SHORT_BUILDUP & ctrl=BUYERS_AND_PUT_WRITERS_ALIGNED & dom=BULLS_DOMINATING -> BUY_CE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH"
+      },
+      {
+        "timestamp": "2026-09-24 12:35:00",
+        "exit_timestamp": "2026-09-24 12:38:00",
+        "index": "NIFTY",
+        "contract": "23150_PE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 23175.0,
+        "oi_diff_lakhs": 257.89,
+        "entry_price": 95.95,
+        "exit_price": 93.05,
+        "gross_pnl": -188.5,
+        "net_pnl": -253.0,
+        "r_multiple": -0.47,
+        "exit_reason": "INITIAL_SL_HIT",
+        "rule_used": "IF wall=CALL_SIDE_GT_50L & ce=SHORT_BUILDUP & pe=SHORT_COVERING & ctrl=BUYERS_AND_CALL_WRITERS_ALIGNED & dom=BEARS_DOMINATING -> BUY_PE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH"
+      },
+      {
+        "timestamp": "2026-09-28 10:25:00",
+        "exit_timestamp": "2026-09-28 10:56:00",
+        "index": "NIFTY",
+        "contract": "22800_PE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 22838.95,
+        "oi_diff_lakhs": 73.93,
+        "entry_price": 59.4,
+        "exit_price": 56.55,
+        "gross_pnl": -185.25,
+        "net_pnl": -249.75,
+        "r_multiple": -0.46,
+        "exit_reason": "INITIAL_SL_HIT",
+        "rule_used": "IF wall=CALL_SIDE_GT_50L & ce=SHORT_BUILDUP & pe=LONG_BUILDUP & ctrl=CALL_WRITERS_DOMINATING_CEILING & dom=BEARS_DOMINATING -> BUY_PE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH"
+      },
+      {
+        "timestamp": "2026-10-05 10:09:00",
+        "exit_timestamp": "2026-10-05 10:09:00",
+        "index": "NIFTY",
+        "contract": "22550_PE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 22551.8,
+        "oi_diff_lakhs": 60.0,
+        "entry_price": 88.55,
+        "exit_price": 82.3,
+        "gross_pnl": -406.25,
+        "net_pnl": -470.75,
+        "r_multiple": -1.02,
+        "exit_reason": "INITIAL_SL_HIT",
+        "rule_used": "IF wall=CALL_SIDE_GT_50L & ce=SHORT_BUILDUP & pe=SHORT_COVERING & ctrl=BUYERS_AND_CALL_WRITERS_ALIGNED & dom=BEARS_DOMINATING -> BUY_PE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH"
+      },
+      {
+        "timestamp": "2026-10-09 14:00:00",
+        "exit_timestamp": "2026-10-09 14:00:00",
+        "index": "NIFTY",
+        "contract": "22550_CE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 22548.1,
+        "oi_diff_lakhs": -206.12,
+        "entry_price": 121.3,
+        "exit_price": 115.0,
+        "gross_pnl": -409.5,
+        "net_pnl": -474.0,
+        "r_multiple": -1.02,
+        "exit_reason": "INITIAL_SL_HIT",
+        "rule_used": "IF wall=PUT_SIDE_GT_50L & ce=SHORT_COVERING & pe=LONG_UNWINDING & ctrl=BUYERS_AND_PUT_WRITERS_ALIGNED & dom=BULLS_DOMINATING -> BUY_CE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH"
+      },
+      {
+        "timestamp": "2026-10-13 09:40:00",
+        "exit_timestamp": "2026-10-13 09:48:00",
+        "index": "NIFTY",
+        "contract": "22550_CE",
+        "lots": 1,
+        "qty": 65,
+        "spot_at_entry": 22518.95,
+        "oi_diff_lakhs": -126.38,
+        "entry_price": 50.5,
+        "exit_price": 66.9,
+        "gross_pnl": 1066.0,
+        "net_pnl": 1001.5,
+        "r_multiple": 2.67,
+        "exit_reason": "ASYMMETRIC_TRAIL_PROFIT",
+        "rule_used": "IF wall=PUT_SIDE_GT_50L & ce=SHORT_COVERING & pe=SHORT_BUILDUP & ctrl=BUYERS_AND_PUT_WRITERS_ALIGNED & dom=BULLS_DOMINATING -> BUY_CE",
+        "data_health": "ACTUAL_STRIKE_STITCHED_RESEARCH"
+      }
+    ],
+    "total_trades": 8,
+    "avg_winning_value_rs": 926.25,
+    "avg_losing_value_rs": 279.5,
+    "win_to_loss_ratio": 3.31
+  },
+  "execution_interval_minutes": 1,
+  "limitations": [
+    "1-minute execution OHLC; adverse 0.1% slippage and stop-first ambiguity handling",
+    "Same day, exact strike, WEEK expiryCode 1; prices never synthesized",
+    "Only ATM +/-3 coverage; missing held-strike bars invalidate outcomes",
+    "Three rolling strikes per side approximate OI walls, not full historical chain",
+    "Research maximum estimated initial gross stop risk Rs.1,000; gaps can exceed this",
+    "Independent fresh learning per candidate; online learning continues chronologically"
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "calendar_days": 60,
+  "variant": "opening_trend",
+  "sessions": 41,
+  "trades": 15,
+  "gross": -1807.0,
+  "net": -2774.5,
+  "net_wins": 3,
+  "net_losses": 12,
+  "avg_net_win": 592.0,
+  "avg_net_loss": 379.2083333333333,
+  "zero_trade_days": 28,
+  "unvalidated": 0,
+  "exit_reasons": {
+    "INITIAL_SL_HIT": 11,
+    "THETA_TIME_STOP": 1,
+    "ASYMMETRIC_TRAIL_PROFIT": 3
+  },
+  "entry_rejection_observations": {
+    "Need matched five-minute strike OI": 376,
+    "Need prior-session data and five closed session candles": 534,
+    "BUY_CE: Price has not held directional confirmation": 9515,
+    "BUY_PE: Wait for a separate closed-candle hold/retest after the level event": 1578,
+    "BUY_PE: Price has not held directional confirmation": 8716,
+    "BUY_CE: Weak follow-through candle body or closing location": 3153,
+    "BUY_PE: Weak follow-through candle body or closing location": 3373,
+    "BUY_PE: Current price has advanced beyond the confirmation entry zone": 601,
+    "BUY_CE: Wait for a separate closed-candle hold/retest after the level event": 1224,
+    "BUY_CE: Current price has advanced beyond the confirmation entry zone": 443,
+    "BUY_PE: No mapped opposing level to assess room; insufficient structure": 24,
+    "BUY_PE: Insufficient room before opposing support/resistance": 127,
+    "BUY_CE: Insufficient room before opposing support/resistance": 73,
+    "Learned-rule/premium/wall-room or other execution selection veto": 12,
+    "BUY_CE: No mapped opposing level to assess room; insufficient structure": 11
+  },
+  "limitations": [
+    "Previously examined dates, exploratory comparison, not untouched validation",
+    "Historical OI is a relative-strike subset without previous-day OI",
+    "Same-expiry assumption; full-chain buildup cannot be reconstructed",
+    "One-minute adverse-slippage replay; daily stop applies to realized net only, not the intratrade daily-profit exit"
+  ]
+}

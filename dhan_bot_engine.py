@@ -33,9 +33,12 @@ from typing import Dict, Any, List, Optional, Tuple, Set, Deque
 import requests
 
 from telegram_notifier import TelegramNotifier
-from nifty_market_structure import assess_nifty_structure
+from nifty_market_structure import assess_nifty_structure, apply_nifty_level_entry
 from index_option_replay import replay_option_trade, ReplayDataError
 from nifty_oi import NiftyOITracker
+
+if __name__=="__main__":
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 LOG_FILE = "dhan_bot_session.log"
 CACHE_DIR = "dhan_hist_cache"
@@ -70,6 +73,10 @@ INDICES_CONFIG = {
     },
 }
 
+PRUNE_COOLDOWN_DAYS = 5
+MAX_PRUNE_CYCLES = 3
+DAILY_PROFIT_TARGET_RS = 1200.0
+MIN_OI_WALL_ROOM_POINTS = 25.0
 MAX_TRADES_PER_DAY = 6
 MAX_CONSECUTIVE_LOSSES_PER_DAY = 2
 POST_SL_COOLDOWN_MINUTES = 15
@@ -634,9 +641,59 @@ class SelfLearningBrain:
                 pass
         return default
 
+    @staticmethod
+    def calendar_days_since(day_str, reference):
+        try:
+            return (datetime.strptime(str(reference), "%Y-%m-%d")-datetime.strptime(str(day_str), "%Y-%m-%d")).days
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def halve_rule_history(rule):
+        rule["wins_count"]=math.ceil(int(rule.get("wins_count",0))/2)
+        rule["losses_count"]=int(rule.get("losses_count",0))//2
+        rule["trades_count"]=rule["wins_count"]+rule["losses_count"]
+        for key in ("total_win_r","total_loss_r"):
+            rule[key]=round(float(rule.get(key,0))/2,4)
+        for label in ("win","loss"):
+            count=rule["wins_count" if label=="win" else "losses_count"]
+            rule["avg_"+label+"_r"]=round(rule["total_"+label+"_r"]/count,2) if count else 0.0
+        wr=rule["wins_count"]/rule["trades_count"] if rule["trades_count"] else 0.0
+        rule["expectancy_r"]=round(wr*rule["avg_win_r"]-(1-wr)*rule["avg_loss_r"],2)
+
+    @staticmethod
+    def mark_pruned(rule, day_str):
+        rule["status"]="PRUNED"
+        rule["pruned_on_day"]=day_str
+        rule["prune_count"]=int(rule.get("prune_count",0))+1
+
+    @staticmethod
+    def has_wall_room(analysis):
+        oi=analysis.get("oi_analysis")
+        if not isinstance(oi,dict) or not oi.get("ready"):return True
+        key="room_to_resistance" if analysis["recommended_dir"]=="BUY_CE" else "room_to_support"
+        room=oi.get(key)
+        if room is None:return True
+        try:return float(room)>=MIN_OI_WALL_ROOM_POINTS
+        except (TypeError,ValueError):return True
+
     def unmute_new_day(self, day_str: str) -> None:
-        self.recent_losing_states.clear()
+        if getattr(self,"learning_day",None)==day_str:
+            return
+        self.learning_day=day_str
+        self.recent_losing_states=[("BUY_CE" if t["action"]==1 else "BUY_PE",t["state"])
+            for t in getattr(self,"brain",{}).get("replay_buffer",[])
+            if t.get("day")==day_str and t.get("reward",0)<=-0.70
+            and t.get("action") in (1,2) and len(t.get("state",[]))==10][-8:]
         for r in self.rules.values():
+            if r.get("status")=="PRUNED":
+                r.setdefault("pruned_on_day",day_str)
+                r.setdefault("prune_count",1)
+                age=self.calendar_days_since(r["pruned_on_day"],day_str)
+                if age is not None and age>=PRUNE_COOLDOWN_DAYS and r["prune_count"]<MAX_PRUNE_CYCLES:
+                    self.halve_rule_history(r)
+                    r.update(status="CANDIDATE",intraday_losses=0,last_lot_loss=False)
+                continue
             t_cnt = int(r.get("trades_count", 0))
             w_cnt = int(r.get("wins_count", 0))
             l_cnt = int(r.get("losses_count", 0))
@@ -646,37 +703,50 @@ class SelfLearningBrain:
 
             if r.get("status") == "DAY_MUTED" and r.get("muted_on_day") != day_str:
                 if (t_cnt >= 5 and wr < 0.35) or (t_cnt >= 4 and exp_r < -0.15):
-                    r["status"] = "PRUNED"
+                    self.mark_pruned(r,day_str)
                 elif days_n >= 3 and exp_r >= 0.25 and wr >= 0.40:
                     r["status"] = "ACTIVE"
                 else:
                     r["status"] = "CANDIDATE"
             elif r.get("status") != "PRUNED":
                 if (t_cnt >= 5 and wr < 0.35) or (t_cnt >= 2 and w_cnt == 0):
-                    r["status"] = "PRUNED"
+                    self.mark_pruned(r,day_str)
                 elif days_n >= 2 and w_cnt >= 2 and l_cnt == 0 and exp_r >= 1.0:
                     r["status"] = "ACTIVE"
-            r["intraday_losses"] = 0
+            if r.get("last_trade_day")!=day_str:
+                r["intraday_losses"] = 0
         atomic_write_json(self.rules_file, self.rules)
 
     def select_action(
         self, analysis: Dict[str, Any], consec_losses: int, bar_time: Optional[dtime] = None
     ) -> Tuple[str, Optional[str]]:
-        if not analysis["exceeds_50_lakhs"] or analysis["recommended_dir"] == "HOLD":
-            return "HOLD", None
+        def reject(reason,sig=None):
+            analysis["entry_decision"]={"action":"HOLD","reason":reason,"rule":sig}
+            return "HOLD",sig
+        level_entry=(analysis["index"]=="NIFTY" and analysis.get("entry_model")=="LEVEL_CANDLE_AND_STRIKE_OI_V1")
+        if analysis["recommended_dir"] == "HOLD" or (not level_entry and not analysis["exceeds_50_lakhs"]):
+            return reject("No confirmed directional setup")
         if analysis["index"] == "NIFTY" and not analysis.get("market_structure",{}).get("allowed",False):
-            return "HOLD", None
+            return reject(analysis.get("market_structure",{}).get("reason","Structure unavailable"))
+        if level_entry and not analysis["market_structure"].get("strike_oi_confirmation"):
+            return reject("Missing same-strike OI confirmation")
 
+        if not self.has_wall_room(analysis):
+            return reject("Insufficient room to nearest building OI wall")
         cfg = INDICES_CONFIG[analysis["index"]]
         opt_ltp = analysis["atm_ce_ltp"] if analysis["recommended_dir"] == "BUY_CE" else analysis["atm_pe_ltp"]
         if opt_ltp < cfg["min_option_premium"]:
-            return "HOLD", None
+            return reject("Selected option premium below minimum")
 
         sig = (
             f"IF wall={analysis['wall_tag']} & ce={analysis['ce_quadrant']} "
             f"& pe={analysis['pe_quadrant']} & ctrl={analysis['market_controller']} "
             f"& dom={analysis['market_dominance']} -> {analysis['recommended_dir']}"
         )
+        if level_entry:
+            structure=analysis["market_structure"]
+            sides=','.join(sorted({r['side'] for r in structure['strike_oi_confirmation']}))
+            sig=f"LEVEL_V1 {structure['setup']} & strike_oi={sides} -> {analysis['recommended_dir']}"
 
         if sig not in self.rules:
             r_id = f"RULE_{len(self.rules) + 1:03d}"
@@ -702,27 +772,28 @@ class SelfLearningBrain:
 
         rule = self.rules[sig]
         if rule["status"] in ("PRUNED", "DAY_MUTED"):
-            return "HOLD", sig
+            return reject("Learned rule "+rule["status"],sig)
 
         # Mid-day Lunch Lull Filter (12:00 PM - 13:30 PM IST)
-        if bar_time and dtime(12, 0) <= bar_time <= dtime(13, 30):
+        if not level_entry and bar_time and dtime(12, 0) <= bar_time <= dtime(13, 30):
             min_lunch_imp = cfg["min_spot_impulse"] * 1.75
             if rule["status"] != "ACTIVE" and (
                 abs(analysis["d_spot_5m"]) < min_lunch_imp or abs(analysis["diff_ce_minus_pe_lakhs"]) < 100.0
             ):
-                return "HOLD", sig
+                return reject("Lunch momentum/imbalance filter",sig)
 
         # Sniper Recovery Gate after a loss
-        if consec_losses >= 1:
+        if not level_entry and consec_losses >= 1:
             min_rec_imp = cfg["min_spot_impulse"] * 1.6
             if rule["status"] != "ACTIVE" and abs(analysis["d_spot_5m"]) < min_rec_imp:
-                return "HOLD", sig
+                return reject("Post-loss recovery filter",sig)
 
         # Cosine Similarity Veto against recent losing state vectors
         for lost_dir, lost_vec in self.recent_losing_states[-8:]:
             if lost_dir == analysis["recommended_dir"] and cosine_similarity(analysis["state_vec"], lost_vec) >= 0.92:
-                return "HOLD", sig
+                return reject("Similar recent losing state",sig)
 
+        analysis["entry_decision"]={"action":analysis["recommended_dir"],"reason":"All entry selection checks passed","rule":sig}
         return analysis["recommended_dir"], sig
 
     def compute_lots(
@@ -764,6 +835,7 @@ class SelfLearningBrain:
 
         if sig in self.rules:
             r = self.rules[sig]
+            r["last_trade_day"]=day_str
             r["trades_count"] += 1
             if day_str not in r["unique_days_traded"]:
                 r["unique_days_traded"].append(day_str)
@@ -793,7 +865,7 @@ class SelfLearningBrain:
                 or (r["trades_count"] >= 4 and r["expectancy_r"] < -0.15)
                 or (r["trades_count"] >= 5 and wr < 0.35)
             ):
-                r["status"] = "PRUNED"
+                self.mark_pruned(r,day_str)
             elif (days_n >= 3 and r["expectancy_r"] >= 0.25 and wr >= 0.40) or (
                 days_n >= 2 and r["wins_count"] >= 2 and r["losses_count"] == 0 and r["expectancy_r"] >= 1.0
             ):
@@ -806,6 +878,7 @@ class SelfLearningBrain:
             "day": day_str,
             "state": [round(x, 4) for x in state_vec],
             "action": action_idx,
+            "reward_basis":"NET_AFTER_MODELED_CHARGES",
             "reward": reward
         })
         if len(self.brain["replay_buffer"]) > 500:
@@ -820,6 +893,8 @@ class SelfLearningBrain:
             self.brain["weights"][action_idx][i] = round((w[i] * 0.995) + lr * err * state_vec[i], 6)
         self.brain["bias"][action_idx] = round((b * 0.995) + lr * err, 6)
         atomic_write_json(self.brain_file, self.brain)
+        self.logger.info("[LEARNING] %s | after-cost reward %+.4fR | rule status %s",
+                         sig,r_mult,self.rules.get(sig,{}).get("status","UNKNOWN"))
 
 
 def update_ratchet_sl(entry_price: float, current_sl: float, highest_ltp: float, sl_points: float) -> Tuple[float, bool]:
@@ -904,6 +979,9 @@ def record_closed_trade(
     gross_pnl = round((exit_price - entry_price) * qty, 2)
     charges = round(40.0 + (lots * 24.5) + 20.0*max(0,len(exit_fills or [])-1), 2)
     net_pnl = round(gross_pnl - charges, 2)
+    # Keep execution's gross R for audit, but train on the after-cost outcome.
+    risk_budget=gross_pnl/r_mult if r_mult and gross_pnl/r_mult>0 else INDICES_CONFIG[idx_name]["sl_points"]*qty
+    learning_r=round(net_pnl/risk_budget,6)
 
     ledger["virtual_balance_gross"] = round(ledger["virtual_balance_gross"] + gross_pnl - booked_gross, 2)
     ledger["virtual_balance_net"] = round(ledger["virtual_balance_net"] + net_pnl - booked_net, 2)
@@ -924,6 +1002,9 @@ def record_closed_trade(
         "gross_pnl": gross_pnl,
         "net_pnl": net_pnl,
         "r_multiple": r_mult,
+        "learning_r_multiple":learning_r,
+        "learning_reward_basis":"NET_AFTER_MODELED_CHARGES",
+        "state_vec":list(state_vec),
         "exit_reason": exit_reason,
         "rule_used": sig,
         "data_health": data_health
@@ -944,7 +1025,7 @@ def record_closed_trade(
     if ledger["avg_losing_value_rs"] > 0:
         ledger["win_to_loss_ratio"] = round(ledger["avg_winning_value_rs"] / ledger["avg_losing_value_rs"], 2)
 
-    brain.learn_from_trade(day_str, sig, state_vec, 1 if opt_type == "CE" else 2, r_mult, lots=lots)
+    brain.learn_from_trade(day_str, sig, state_vec, 1 if opt_type == "CE" else 2, learning_r, lots=lots)
     atomic_write_json(ledger_path, ledger)
     return gross_pnl
 
@@ -966,10 +1047,13 @@ def run_real_historical_backtest(
 
     dhan = DhanV2RestClient(client_id, access_token, logger)
     analyzer = MarketMicrostructureAnalyzer()
-    brain = SelfLearningBrain(logger)
+    output_dir=os.path.join(CACHE_DIR,"index_backtest_"+datetime.now().strftime("%Y%m%d_%H%M%S_%f"))
+    os.makedirs(output_dir,exist_ok=True)
+    backtest_ledger_path=os.path.join(output_dir,"paper_trade_ledger.json")
+    brain = SelfLearningBrain(logger,os.path.join(output_dir,"brain.json"),os.path.join(output_dir,"rules.json"))
 
     ledger = {
-        "mode": "PAPER",
+        "mode": "BACKTEST",
         "initial_capital": 30000.0,
         "virtual_balance_gross": 30000.0,
         "virtual_balance_net": 30000.0,
@@ -1060,6 +1144,7 @@ def run_real_historical_backtest(
             ce_scale = 3.0 / len(avail_ce)
             pe_scale = 3.0 / len(avail_pe)
             skip_until_idx = -1
+            replay_oi = NiftyOITracker()
 
             for i in range(n_bars):
                 ts_val = int(ts_list[i])
@@ -1106,8 +1191,11 @@ def run_real_historical_backtest(
                         for data in legs.values():
                             if "strike" in data and i<len(data["strike"]):
                                 strike=str(float(data["strike"][i]))
-                                historical_chain.setdefault(strike,{})[side]={"oi":data["oi"][i]}
-                    structure=assess_nifty_structure(structure_candles,historical_chain,ts_val+300,spot,analysis["recommended_dir"])
+                                historical_chain.setdefault(strike,{})[side]={"oi":data["oi"][i],"last_price":data["close"][i]}
+                    _,analysis["oi_analysis"]=replay_oi.assess(historical_chain,spot,ts_val+300,idx_name)
+                    structure=apply_nifty_level_entry(analysis,structure_candles,historical_chain,ts_val+300,
+                        enable_opening_trend=env.get('NIFTY_OPENING_TREND','false').strip().lower()=='true',
+                        enable_price_levels=env.get('NIFTY_PRICE_LEVEL_CONFIRMATION','false').strip().lower()=='true')
                     structure["oi_source"]="ROLLING_STRIKES_SUBSET_NOT_FULL_CHAIN"
                     analysis["market_structure"]=structure
                     if dtime(9,40)<=datetime.fromtimestamp(ts_val+300).time()<=LAST_ENTRY_TIME:
@@ -1122,7 +1210,7 @@ def run_real_historical_backtest(
                 day_str = dt.strftime("%Y-%m-%d")
                 day_key = (idx_name, day_str)
                 if day_key not in daily_stats:
-                    daily_stats[day_key] = {"trades": 0, "consec_losses": 0}
+                    daily_stats[day_key] = {"trades": 0, "consec_losses": 0, "net_pnl": 0.0}
                     brain.unmute_new_day(day_str)
 
                 d_stat = daily_stats[day_key]
@@ -1131,6 +1219,8 @@ def run_real_historical_backtest(
                 if d_stat.get("unvalidated_position") or d_stat["trades"] >= MAX_TRADES_PER_DAY or d_stat["consec_losses"] >= MAX_CONSECUTIVE_LOSSES_PER_DAY:
                     continue
 
+                if d_stat["net_pnl"] >= DAILY_PROFIT_TARGET_RS:
+                    continue
                 action_dir, sig = brain.select_action(analysis, d_stat["consec_losses"], bar_time=dt.time())
                 if action_dir == "HOLD" or not sig:
                     continue
@@ -1183,7 +1273,6 @@ def run_real_historical_backtest(
                     logger.warning("[UNVALIDATED REPLAY] %s %s | %s",idx_name,entry_time,error.reason)
                     continue
 
-                skip_until_idx = (exit_idx + cooldown_bars) if r_mult < 0 else (exit_idx + win_cooldown_bars)
                 gross_pnl = record_closed_trade(
                     ledger=ledger,
                     brain=brain,
@@ -1205,13 +1294,16 @@ def run_real_historical_backtest(
                     state_vec=analysis["state_vec"],
                     data_health="DHAN_REAL_HISTORICAL", exit_fills=exit_fills,
                     market_structure=analysis.get("market_structure"),
+                    ledger_path=backtest_ledger_path,
                 )
                 ledger["trades"][-1].update(signal_timestamp=datetime.fromtimestamp(ts_val+interval_min*60).isoformat(),
                     execution_model="NEXT_BAR_OPEN_0.1PCT_ADVERSE_SLIPPAGE",
                     exit_time_precision="five-minute bar; exact intrabar fill time unknown")
 
+                skip_until_idx=exit_idx+(cooldown_bars if ledger["trades"][-1]["net_pnl"]<=0 else win_cooldown_bars)
+                d_stat["net_pnl"] = round(d_stat["net_pnl"] + float(ledger["trades"][-1]["net_pnl"]), 2)
                 d_stat["trades"] += 1
-                d_stat["consec_losses"] = d_stat["consec_losses"] + 1 if gross_pnl <= 0 else 0
+                d_stat["consec_losses"] = d_stat["consec_losses"] + 1 if ledger["trades"][-1]["net_pnl"] <= 0 else 0
 
                 logger.info(
                     f"[REAL BACKTEST TRADE] {entry_time.strftime('%Y-%m-%d %H:%M')} | {idx_name} {strike_val}_{opt_type} (Lots:{lots}) "
@@ -1234,9 +1326,10 @@ def run_real_historical_backtest(
                            "Unvalidated outcomes excluded from P&L and learning; remaining same-day entries blocked"]
     if structure_counts["unavailable"]:
         logger.warning("Nifty backtest has %d snapshots without verified structure; result is incomplete",structure_counts["unavailable"])
-    atomic_write_json("paper_trade_ledger.json", ledger)
+    atomic_write_json(backtest_ledger_path, ledger)
+    logger.info("Backtest output and learning isolated in %s",output_dir)
     if last_view_by_index:
-        atomic_write_json("live_telemetry.json", {
+        atomic_write_json(os.path.join(output_dir,"telemetry.json"), {
             "updated_at": datetime.now().strftime("%H:%M:%S"),
             "api_poll_interval_sec": 3.6,
             "indices": last_view_by_index,
@@ -1250,6 +1343,37 @@ def run_real_historical_backtest(
         f"| Avg Win: Rs.{ledger['avg_winning_value_rs']:,.2f} vs Avg Loss: Rs.{ledger['avg_losing_value_rs']:,.2f} "
         f"({ledger['win_to_loss_ratio']:.2f}x)"
     )
+
+
+def daily_target_reached(realized_net, position, bid):
+    """Estimate full-day net on liquidation, including any partial fills once."""
+    try:
+        if not math.isfinite(bid) or bid<=0:return False
+        entry=float(position["entry_price"])
+        gross=sum((float(f["price"])-entry)*int(f["qty"]) for f in position.get("exit_fills",[]))
+        gross+=(bid-entry)*int(position["qty"])
+        fees=40.0+int(position["lots"])*24.5+20.0*len(position.get("exit_fills",[]))
+        return realized_net+gross-fees>=DAILY_PROFIT_TARGET_RS
+    except (KeyError,TypeError,ValueError,OverflowError):return False
+
+
+def record_nifty_entry_observation(path, analysis, candles, chain, as_of):
+    """Save decision-time evidence for missed-entry review; never train on it.
+
+    Includes the last 150 closed index bars and nearby option contracts so later
+    review need not infer a past entry from the eventual day high/low.
+    """
+    if not isinstance(candles,dict) or not candles.get("timestamp"):
+        return False
+    keep=[i for i,t in enumerate(candles["timestamp"]) if float(t)+300<=as_of][-150:]
+    if not keep:return False
+    history={k:[candles[k][i] for i in keep] for k in ("timestamp","open","high","low","close")}
+    nearby={k:v for k,v in chain.items() if abs(float(k)-analysis["spot"])<=500}
+    observation={"snapshot_epoch":as_of,"analysis":analysis,"closed_index_candles":history,
+                 "option_chain":nearby,"purpose":"ENTRY_REVIEW_ONLY_NOT_REALIZED_PNL_OR_TRAINING"}
+    with open(path,"a",encoding="utf-8") as stream:
+        stream.write(json.dumps(observation,separators=(",",":"),allow_nan=False)+"\n")
+    return True
 
 
 def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices_to_trade=None) -> None:
@@ -1284,9 +1408,10 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
     # Restore today's trade count and consecutive losses if script is restarted mid-day
     today_trades_list = [t for t in ledger.get("trades", []) if str(t.get("timestamp", "")).startswith(today_str)]
     day_trades = len(today_trades_list)
+    day_net_pnl = round(sum(float(t.get("net_pnl",0.0)) for t in today_trades_list), 2)
     consec_losses = 0
     for t in reversed(today_trades_list):
-        if float(t.get("gross_pnl", 0.0)) <= 0:
+        if float(t.get("net_pnl", t.get("gross_pnl",0.0))) <= 0:
             consec_losses += 1
         else:
             break
@@ -1323,6 +1448,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
     cooldown_until: Optional[datetime] = None
     cycle = 0
     last_structure_log=None
+    last_entry_audit=None
     last_oi_log=0.0
 
     while True:
@@ -1337,13 +1463,15 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
         # Immediately stop API polling once daily trade cap, consecutive loss breaker,
         # or entry cutoff time is reached and no position is open.
         if active_pos is None and (
-            day_trades >= MAX_TRADES_PER_DAY
+            day_net_pnl >= DAILY_PROFIT_TARGET_RS
+            or day_trades >= MAX_TRADES_PER_DAY
             or consec_losses >= MAX_CONSECUTIVE_LOSSES_PER_DAY
             or now.time() > LAST_ENTRY_TIME
         ):
             logger.info(
                 f"Daily session target/cutoff reached (Trades: {day_trades}/{MAX_TRADES_PER_DAY}, "
                 f"Consec Losses: {consec_losses}/{MAX_CONSECUTIVE_LOSSES_PER_DAY}, "
+                f"Net today: Rs.{day_net_pnl:+.2f}/{DAILY_PROFIT_TARGET_RS:.0f}, "
                 f"Time: {now.strftime('%H:%M:%S')}). Stopping Dhan API polling."
             )
             break
@@ -1368,7 +1496,9 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                 structure_candles=dhan.fetch_nifty_structure_candles(
                     (now-timedelta(days=10)).strftime("%Y-%m-%d 00:00:00"),
                     now.strftime("%Y-%m-%d %H:%M:%S"))
-                structure=assess_nifty_structure(structure_candles,raw_oc.get("oc",{}),time.time(),view["spot"],view["recommended_dir"])
+                structure=apply_nifty_level_entry(view,structure_candles,raw_oc.get("oc",{}),time.time(),
+                    enable_opening_trend=env.get('NIFTY_OPENING_TREND','false').strip().lower()=='true',
+                    enable_price_levels=env.get('NIFTY_PRICE_LEVEL_CONFIRMATION','false').strip().lower()=='true')
                 view["market_structure"]=structure
                 log_key=(structure.get("confirmation_close"),structure["reason"])
                 if log_key!=last_structure_log:
@@ -1399,6 +1529,11 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     exit_reason = "THETA_TIME_STOP"
                 elif now.time() >= EOD_SQUAREOFF_TIME:
                     exit_reason = "EOD_SQUAREOFF"
+
+                executable_bid=float(node.get("top_bid_price",0) or 0)
+                if not exit_reason and daily_target_reached(day_net_pnl,active_pos,executable_bid):
+                    exit_reason="DAILY_NET_PROFIT_TARGET"
+                    if not live_mode:curr_ltp=executable_bid
 
                 staged = "target_one_qty" in active_pos
                 if not exit_reason and staged:
@@ -1463,8 +1598,9 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         booked_gross=active_pos.get("partial_gross",0),booked_net=active_pos.get("partial_net",0),
                         market_structure=active_pos.get("market_structure"),
                     )
+                    day_net_pnl = round(day_net_pnl + float(ledger["trades"][-1]["net_pnl"]), 2)
                     day_trades += 1
-                    if gross_pnl <= 0:
+                    if ledger["trades"][-1]["net_pnl"] <= 0:
                         consec_losses += 1
                         cooldown_until = now + timedelta(minutes=POST_SL_COOLDOWN_MINUTES)
                     else:
@@ -1480,6 +1616,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
 
             elif (
                 dtime(9, 20) <= now.time() <= LAST_ENTRY_TIME
+                and day_net_pnl < DAILY_PROFIT_TARGET_RS
                 and day_trades < MAX_TRADES_PER_DAY
                 and consec_losses < MAX_CONSECUTIVE_LOSSES_PER_DAY
                 and (cooldown_until is None or now >= cooldown_until)
@@ -1538,6 +1675,22 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             f"| Lots: {lots} (Qty: {qty}) @ Rs.{entry_p:.2f} | SL: Rs.{init_sl:.2f} "
                             f"| 5m Spot: {view['d_spot_5m']:+.1f} | 3-Strike Diff = {view['diff_ce_minus_pe_lakhs']:+.2f}L"
                         )
+
+            if idx_name=="NIFTY":
+                view["execution_context"]={"open_position":bool(active_pos),"closed_trades_today":day_trades,
+                    "consecutive_net_losses":consec_losses,"realized_net_today":day_net_pnl,
+                    "cooldown_until":cooldown_until.isoformat() if cooldown_until else None}
+                # Observe one decision per closed candle/readiness state, without
+                # extra API requests or treating a skipped trade as realized P&L.
+                try:
+                    closed=[t for t in (structure_candles or {}).get("timestamp",[]) if float(t)+300<=time.time()]
+                    audit_key=(max(closed) if closed else None,bool(view.get("oi_analysis",{}).get("ready")))
+                    if audit_key!=last_entry_audit:
+                        path=os.path.join(CACHE_DIR,"nifty_entry_audit_"+now.strftime("%Y-%m-%d")+".jsonl")
+                        if record_nifty_entry_observation(path,view,structure_candles,raw_oc.get("oc",{}),time.time()):
+                            last_entry_audit=audit_key
+                except (OSError,KeyError,TypeError,ValueError,OverflowError) as error:
+                    logger.warning("Entry review observation could not be saved: %s",type(error).__name__)
 
             if active_pos:
                 telegram.position(active_pos)

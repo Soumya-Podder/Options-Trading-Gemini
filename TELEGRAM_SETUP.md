@@ -1,8 +1,7 @@
 # Telegram trade alerts
 
 The session launcher uses `dhan_bot_engine.py`. Telegram is integrated in that
-engine's intraday PAPER and LIVE sessions only. Historical backtests and the
-older `dhan_self_learning_bot.py` are unaffected.
+engine's intraday PAPER and LIVE sessions. Historical backtests do not send trade alerts.
 
 1. Open https://t.me/BotFather in Telegram, send `/newbot`, and follow the prompts.
 2. Add your new bot to your Telegram channel as an administrator with permission

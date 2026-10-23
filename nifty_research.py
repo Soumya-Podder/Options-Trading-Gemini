@@ -319,7 +319,7 @@ def run_candidate(config, sessions, legs, underlying, out, previous_analyzer, ex
     brain=bot.SelfLearningBrain(logger,str(out/'brain.json'),str(out/'rules.json'))
     ledger={'initial_capital':30000.0,'virtual_balance_gross':30000.0,'virtual_balance_net':30000.0,
             'profit_without_charges':0.0,'net_profit_after_charges':0.0,'trades':[]}
-    daily=[];unvalidated=[]
+    daily=[];unvalidated=[];entry_rejections=Counter()
     original_stop=bot.INDICES_CONFIG['NIFTY']['sl_points']
     bot.INDICES_CONFIG['NIFTY']['sl_points']=config['stop']
     signal_minutes=config.get('signal_minutes',5)
@@ -346,7 +346,7 @@ def run_candidate(config, sessions, legs, underlying, out, previous_analyzer, ex
                     sum(r['close'] for r in c),sum(r['close'] for r in p),sum(r['iv'] for r in c),
                     sum(r['iv'] for r in p),c[0]['close'],p[0]['close'],
                     **({'live_ts':t+60} if signal_minutes==1 else {}))
-                if config['entry']=='oi_same_contract':
+                if config['entry'] in ('oi_same_contract','level_oi'):
                     oc={}
                     for side,side_key in (('CALL','ce'),('PUT','pe')):
                         for rows in legs[side].values():
@@ -371,6 +371,21 @@ def run_candidate(config, sessions, legs, underlying, out, previous_analyzer, ex
                 if config.get('structure'):
                     if structure_history is None:raise ValueError('Structure candles required for full-gate study')
                     analysis['market_structure']=bot.assess_nifty_structure(structure_history[day],oc,t+signal_minutes*60,c[0]['spot'],analysis['recommended_dir'])
+                if config['entry']=='level_oi':
+                    if structure_history is None:raise ValueError('Structure candles required for level-first entry')
+                    if config.get('opening_trend'):
+                        bot.apply_nifty_level_entry(analysis,structure_history[day],oc,t+signal_minutes*60,
+                            enable_opening_trend=True,enable_price_levels=bool(config.get('price_levels')))
+                    else:
+                        bot.apply_nifty_level_entry(analysis,structure_history[day],oc,t+signal_minutes*60)
+                    if not analysis['market_structure'].get('allowed'):
+                        checks=analysis['market_structure'].get('direction_checks',{})
+                        if checks:
+                            for direction,check in checks.items():
+                                entry_rejections[direction+': '+str(check.get('reason'))]+=1
+                        else:
+                            entry_rejections[analysis['market_structure'].get('reason','Unavailable')]+=1
+                if config.get("daily_profit_target") is not None and day_net>=config["daily_profit_target"]:continue
                 if blocked or i<=skip_until or count>=config.get('max_trades',bot.MAX_TRADES_PER_DAY) or losses>=bot.MAX_CONSECUTIVE_LOSSES_PER_DAY:continue
                 signal_time=datetime.fromtimestamp(t+signal_minutes*60,IST)
                 if signal_time.time()<bot.dtime(9,25) or signal_time.time()>bot.LAST_ENTRY_TIME:continue
@@ -378,6 +393,8 @@ def run_candidate(config, sessions, legs, underlying, out, previous_analyzer, ex
                     brain.recent_losing_states.clear()
                     for rule in brain.rules.values():rule['status']='CANDIDATE'
                 action,sig=brain.select_action(analysis,losses,bar_time=signal_time.time())
+                if action=='HOLD' and analysis.get('market_structure',{}).get('allowed'):
+                    entry_rejections['Learned-rule/premium/wall-room or other execution selection veto']+=1
                 if action=='HOLD' or not sig or i+1>=len(stamps):continue
                 side='CALL' if action=='BUY_CE' else 'PUT'
                 strike=selected_entry_strike(analysis,side)
@@ -412,16 +429,18 @@ def run_candidate(config, sessions, legs, underlying, out, previous_analyzer, ex
                     entry,exit_price,r,reason,sig,analysis['state_vec'],'ACTUAL_STRIKE_STITCHED_RESEARCH',fills,
                     ledger_path=str(out/'paper_trade_ledger.json'))
                 day_gross+=gross;day_net+=ledger['trades'][-1]['net_pnl']
-                count+=1;losses=losses+1 if gross<=0 else 0
+                net_loss=ledger['trades'][-1]['net_pnl']<=0
+                count+=1;losses=losses+1 if net_loss else 0
                 # Next signal closes at bar i+1, so avoid signals formed before exit.
                 exit_signal_i=exit_i if execution_legs is None else exit_i//signal_minutes
-                skip_until=exit_signal_i+max(1,(bot.POST_SL_COOLDOWN_MINUTES if r<0 else bot.POST_WIN_COOLDOWN_MINUTES)//signal_minutes)
+                skip_until=exit_signal_i+max(1,(bot.POST_SL_COOLDOWN_MINUTES if net_loss else bot.POST_WIN_COOLDOWN_MINUTES)//signal_minutes)
             daily.append({'day':day,'gross':round(day_gross,2),'net':round(day_net,2),'trades':count,
                           'unvalidated':blocked,'eligible_entries':eligible,
                           'rule_status_counts':dict(Counter(r.get('status') for r in brain.rules.values()))})
     finally:bot.INDICES_CONFIG['NIFTY']['sl_points']=original_stop
     result={'config':config,'daily':daily,'unvalidated':unvalidated,'ledger':ledger,
             'execution_interval_minutes':5 if execution_legs is None else 1,
+            'entry_rejection_observations':dict(entry_rejections),
             'limitations':[f'{5 if execution_legs is None else 1}-minute execution OHLC; adverse 0.1% slippage and stop-first ambiguity handling',
                            'Same day, exact strike, WEEK expiryCode 1; prices never synthesized',
                            'Only ATM +/-3 coverage; missing held-strike bars invalidate outcomes',

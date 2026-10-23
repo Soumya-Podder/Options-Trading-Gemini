@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, patch
 
 import requests
 import dhan_dynamic_fno_stock_bot as bot
-from stock_data_quality import IST, quote_received_age
+from dhan_dynamic_fno_stock_bot import IST, quote_received_age
 
 
 def candles(stamp, strike=False):
@@ -32,7 +32,7 @@ class HistoricalDataTests(unittest.TestCase):
         self.client.logger=MagicMock()
         self.client.history_cache_dir=self.folder.name
         self.client.session=MagicMock()
-        self.sleep=patch("stock_data_quality.time.sleep")
+        self.sleep=patch("dhan_dynamic_fno_stock_bot.time.sleep")
         self.sleep.start();self.addCleanup(self.sleep.stop)
         self.stamp=datetime(2026,9,18,15,25,tzinfo=IST).timestamp()
 
@@ -106,6 +106,23 @@ class HistoricalDataTests(unittest.TestCase):
         self.client.session.post.side_effect=[response({"errorCode":"805"},429),response(candles(self.stamp))]
         self.assertIsNotNone(self.fetch())
         self.assertEqual(self.client.history_events,[])
+
+    def test_live_history_recovers_after_bounded_circuit_cooldown(self):
+        class Clock(datetime):
+            @classmethod
+            def now(cls,tz=None):return cls(2026,10,23,10,tzinfo=IST)
+        self.client.history_failure_streak=3
+        self.client.history_circuit_opened_at=100
+        now=Clock.now(IST)
+        stamp=now.replace(hour=9,minute=15,second=0,microsecond=0).timestamp()
+        self.client.session.post.return_value=response(candles(stamp))
+        with patch.object(bot,'datetime',Clock),patch.object(bot.time,'monotonic',return_value=150):
+            self.assertIsNone(self.client.fetch_intraday_candles('1'))
+        self.client.session.post.assert_not_called()
+        with patch.object(bot,'datetime',Clock),patch.object(bot.time,'monotonic',return_value=161):
+            self.assertIsNotNone(self.client.fetch_intraday_candles('1'))
+        self.client.session.post.assert_called_once()
+        self.assertEqual(self.client.history_failure_streak,0)
 
     def test_permanent_http_error_records_code_without_retry(self):
         self.client.session.post.return_value=response({"errorCode":"DH-902","errorType":"Invalid_Access"},401)

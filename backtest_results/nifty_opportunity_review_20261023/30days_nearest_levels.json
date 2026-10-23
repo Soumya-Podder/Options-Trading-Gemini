@@ -1,0 +1,39 @@
+{
+  "calendar_days": 30,
+  "variant": "nearest_levels",
+  "sessions": 21,
+  "trades": 6,
+  "gross": -965.25,
+  "net": -1352.25,
+  "net_wins": 1,
+  "net_losses": 5,
+  "avg_net_win": 348.25,
+  "avg_net_loss": 340.1,
+  "zero_trade_days": 15,
+  "unvalidated": 0,
+  "exit_reasons": {
+    "INITIAL_SL_HIT": 5,
+    "ASYMMETRIC_TRAIL_PROFIT": 1
+  },
+  "entry_rejection_observations": {
+    "Need matched five-minute strike OI": 246,
+    "Need prior-session data and five closed session candles": 364,
+    "BUY_CE: Weak follow-through candle body or closing location": 1484,
+    "BUY_PE: Price has not held directional confirmation": 4596,
+    "BUY_CE: Price has not held directional confirmation": 4808,
+    "BUY_PE: Weak follow-through candle body or closing location": 1572,
+    "BUY_PE: Wait for a separate closed-candle hold/retest after the level event": 725,
+    "BUY_PE: Current price has advanced beyond the confirmation entry zone": 261,
+    "BUY_PE: Insufficient room before opposing support/resistance": 97,
+    "BUY_CE: Wait for a separate closed-candle hold/retest after the level event": 649,
+    "BUY_CE: Current price has advanced beyond the confirmation entry zone": 232,
+    "BUY_CE: Insufficient room before opposing support/resistance": 78,
+    "Learned-rule/premium/wall-room or other execution selection veto": 1
+  },
+  "limitations": [
+    "Previously examined dates, exploratory comparison, not untouched validation",
+    "Historical OI is a relative-strike subset without previous-day OI",
+    "Same-expiry assumption; full-chain buildup cannot be reconstructed",
+    "One-minute adverse-slippage replay; daily stop applies to realized net only, not the intratrade daily-profit exit"
+  ]
+}

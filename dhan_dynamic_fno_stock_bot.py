@@ -17,9 +17,9 @@ from datetime import datetime, timedelta, time as dtime, timezone
 from typing import Dict, Any, List, Optional, Tuple
 import requests
 from collections import Counter
-from stock_data_quality import HistoricalDataMixin, quote_received_age
+from pathlib import Path
 from stock_option_signals import evaluate_stock_setup
-from stock_option_policy import premium_plan, rank_candidates, DailyTradeGate
+from stock_option_policy import premium_plan, rank_candidates, DailyTradeGate, stock_reentry_reason
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -27,6 +27,9 @@ try:
     from telegram_notifier import TelegramNotifier
 except ImportError:
     TelegramNotifier = None
+
+if __name__=="__main__":
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
 
 LOG_FILE = "dhan_stock_fno.log"
 LEDGER_FILE = "stock_fno_paper_ledger.json"
@@ -175,6 +178,9 @@ class DynamicStrategyConfig:
         self.no_progress_bars = int(env.get("STOCK_OPT_NO_PROGRESS_BARS", 5))
         self.max_premium = float(env.get("STOCK_OPT_MAX_PREMIUM", 1000))
         self.gate_dir = "stock_option_daily_entries"
+        self.enable_opening_trend=env.get("STOCK_OPT_OPENING_TREND","false").strip().lower()=="true"
+        self.extend_rupee_target=env.get("STOCK_OPT_EXTEND_RUPEE_TARGET","false").strip().lower()=="true"
+        self.reentry_after_loss=env.get("STOCK_OPT_REENTRY_AFTER_LOSS","false").strip().lower()=="true"
         numbers = (self.target_pct, self.stop_pct, self.min_rr_target, self.slippage_pct,
                    self.max_spread_pct, self.rupee_target, self.rupee_max_risk,
                    self.min_delta, self.max_delta, self.max_theta_pct_per_day, self.max_premium)
@@ -189,10 +195,10 @@ class DynamicStrategyConfig:
                 and 1 <= self.no_progress_bars <= self.max_hold_bars_5m):
             raise ValueError("Invalid stock-option target, risk, Greek or entry limits")
 
-    def plan(self, entry: float, qty: int):
+    def plan(self, entry: float, qty: int, max_target_price=None):
         return premium_plan(entry, qty, compute_fno_option_charges, self.target_pct,
                             self.stop_pct, self.min_rr_target, self.slippage_pct,
-                            self.rupee_target, self.max_lots, self.rupee_max_risk)
+                            self.rupee_target, self.max_lots, self.rupee_max_risk,self.extend_rupee_target,max_target_price)
 
 
 class DynamicStockOptionsUniverse:
@@ -361,7 +367,195 @@ class DynamicStockOptionsUniverse:
         return min(candidates, key=lambda c: (abs(abs(c["delta"])-(cfg.min_delta+cfg.max_delta)/2), c["iv"]))
 
 
-class DhanStockOptionsClient(HistoricalDataMixin):
+CACHE_VERSION = 2
+
+def boundary(value, default):
+    if value is None:
+        return default
+    dt = datetime.fromisoformat(value)
+    return dt.replace(tzinfo=IST) if dt.tzinfo is None else dt.astimezone(IST)
+
+
+def quote_received_age(quote, now_epoch):
+    """Age of local response receipt; last-trade time is not snapshot time."""
+    try:
+        received=float(quote["received_epoch"])
+        age=float(now_epoch)-received
+    except (KeyError,TypeError,ValueError,OverflowError):
+        return float("inf")
+    return age if math.isfinite(age) else float("inf")
+
+
+class DhanStockOptionsClient:
+    def _history_issue(self, payload, start, end, kind, **details):
+        event = {"security_id": str(payload["securityId"]), "instrument": payload["instrument"],
+                 "side": payload.get("drvOptionType"), "from": start.isoformat(),
+                 "to_exclusive": end.isoformat(), "reason": kind,
+                 "severity": "coverage_warning" if kind in ("internal_bar_gap", "partial_session_tail") else "error",
+                 **details}
+        self.history_events.append(event)
+        self.logger.warning("Historical data quality: %s", json.dumps(event))
+
+    def _history_window(self, endpoint, payload, start, end, fields, cache_dir, use_cache):
+        now = datetime.now(IST)
+        request = {**payload, "fromDate": start.strftime("%Y-%m-%d %H:%M:%S") if endpoint == "intraday" else start.strftime("%Y-%m-%d"),
+                   "toDate": end.strftime("%Y-%m-%d %H:%M:%S") if endpoint == "intraday" else end.strftime("%Y-%m-%d")}
+        key = hashlib.sha256(json.dumps({"endpoint": endpoint, "payload": request}, sort_keys=True).encode()).hexdigest()
+        path = Path(cache_dir) / f"history_v{CACHE_VERSION}_{key}.json"
+        final = end <= now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+        def validate(data):
+            if not isinstance(data, dict) or not data.get("timestamp"):
+                raise ValueError("empty")
+            if any(not isinstance(data.get(k), list) or len(data[k]) != len(data["timestamp"]) for k in fields):
+                raise ValueError("unequal_arrays")
+            result = {k: [] for k in fields}
+            previous = None
+            for i, stamp in enumerate(data["timestamp"]):
+                stamp = float(stamp)
+                if not math.isfinite(stamp) or stamp != int(stamp) or (previous is not None and stamp <= previous):
+                    raise ValueError("bad_timestamps")
+                previous = stamp
+                # Normalize Dhan responses to a shared [start, end) interval.
+                if not start.timestamp() <= stamp < end.timestamp():
+                    continue
+                row = {k: float(data[k][i]) for k in fields}
+                if not all(math.isfinite(v) for v in row.values()):
+                    raise ValueError("nonfinite")
+                if not 0 < row["low"] <= min(row["open"], row["close"]) <= max(row["open"], row["close"]) <= row["high"]:
+                    raise ValueError("bad_ohlc")
+                if "volume" in row and row["volume"] < 0:
+                    raise ValueError("bad_volume")
+                if "strike" in row and row["strike"] <= 0:
+                    raise ValueError("bad_strike")
+                for k in fields:
+                    result[k].append(int(stamp) if k == "timestamp" else row[k])
+            if not result["timestamp"]:
+                raise ValueError("empty_range")
+            return result
+
+        def record(data, source):
+            self.history_coverage.append({"security_id":str(payload["securityId"]), "endpoint":endpoint,
+                "side":payload.get("drvOptionType"), "from":start.isoformat(),"to_exclusive":end.isoformat(),
+                "first_bar":datetime.fromtimestamp(data["timestamp"][0],IST).isoformat(),
+                "last_bar":datetime.fromtimestamp(data["timestamp"][-1],IST).isoformat(),
+                "rows":len(data["timestamp"]), "source":source})
+            step = int(payload["interval"])*60
+            for previous, current in zip(data["timestamp"],data["timestamp"][1:]):
+                if (datetime.fromtimestamp(previous,IST).date() == datetime.fromtimestamp(current,IST).date()
+                        and current-previous != step):
+                    self._history_issue(payload,start,end,"internal_bar_gap",previous_bar=previous,next_bar=current)
+                    break
+            if (endpoint == "intraday" and payload["exchangeSegment"] == "NSE_EQ" and final
+                    and end.hour == end.minute == end.second == 0):
+                last = datetime.fromtimestamp(data["timestamp"][-1],IST)
+                expected_last = last.replace(hour=15,minute=30,second=0,microsecond=0)-timedelta(seconds=step)
+                if last < expected_last:
+                    self._history_issue(payload,start,end,"partial_session_tail",last_bar=last.isoformat())
+            return data
+
+        if use_cache and path.exists():
+            try:
+                cached = json.loads(path.read_text(encoding="utf-8"))
+                age = time.time() - float(cached["received_epoch"])
+                if (cached.get("version") == CACHE_VERSION and cached.get("request_key") == key
+                        and 0 <= age and (final or age <= 15)):
+                    issue_count, coverage_count = len(self.history_events), len(self.history_coverage)
+                    data = record(validate(cached["data"]),"cache")
+                    if len(self.history_events) == issue_count:
+                        return data
+                    # An old partial cache is not authoritative. Try the network;
+                    # only the replacement request determines final coverage.
+                    del self.history_events[issue_count:]
+                    del self.history_coverage[coverage_count:]
+            except (KeyError, ValueError, TypeError, OSError):
+                pass
+        # Stop repeated network waits after three exhausted transient failures.
+        if self.history_failure_streak >= 3:
+            opened=getattr(self,'history_circuit_opened_at',None)
+            if opened is None:
+                opened=time.monotonic();self.history_circuit_opened_at=opened
+            if not final and time.monotonic()-opened>=60:
+                # A live scanner must not remain disabled for the rest of the
+                # session after a temporary outage. Allow one bounded probe.
+                self.history_failure_streak=2
+            else:
+                self._history_issue(payload, start, end, "circuit_open")
+                return None
+        for attempt in range(2):
+            time.sleep(max(0, 0.65 - (time.monotonic() - self.history_request_at)))
+            self.history_request_at = time.monotonic()
+            retry = False
+            try:
+                response = self.session.post(f"{self.BASE_URL}/charts/{endpoint}", json=request, timeout=(5, 20))
+                if response.status_code != 200:
+                    retry = response.status_code == 429 or response.status_code >= 500
+                    detail = {"http_status": response.status_code}
+                    try:
+                        error = response.json()
+                        detail.update({k: error[k] for k in ("errorCode", "errorType") if k in error})
+                    except ValueError:
+                        pass
+                    kind = "http_error"
+                else:
+                    raw = response.json()
+                    data = raw.get("data", raw)
+                    if endpoint == "rollingoption":
+                        data = data.get("ce" if payload["drvOptionType"] == "CALL" else "pe")
+                    validated = validate(data)
+                    self.history_failure_streak = 0
+                    self.history_circuit_opened_at=None
+                    issue_count = len(self.history_events)
+                    record(validated,"network")
+                    if use_cache and len(self.history_events) == issue_count:
+                        self._history_save(str(path), {"version": CACHE_VERSION, "request_key": key,
+                            "received_epoch": time.time(), "data": validated})
+                    return validated
+            except requests.RequestException as error:
+                kind, detail, retry = "request_error", {"error_type": type(error).__name__}, True
+            except (ValueError, TypeError, KeyError, AttributeError) as error:
+                known = {"empty","empty_range","unequal_arrays","bad_timestamps","nonfinite","bad_ohlc","bad_volume","bad_strike"}
+                validation = error.args[0] if error.args and isinstance(error.args[0],str) and error.args[0] in known else "invalid_json_or_response"
+                kind, detail = "invalid_or_empty_data", {"error_type": type(error).__name__, "validation_reason":validation}
+            if retry and attempt == 0:
+                time.sleep(2)
+                continue
+            self.history_failure_streak = self.history_failure_streak + 1 if retry else 0
+            if self.history_failure_streak>=3:self.history_circuit_opened_at=time.monotonic()
+            self._history_issue(payload, start, end, kind, **detail)
+            return None
+
+    def fetch_intraday_candles(self, security_id, exchange_segment="NSE_EQ", instrument="EQUITY",
+                               interval="5", from_date=None, to_date=None, use_cache=False):
+        now = datetime.now(IST)
+        start = boundary(from_date, (now-timedelta(days=5)).replace(hour=0, minute=0, second=0, microsecond=0))
+        end = boundary(to_date, now)
+        if end <= start:
+            raise ValueError("Historical end must follow start")
+        fields = ("timestamp", "open", "high", "low", "close", "volume")
+        return self._history_window("intraday", {"securityId": str(security_id), "exchangeSegment": exchange_segment,
+            "instrument": instrument, "interval": str(interval)}, start, end, fields, self.history_cache_dir, use_cache)
+
+    def fetch_rolling_stock_option(self, eq_security_id, opt_type, from_date, to_date, interval="5"):
+        start, end = boundary(from_date, None), boundary(to_date, None)
+        if start >= end or start.time().replace(tzinfo=None).isoformat() != "00:00:00" or end.time().replace(tzinfo=None).isoformat() != "00:00:00":
+            raise ValueError("Rolling history requires increasing, midnight date boundaries")
+        payload = {"securityId": int(eq_security_id), "exchangeSegment": "NSE_FNO", "instrument": "OPTSTK",
+            "interval": str(interval), "expiryFlag": "MONTH", "expiryCode": 1, "strike": "ATM",
+            "drvOptionType": "CALL" if opt_type == "CE" else "PUT",
+            "requiredData": ["open", "high", "low", "close", "strike"]}
+        fields = ("timestamp", "open", "high", "low", "close", "strike")
+        merged = {k: [] for k in fields}
+        while start < end:
+            finish = min(start+timedelta(days=5), end)
+            data = self._history_window("rollingoption", payload, start, finish, fields, self.history_cache_dir, True)
+            if data:
+                for k in fields:
+                    merged[k].extend(data[k])
+            start = finish
+        return merged if merged["timestamp"] else None
+
+
     BASE_URL = "https://api.dhan.co/v2"
 
     def __init__(self, client_id: str, access_token: str, logger: logging.Logger):
@@ -515,8 +709,10 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
     candles = client.fetch_intraday_candles(stock_info["eq_security_id"], interval="5")
     if not candles:
         return reject("Underlying candle history unavailable")
-    sig = evaluate_stock_setup(candles, time.time(), cfg.min_day_change_pct, cfg.ema_period)
+    sig = evaluate_stock_setup(candles, time.time(), cfg.min_day_change_pct, cfg.ema_period,
+                               enable_opening_trend=cfg.enable_opening_trend,reasons=reasons)
     if not sig:
+        if reasons:return None
         return reject("No fresh confirmed momentum setup (EMA/VWAP/volume/body/proximity)")
     current = client.fetch_batch_ohlc([stock_info["eq_security_id"]]).get("NSE_EQ", {}).get(str(stock_info["eq_security_id"]), {})
     spot_ltp = float(current.get("last_price", 0) or 0)
@@ -560,7 +756,17 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         spread = (ask - bid) / ask * 100
         if spread > cfg.max_spread_pct:
             return reject(f"Spread {spread:.2f}% above {cfg.max_spread_pct:.2f}%")
-        plan = cfg.plan(ask, qty)
+        if cfg.extend_rupee_target:
+            # Feed the same option-move estimate into sizing. A small first lot
+            # must not veto a larger affordable lot count that fits both the
+            # target-move estimate and the unchanged cash-risk ceiling.
+            delta,theta,gamma=(float(sig[k]) for k in ('delta','theta','gamma'))
+            move=1.8*float(sig['atr_5m'])
+            decay=max(0,-theta)*cfg.max_hold_bars_5m*5/(24*60)
+            premium_move=abs(delta)*move+0.5*gamma*move*move-decay
+            plan=cfg.plan(ask,qty,max_target_price=ask+premium_move)
+        else:
+            plan = cfg.plan(ask, qty)
         if not plan:
             return reject(f"No lot count reaches Rs.{cfg.rupee_target:.0f} within risk/RR limits")
         qty = plan["qty"]
@@ -593,8 +799,10 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         move = 1.8 * float(sig["atr_5m"])
         expected_gain = abs(delta)*move + 0.5*gamma*move*move - decay
         net_gain = expected_gain*qty - plan["target_estimated_costs"]
-        if net_gain < cfg.rupee_target * 0.75:
-            return reject(f"A 1.8 ATR move nets only Rs.{net_gain:.0f} of the Rs.{cfg.rupee_target:.0f} target (75% minimum)")
+        minimum_fraction=1.0 if cfg.extend_rupee_target else 0.75
+        required_gain=max(cfg.rupee_target,plan.get('net_profit_target',cfg.rupee_target))*minimum_fraction
+        if net_gain < required_gain:
+            return reject(f"A 1.8 ATR move nets only Rs.{net_gain:.0f} of the required Rs.{required_gain:.0f} ({minimum_fraction:.0%} minimum)")
         # Cross-sectional IV range in the same expiry/side, not historical IV rank.
         low, high = float(sig["iv_range_low"]), float(sig["iv_range_high"])
         if not all(math.isfinite(v) for v in (low, high)) or high <= low:
@@ -640,6 +848,8 @@ def close_paper_position(ledger, pos, price, reason, now):
                lots=pos.get("lots", 1), exit_price=price, gross_pnl=gross, charges=fees, net_pnl=round(gross-fees, 2),
                r_multiple=round(gross / (pos["opt_1r"] * qty), 2), exit_reason=reason,
                data_source="PAPER_BID_ASK", entry_id=pos["entry_id"])
+    rec['learning_risk_rs']=round(float(pos.get('expected_net_risk',pos['opt_1r']*qty+fees)),2)
+    rec['learning_r_multiple']=round(rec['net_pnl']/rec['learning_risk_rs'],6) if rec['learning_risk_rs']>0 else None
     # Idempotent if interrupted between ledger save and closing the daily record.
     if not any(t.get("entry_id") == pos["entry_id"] for t in ledger["trades"]):
         ledger["trades"].append(rec)
@@ -666,7 +876,7 @@ def paper_exit(pos, quote, now, cfg):
     reason = None
     if bid <= pos["current_sl"]:
         reason = "TRAIL_STOP" if pos["current_sl"] > pos["initial_sl"] else "PREMIUM_STOP"
-    elif net >= pos.get("net_profit_target", cfg.rupee_target):
+    elif bid >= pos["rupee_target_price"]:
         reason = "RUPEE_TARGET"
     elif bid >= pos["hard_target_price"]:
         reason = "PREMIUM_TARGET"
@@ -706,6 +916,8 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
     telegram = TelegramNotifier(env, logger, "LIVE" if live_mode else "PAPER") if TelegramNotifier and not scan_once else None
     logger.info("Stock options: max %d/day | net target Rs.%.0f | estimated risk cap Rs.%.0f",
                 cfg.max_daily_trades, cfg.rupee_target, cfg.rupee_max_risk)
+    logger.info("Entry profile: gap continuation %s | cash-target extension %s | maximum %d lots",
+                cfg.enable_opening_trend,cfg.extend_rupee_target,cfg.max_lots)
     try:
         while True:
             now = datetime.now(IST)
@@ -746,13 +958,24 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
             shortlist = shortlist_movers(quotes, cfg)
             signals = []
             candidates = []
-            used_symbols = {p["symbol"] for p in positions} | {t["symbol"] for t in completed}
+            used_symbols = {p["symbol"] for p in positions}
+            if not cfg.reentry_after_loss:used_symbols|={t['symbol'] for t in completed}
             for change, sec_id, ltp in shortlist:
                 if sec_id not in universe or universe[sec_id]["symbol"] in used_symbols:
                     continue
+                if cfg.reentry_after_loss:
+                    reason=stock_reentry_reason(universe[sec_id]['symbol'],completed,time.time())
+                    if reason:
+                        logger.info('[OPTSTK REENTRY WAIT] %s | %s',universe[sec_id]['symbol'],reason)
+                        continue
                 signal_reasons = []
                 sig = verify_live_scanx_and_resolve_stock_option(client, universe[sec_id], ltp, change, cfg, reasons=signal_reasons)
                 if sig:
+                    if cfg.reentry_after_loss:
+                        reason=stock_reentry_reason(sig['symbol'],completed,time.time(),sig['signal_timestamp'])
+                        if reason:
+                            logger.info('[OPTSTK REENTRY WAIT] %s | %s',sig['symbol'],reason)
+                            continue
                     signals.append(sig)
                     depth = client.fetch_option_quotes([sig["opt_security_id"]])
                     reasons = []
@@ -763,7 +986,7 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                         logger.info("[OPTSTK REJECT] %s %s | %s", sig["symbol"], sig["opt_type"], reasons[0] if reasons else "Unspecified rejection")
                 else:
                     logger.info("[OPTSTK REJECT] %s | %s", universe[sec_id]["symbol"], signal_reasons[0] if signal_reasons else "Setup unavailable")
-            ranked = rank_candidates(candidates)
+            ranked = rank_candidates(candidates,ledger.get('trades',[]) if ledger else [],time.time())
             logger.info("Shortlist %d | confirmed %d | qualified %d", len(shortlist), len(signals), len(ranked))
             if scan_once:
                 return
@@ -795,6 +1018,11 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                 now = datetime.now(IST)
                 if not best or now.time().replace(tzinfo=None) > dtime(14, 30):
                     continue
+                refreshed=rank_candidates([best],ledger.get('trades',[]),now.timestamp())
+                if not refreshed:
+                    logger.info("[OPTSTK LEARNING PAUSE] %s | Recent closed net losses for this setup",symbol)
+                    continue
+                best=refreshed[0]
                 slot = next((i for i in range(1, cfg.max_daily_trades+1) if gate.read(today, i) is None), None)
                 if slot is None:
                     break
@@ -906,10 +1134,13 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
             snapshots.setdefault(ts+300, {})[sec] = {"last_price": last_close, "ohlc": {"close": prev_close}}
             # Slice to already-closed bars; identical setup evaluator to live scanning.
             prefix = {k: v[:i+1] for k, v in candles.items() if isinstance(v, list)}
-            sig = evaluate_stock_setup(prefix, ts+300, cfg.min_day_change_pct, cfg.ema_period)
+            sig = evaluate_stock_setup(prefix, ts+300, cfg.min_day_change_pct, cfg.ema_period,
+                                        enable_opening_trend=cfg.enable_opening_trend)
             if sig:
                 signals[(ts+300, sec)] = sig
     ledger = {"mode": "BACKTEST", "initial_capital": cfg.initial_capital, "trades": [],
+              "entry_configuration":{"opening_trend":cfg.enable_opening_trend,"extend_rupee_target":cfg.extend_rupee_target,
+                  "rupee_target":cfg.rupee_target,"rupee_max_risk":cfg.rupee_max_risk,"max_lots":cfg.max_lots},
               "limitations": ["Current universe and lot sizes; historical membership not reconstructed",
                               "Five-minute OHLC lacks bid/ask and intrabar path; modeled slippage, not verified fills",
                               "Missing bars or rolling ATM strike changes are unvalidated, never synthetic",
@@ -931,7 +1162,9 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
                 continue
             stock = frames[sec]
             if stock["symbol"] in used_symbols.get(day, set()):
-                continue
+                if not cfg.reentry_after_loss:continue
+                history=[t for t in ledger['trades'] if t.get('symbol')==stock['symbol']]
+                if not history or stock_reentry_reason(stock['symbol'],history,ts,sig['signal_timestamp']):continue
             key = (sec, sig["opt_type"])
             if key not in option_maps:
                 raw = client.fetch_rolling_stock_option(sec, sig["opt_type"], start.strftime("%Y-%m-%d"), end.strftime("%Y-%m-%d"))
@@ -959,7 +1192,7 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
                 strategy_rejections["insufficient_wallet"] += 1
             if plan and entry*plan["qty"] + plan["estimated_costs"] <= wallet:
                 candidates.append({**sig, **plan, "symbol": stock["symbol"], "lot_size": qty, "map_key": key})
-        ranked = rank_candidates(candidates)
+        ranked = rank_candidates(candidates,ledger['trades'],ts)
         if not ranked:
             continue
         for best in ranked[:min(cfg.max_concurrent-len(active_until), cfg.max_daily_trades-used_days.get(day,0))]:
@@ -984,7 +1217,9 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
             ledger["trades"].append({**sim, "symbol": best["symbol"], "opt_type": best["opt_type"],
                 "contract": f"{best['symbol']} {sim['strike']:g}_{best['opt_type']}", "qty": qty, "lots": sim["lots"],
                 "timestamp": datetime.fromtimestamp(ts, IST).strftime("%Y-%m-%d %H:%M:%S"),
-                "gross_pnl": gross, "charges": fees, "net_pnl": round(gross-fees, 2), "data_source": "REAL_OPTION_OHLC_MODELED_FILLS"})
+                "gross_pnl": gross, "charges": fees, "net_pnl": round(gross-fees, 2),
+                "scanner":best['scanner'],"learning_risk_rs":best.get('expected_net_risk',sim['opt_1r']*qty+fees),
+                "data_source": "REAL_OPTION_OHLC_MODELED_FILLS"})
     update_ledger_metrics(ledger)
     ledger["unvalidated_candidates_or_outcomes"] = skipped
     ledger["stock_coverage"] = len(frames)

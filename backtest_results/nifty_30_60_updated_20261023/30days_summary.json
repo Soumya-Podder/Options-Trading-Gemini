@@ -1,0 +1,62 @@
+{
+  "calendar_days": 30,
+  "from_inclusive": "2026-09-15",
+  "to_exclusive": "2026-10-15",
+  "trading_sessions": 21,
+  "trades": 7,
+  "gross_profit": 750.75,
+  "net_profit": 299.25,
+  "wins": 2,
+  "losses": 5,
+  "win_rate": 28.571428571428573,
+  "avg_gross_win": 1183.0,
+  "avg_gross_loss": 323.05,
+  "lots": {
+    "1": 7
+  },
+  "unvalidated": 0,
+  "blocks": [
+    {
+      "start": "2026-09-15",
+      "end": "2026-09-28",
+      "sessions": 10,
+      "gross": 500.5,
+      "net": 242.5,
+      "trades": 4,
+      "unvalidated_days": 0,
+      "target_met": false
+    },
+    {
+      "start": "2026-09-29",
+      "end": "2026-10-13",
+      "sessions": 10,
+      "gross": 250.25,
+      "net": 56.75,
+      "trades": 3,
+      "unvalidated_days": 0,
+      "target_met": false
+    },
+    {
+      "start": "2026-10-14",
+      "end": "2026-10-14",
+      "sessions": 1,
+      "gross": 0.0,
+      "net": 0.0,
+      "trades": 0,
+      "unvalidated_days": 0,
+      "target_met": false
+    }
+  ],
+  "exit_reasons": {
+    "ASYMMETRIC_TRAIL_PROFIT": 2,
+    "INITIAL_SL_HIT": 5
+  },
+  "limitations": [
+    "1-minute execution OHLC; adverse 0.1% slippage and stop-first ambiguity handling",
+    "Same day, exact strike, WEEK expiryCode 1; prices never synthesized",
+    "Only ATM +/-3 coverage; missing held-strike bars invalidate outcomes",
+    "Three rolling strikes per side approximate OI walls, not full historical chain",
+    "Research maximum estimated initial gross stop risk Rs.1,000; gaps can exceed this",
+    "Independent fresh learning per candidate; online learning continues chronologically"
+  ]
+}

@@ -13,11 +13,12 @@ import time
 import subprocess
 import signal
 from datetime import datetime
+PROJECT_DIR=os.path.dirname(os.path.abspath(__file__))
 
 # Load environment variables from local .env file if available
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(os.path.join(PROJECT_DIR,".env"))
 except ImportError:
     pass
 
@@ -44,32 +45,35 @@ def is_market_hours() -> bool:
 def main():
     print(f"[{datetime.now()}] Session Manager started. Mode: {MODE}")
     
-    bot_process = None
+    index_process = None
     stock_process = None
     dashboard_process = None
     reported_exits = set()
 
     try:
         # 1. Launch the Real-Data Self-Learning Options Bot Engine
-        cmd = [PYTHON_EXEC, "dhan_bot_engine.py"]
+        index_cmd = [PYTHON_EXEC, "dhan_bot_engine.py", "--indices", "NIFTY"]
         if MODE == "LIVE":
-            cmd.append("--live")
+            index_cmd.append("--live")
 
-        print(f"[{datetime.now()}] Launching {' '.join(cmd)} (Mode: {MODE})...")
-        bot_process = subprocess.Popen(cmd)
+        print(f"[{datetime.now()}] Launching {' '.join(index_cmd)} (Mode: {MODE})...")
+        index_process = subprocess.Popen(index_cmd,cwd=PROJECT_DIR)
+
+        # Stagger startup to avoid an initial burst of data requests.
+        time.sleep(3.0)
 
         stock_cmd = [PYTHON_EXEC, "dhan_dynamic_fno_stock_bot.py"]
         if MODE == "LIVE":
             stock_cmd.append("--live")
         print(f"[{datetime.now()}] Launching {' '.join(stock_cmd)} (Mode: {MODE})...")
-        stock_process = subprocess.Popen(stock_cmd)
+        stock_process = subprocess.Popen(stock_cmd,cwd=PROJECT_DIR)
 
         # Give the bot 3 seconds to initialize connections & local state
         time.sleep(3.0)
 
         # 2. Launch the Live Terminal Dashboard
         print(f"[{datetime.now()}] Launching bot_dashboard.py...")
-        dashboard_process = subprocess.Popen([PYTHON_EXEC, "bot_dashboard.py", "--refresh", "2.0"])
+        dashboard_process = subprocess.Popen([PYTHON_EXEC, "bot_dashboard.py", "--refresh", "2.0"],cwd=PROJECT_DIR)
 
         # 3. Monitor loop until 03:46 PM IST or manual termination
         while True:
@@ -78,15 +82,17 @@ def main():
             # Check if processes crashed unexpectedly
             # The stock bot may finish normally after its daily cap or cutoff.
             # Keep supervising the other engine until it also finishes.
-            exits = {}
-            for name, proc in (("Index bot", bot_process), ("Stock-options bot", stock_process)):
-                exits[name] = proc.poll()
-                if exits[name] is not None and name not in reported_exits:
-                    print(f"[{datetime.now()}] {name} exited with code {exits[name]}.")
-                    reported_exits.add(name)
-            if all(code is not None for code in exits.values()):
+            index_done=index_process.poll() is not None
+            stock_done=stock_process.poll() is not None
+            if "Index bot" not in reported_exits and index_done:
+                reported_exits.add("Index bot")
+                print(f"[{datetime.now()}] Index engine finished (code {index_process.returncode}); stock engine continues if active.")
+            if "Stock-options bot" not in reported_exits and stock_done:
+                reported_exits.add("Stock-options bot")
+                print(f"[{datetime.now()}] Stock engine finished (code {stock_process.returncode}); index continues.")
+            if index_done and stock_done:
                 break
-            
+
             # Check if past 03:46 PM IST shutdown time
             now = datetime.now()
             if now.weekday() >= 5 or now.time() > datetime.strptime("15:46", "%H:%M").time():
@@ -97,7 +103,7 @@ def main():
         print(f"\n[{datetime.now()}] Manual stop requested (Ctrl+C). Cleaning up...")
     finally:
         # Graceful termination sequence
-        for name, proc in [("Dashboard", dashboard_process), ("Stock-options bot", stock_process), ("Index bot", bot_process)]:
+        for name, proc in [("Dashboard", dashboard_process), ("Stock-options bot", stock_process), ("Index bot", index_process)]:
             if proc and proc.poll() is None:
                 print(f"[{datetime.now()}] Stopping {name} (PID {proc.pid})...")
                 try:

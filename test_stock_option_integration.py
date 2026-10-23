@@ -34,6 +34,7 @@ class IntegrationTests(unittest.TestCase):
         bid=53.5
         quote={"received_epoch":self.now.timestamp(),"depth":{"buy":[{"price":bid,"quantity":pos["qty"]}]}}
         self.assertGreater((bid-50)*pos["qty"]-bot.compute_fno_option_charges(50,bid,pos["qty"]),1200)
+        self.assertLess(bid,pos["rupee_target_price"])
         self.assertIsNone(bot.paper_exit(pos,quote,self.now,cfg))
 
     def test_follow_through_band_for_calls_and_puts(self):
@@ -60,7 +61,7 @@ class IntegrationTests(unittest.TestCase):
                     "delta": 0.6, "theta": -1, "gamma": 0.01, "iv": 20,
                     "iv_range_low": 15, "iv_range_high": 30, "opt_type": "CE",
                     "greeks_timestamp": self.now.timestamp(), "expiry": "2026-11-26", "atr_5m": 20}
-        self.quote = {"last_trade_time": "22/10/2026 11:00:10",
+        self.quote = {"received_epoch": datetime(2026,10,22,11,0,10,tzinfo=bot.IST).timestamp(), "last_trade_time": "22/10/2026 11:00:10",
                       "depth": {"buy": [{"price": 99.95, "quantity": 500}],
                                 "sell": [{"price": 100, "quantity": 500}]}}
 
@@ -77,7 +78,7 @@ class IntegrationTests(unittest.TestCase):
     def test_wide_spread_stale_depth_or_insufficient_size_rejected(self):
         for edit in (lambda q: q["depth"]["buy"][0].update(price=97),
                      lambda q: q["depth"]["sell"][0].update(quantity=499),
-                     lambda q: q.update(last_trade_time="22/10/2026 10:59:00")):
+                     lambda q: q.update(received_epoch=self.now.timestamp()-31)):
             q = copy.deepcopy(self.quote)
             edit(q)
             self.assertIsNone(self.qualify(q))

@@ -11,7 +11,7 @@ import json
 import math
 import os
 import tempfile
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional
@@ -105,7 +105,8 @@ def _percentage_plan(
 
 def premium_plan(entry, qty, charge_fn, target_pct=3.0, stop_pct=0.5,
                  min_net_rr=3.0, slippage_pct=0.1, rupee_target=0,
-                 max_lots=1, rupee_max_risk=float("inf")):
+                 max_lots=1, rupee_max_risk=float("inf"), extend_rupee_target=False,
+                 max_target_price=None):
     """Choose the smallest lot count reaching the net rupee target within limits.
 
     qty is the exchange lot size. Rupee target prices include estimated fees
@@ -115,15 +116,33 @@ def premium_plan(entry, qty, charge_fn, target_pct=3.0, stop_pct=0.5,
             or not math.isfinite(rupee_target) or rupee_target < 0
             or math.isnan(rupee_max_risk) or rupee_max_risk <= 0):
         return None
+    if not isinstance(extend_rupee_target,bool):return None
+    if max_target_price is not None:
+        try:
+            if not math.isfinite(float(max_target_price)) or float(max_target_price)<=float(entry):return None
+            max_target_price=float(max_target_price)
+        except (ValueError,TypeError,OverflowError):return None
+    if extend_rupee_target:
+        try:
+            if isinstance(target_pct,bool) or not math.isfinite(float(target_pct)) or not 0<float(target_pct)<=100:return None
+            target_pct=float(target_pct)
+        except (ValueError,TypeError,OverflowError):return None
     for lots in range(1, max_lots + 1):
         if isinstance(qty, bool):
             return None
         units = qty * lots
-        plan = _percentage_plan(entry, units, charge_fn, target_pct, stop_pct,
+        # In explicit rupee-target mode, a percentage booking preference must
+        # not force extra lots or veto an achievable cash target. Still bound
+        # target search to at most a doubling of premium; executable Greeks and
+        # underlying move feasibility are checked during qualification.
+        ceiling_pct=max(target_pct,100.) if extend_rupee_target and rupee_target else target_pct
+        plan = _percentage_plan(entry, units, charge_fn, ceiling_pct, stop_pct,
                                 min_net_rr, slippage_pct)
         if not plan or plan["expected_net_reward"] < rupee_target or plan["expected_net_risk"] > rupee_max_risk:
             continue
         target_price = plan["hard_target_price"]
+        if extend_rupee_target and max_target_price is not None:
+            target_price=min(target_price,math.floor(max_target_price*20+1e-9)/20)
         if rupee_target:
             stop_fill = math.floor(plan["initial_sl"]*(1-slippage_pct/100)*20 + 1e-9)/20
             risk = (entry-stop_fill)*units + charge_fn(entry,stop_fill,units)
@@ -134,6 +153,8 @@ def premium_plan(entry, qty, charge_fn, target_pct=3.0, stop_pct=0.5,
             # Integer tick bisection avoids a slow linear search for expensive options.
             lo = math.floor(entry / float(TICK)) + 1
             hi = round(target_price / float(TICK))
+            if hi<lo:
+                continue
             while lo < hi:
                 mid = (lo + hi) // 2
                 price = mid * float(TICK)
@@ -146,11 +167,16 @@ def premium_plan(entry, qty, charge_fn, target_pct=3.0, stop_pct=0.5,
             target_price = round(lo * float(TICK), 2)
             fill = math.floor(target_price * (1 - slippage_pct / 100)*20 + 1e-9)/20
             reward = (fill-entry)*units - charge_fn(entry, fill, units)
-            if reward < rupee_target or reward / plan["expected_net_risk"] < min_net_rr:
+            if reward < required_reward:
                 continue
             plan.update(expected_net_reward=reward, expected_net_rr=reward/plan["expected_net_risk"])
             plan["net_profit_target"] = required_reward
             plan["trail_jump"] = max(float(TICK), round((target_price-entry)*0.25 / float(TICK))*float(TICK))
+            if extend_rupee_target:
+                plan.update(hard_target_price=target_price,min_rr_target_price=target_price,
+                            target_pct_reference=target_pct,
+                            target_estimated_costs=charge_fn(entry,fill,units)+(target_price-fill)*units)
+                plan['estimated_costs']=max(plan['target_estimated_costs'],plan['stop_estimated_costs'])
         plan.update(lots=lots, qty=units, rupee_target_price=target_price)
         return plan
     return None
@@ -169,12 +195,71 @@ def signal_quality(candidate: Dict[str, Any]) -> float:
     return _finite_score(candidate.get("signal_quality", 0.0))
 
 
-def rank_candidates(candidates: Iterable[Dict[str, Any]]) -> list[Dict[str, Any]]:
-    """Rank confirmed setup quality first, then net payoff and symbol, stably."""
+def stock_reentry_reason(symbol, trades, as_of, signal_timestamp=None):
+    """A loss need not blacklist a symbol all day; require a fresh setup after 15m.
+
+    Inspect closing time before outcome, so replay never uses a future P&L.
+    Daily slot caps and open-position checks are enforced independently.
+    """
+    ist=timezone(timedelta(hours=5,minutes=30));day=datetime.fromtimestamp(as_of,ist).date()
+    closed=[]
+    for trade in trades:
+        if trade.get('symbol')!=symbol:continue
+        try:
+            entered=datetime.fromisoformat(trade['timestamp'])
+            if entered.tzinfo is None:entered=entered.replace(tzinfo=ist)
+            if entered.date()!=day or entered.timestamp()>as_of:continue
+            exited=datetime.fromisoformat(trade['exit_timestamp'])
+            if exited.tzinfo is None:exited=exited.replace(tzinfo=ist)
+            if exited.timestamp()>as_of:return 'Earlier symbol position has not closed'
+            net=float(trade['net_pnl'])
+            if not math.isfinite(net):return 'Earlier symbol outcome is invalid'
+            if net>=0:return 'Profit or breakeven already booked for this symbol today'
+            closed.append(exited.timestamp())
+        except (KeyError,ValueError,TypeError,OverflowError):return 'Earlier symbol trade needs reconciliation'
+    if not closed:return None
+    last_exit=max(closed)
+    if as_of-last_exit<900:return '15-minute cooldown after the previous net loss'
+    if signal_timestamp is not None and signal_timestamp<=last_exit:
+        return 'Re-entry needs a new confirmation candle after the loss'
+    return None
+
+
+def rank_candidates(candidates: Iterable[Dict[str, Any]], closed_trades=(), as_of=None) -> list[Dict[str, Any]]:
+    """Rank quality with bounded feedback from this symbol/setup's closed net outcomes.
+
+    Feedback never increases size or relaxes entry checks. Use only outcomes known
+    at decision time, including during replay. Unknown/legacy risk is not invented.
+    """
+    candidates=[dict(c) for c in candidates]
+    if as_of is not None:
+        cutoff=datetime.fromtimestamp(as_of,timezone.utc)
+        for candidate in candidates:
+            outcomes=[]
+            for trade in closed_trades:
+                if any(trade.get(k)!=candidate.get(k) for k in ('symbol','scanner','opt_type')):
+                    continue
+                try:
+                    exited=datetime.fromisoformat(trade['exit_timestamp'])
+                    if exited.tzinfo is None:exited=exited.replace(tzinfo=timezone(timedelta(hours=5,minutes=30)))
+                    if exited>cutoff:continue
+                    net=float(trade['net_pnl']);risk=float(trade.get('learning_risk_rs',0))
+                    if risk<=0 or not all(math.isfinite(v) for v in (net,risk)):continue
+                    outcomes.append((exited,net/risk,net))
+                except (KeyError,TypeError,ValueError,OverflowError):continue
+            outcomes=sorted(outcomes,key=lambda r:r[0])[-20:]
+            count=len(outcomes)
+            expectancy=sum(r[1] for r in outcomes)/count if count else 0.
+            adjustment=max(-10.,min(10.,10*expectancy*count/(count+5))) if count>=3 else 0.
+            paused=(count>=5 and expectancy<0 and all(r[2]<0 for r in outcomes[-3:])
+                    and cutoff-outcomes[-1][0]<timedelta(days=5))
+            candidate['learning_feedback']={'closed_trades':count,'net_expectancy_r':round(expectancy,4),
+                'quality_adjustment':round(adjustment,4),'paused':paused,'basis':'CLOSED_NET_PNL_SAME_SYMBOL_SCANNER_SIDE'}
+        candidates=[c for c in candidates if not c['learning_feedback']['paused']]
     return sorted(
         candidates,
         key=lambda candidate: (
-            -signal_quality(candidate),
+            -(signal_quality(candidate)+candidate.get('learning_feedback',{}).get('quality_adjustment',0)),
             -_finite_score(candidate.get("expected_net_rr", 0.0)),
             str(candidate.get("symbol", "")).upper(),
         ),

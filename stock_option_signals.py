@@ -10,6 +10,7 @@ only five minutes later. A signal is evidence of alignment, not a price guarante
 from datetime import datetime, time, timezone, timedelta
 from math import isfinite
 from typing import Dict, List, Optional
+from market_regime import opening_trend
 
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -98,32 +99,37 @@ def evaluate_stock_setup(
     as_of_epoch: float,
     min_day_change_pct: float = 2.2,
     ema_period: int = 10,
+    enable_opening_trend: bool = False,
+    reasons=None,
 ) -> Optional[dict]:
     """Return a selective CE/PE setup, or None when any confirmation is absent.
 
     Scanner momentum, rising volume and price versus previous completed 15m
     EMA require one directional confirmation close. ORB/retest adds rank only.
     """
-    if (not isinstance(ema_period, int) or isinstance(ema_period, bool) or ema_period < 2):
+    def reject(reason):
+        if reasons is not None:reasons.append(reason)
         return None
+    if (not isinstance(ema_period, int) or isinstance(ema_period, bool) or ema_period < 2):
+        return reject('Invalid EMA period')
     try:
         as_of_epoch = float(as_of_epoch)
         min_day_change_pct = float(min_day_change_pct)
         if not isfinite(as_of_epoch) or not isfinite(min_day_change_pct) or min_day_change_pct <= 0:
-            return None
+            return reject('Invalid decision time or day-change threshold')
         today = datetime.fromtimestamp(as_of_epoch, IST).date()
     except (TypeError, ValueError, OverflowError, OSError):
-        return None
+        return reject('Invalid decision time or day-change threshold')
     bars = _closed_bars(candles, as_of_epoch)
     if not bars or len(bars) < 11 or bars[-1]["date"] != today:
-        return None
+        return reject('Insufficient current-session or malformed closed candles')
     latest = bars[-1]
     if as_of_epoch - (latest["timestamp"] + BAR_SECONDS) > BAR_SECONDS:
-        return None
+        return reject('Stale closed confirmation candle')
     today_bars = [bar for bar in bars if bar["date"] == today]
     previous_bars = [bar for bar in bars if bar["date"] < today]
     if len(today_bars) < 2 or not previous_bars:
-        return None
+        return reject('Need prior close and two closed session candles')
     session_open = int(datetime.combine(today, SESSION_OPEN, IST).timestamp())
     opening = {bar["timestamp"]: bar for bar in today_bars}
     opening_range = [opening.get(session_open + offset) for offset in (0, 300, 600)]
@@ -132,33 +138,36 @@ def evaluate_stock_setup(
     orb_low = min((bar["low"] for bar in opening_range), default=latest["low"])
     previous = today_bars[-2]
     if latest["timestamp"] != previous["timestamp"] + BAR_SECONDS:
-        return None
+        return reject('Gap in the latest confirmation candles')
 
     day_change_pct = (latest["close"] / previous_bars[-1]["close"] - 1.0) * 100.0
     if abs(day_change_pct) < min_day_change_pct:
-        return None
+        return reject('Closed day move below scanner threshold')
     bars_15m = _completed_15m_bars(bars)
     if len(bars_15m) < ema_period + 2:
-        return None
+        return reject('Insufficient completed 15-minute EMA history')
     # Freshness and consecutive confirmation bars are checked above. Older gaps
     # may reduce trend observations without invalidating today's fresh setup.
     ema_values = _ema([bar["close"] for bar in bars_15m], ema_period)
     ema_value, previous_ema = ema_values[-1], ema_values[-2]
     atr_15m = _atr(bars_15m, ema_period)[-1]
     atr_5m = _atr(bars, 10)[-1]
-    if atr_5m <= 0 or atr_15m <= 0 or abs(latest["close"] - ema_value) > 1.25 * atr_15m:
-        return None
+    regime=opening_trend([{**b,'ts':b['timestamp']} for b in bars]) if enable_opening_trend else None
+    if atr_5m <= 0 or atr_15m <= 0:
+        return reject('Unavailable ATR')
+    if abs(latest["close"] - ema_value) > 1.25 * atr_15m and not regime:
+        return reject('EMA distance exceeds 1.25 ATR without a confirmed opening-trend break')
     total_volume = sum(bar["volume"] for bar in today_bars)
     if total_volume <= 0:
-        return None
+        return reject('No current-session volume for VWAP')
     vwap = sum(((bar["high"] + bar["low"] + bar["close"]) / 3.0) * bar["volume"]
                for bar in today_bars) / total_volume
     average_volume = sum(bar["volume"] for bar in bars[-11:-1]) / 10.0
     if average_volume <= 0 or latest["volume"] <= 0 or latest["volume"] < 1.2 * average_volume:
-        return None
+        return reject('Confirmation volume below 1.2 times recent average')
     candle_range = latest["high"] - latest["low"]
     if candle_range <= 0 or abs(latest["close"] - latest["open"]) < 0.45 * candle_range:
-        return None
+        return reject('Weak confirmation candle body')
 
     bullish = (day_change_pct >= min_day_change_pct
                and latest["volume"] > previous["volume"]
@@ -176,7 +185,7 @@ def evaluate_stock_setup(
                  or (bearish and latest["close"] < orb_low
                      and abs(previous["high"]-orb_low) <= tolerance and previous["close"] <= orb_low))
     if not bullish and not bearish:
-        return None
+        return reject('Candle, VWAP, EMA and rising volume are not directionally aligned')
     relative_volume = latest["volume"] / average_volume
     body_ratio = abs(latest["close"] - latest["open"]) / candle_range
     close_strength = ((latest["close"] - latest["low"]) if bullish
@@ -187,7 +196,8 @@ def evaluate_stock_setup(
                       + 30.0 * body_ratio + 20.0 * close_strength + 10.0 * orb_bonus)
     return {
         "opt_type": "CE" if bullish else "PE",
-        "scanner": "BULLISH_MOMENTUM_CONFIRMATION" if bullish else "BEARISH_MOMENTUM_CONFIRMATION",
+        "scanner": (regime['setup']+('_CE' if bullish else '_PE')) if regime else ("BULLISH_MOMENTUM_CONFIRMATION" if bullish else "BEARISH_MOMENTUM_CONFIRMATION"),
+        "market_regime":regime,
         "spot_ltp": latest["close"],
         "day_change_pct": day_change_pct,
         "ema10_15m": ema_value,

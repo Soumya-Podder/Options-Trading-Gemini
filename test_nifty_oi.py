@@ -16,6 +16,14 @@ class OITests(unittest.TestCase):
         self.tracker=NiftyOITracker()
         self.t=datetime(2026,10,23,10,tzinfo=IST).timestamp()
 
+    def test_nearest_building_wall_uses_oi_change_even_when_premium_rises(self):
+        self.tracker.assess(chain(),22025,self.t,'2026-10-27')
+        _,info=self.tracker.assess(chain(11000,110),22025,self.t+300,'2026-10-27')
+        self.assertEqual(info['room_to_resistance'],25)
+        self.assertEqual(info['room_to_support'],25)
+        self.assertEqual(info['building_resistance']['strike'],22050)
+        self.assertEqual(info['building_support']['strike'],22000)
+
     def test_startup_requires_actual_five_minutes(self):
         self.tracker.assess(chain(),22025,self.t,'2026-10-27')
         ref,info=self.tracker.assess(chain(11000),22025,self.t+299,'2026-10-27')

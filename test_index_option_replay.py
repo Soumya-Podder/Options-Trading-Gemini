@@ -96,7 +96,8 @@ class ReplayTests(unittest.TestCase):
              patch.object(bot,"assess_nifty_structure",return_value={"ready":True,"allowed":True}), \
              patch.object(bot,"atomic_write_json") as save:
             bot.run_real_historical_backtest(2,["NIFTY"],"5",logging.getLogger("test"))
-        ledger=next(c.args[1] for c in save.call_args_list if c.args[0]=="paper_trade_ledger.json")
+        ledger=next(c.args[1] for c in save.call_args_list if str(c.args[0]).endswith("paper_trade_ledger.json"))
+        self.assertTrue(all(c.args[0] not in ("paper_trade_ledger.json","live_telemetry.json","bot_brain_state.json","learned_rules.json") for c in save.call_args_list))
         self.assertEqual(ledger["total_trades"],0)
         self.assertEqual(ledger["net_profit_after_charges"],0)
         self.assertEqual(len(ledger["unvalidated_trades"]),1)

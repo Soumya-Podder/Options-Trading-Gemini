@@ -1,3 +1,5 @@
+> Current entry behavior is documented in NIFTY_LEVEL_ENTRY.md. The notes below describe the earlier momentum-gated implementation and its historical evaluation.
+
 # Nifty entry structure
 
 Nifty entries now require both the existing OI/momentum/learned-rule filters and

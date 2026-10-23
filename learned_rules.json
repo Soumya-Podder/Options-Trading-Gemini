@@ -17,7 +17,9 @@
     "expectancy_r": -1.0,
     "intraday_losses": 0,
     "last_lot_loss": true,
-    "muted_on_day": ""
+    "muted_on_day": "",
+    "pruned_on_day": "2026-10-23",
+    "prune_count": 1
   },
   "IF wall=CALL_SIDE_GT_50L & ce=LONG_UNWINDING & pe=SHORT_COVERING & ctrl=BUYERS_AND_CALL_WRITERS_ALIGNED & dom=BEARS_DOMINATING -> BUY_PE": {
     "rule_id": "RULE_002",
@@ -37,7 +39,9 @@
     "expectancy_r": -0.72,
     "intraday_losses": 0,
     "last_lot_loss": true,
-    "muted_on_day": ""
+    "muted_on_day": "",
+    "pruned_on_day": "2026-10-23",
+    "prune_count": 1
   },
   "IF wall=CALL_SIDE_GT_50L & ce=SHORT_BUILDUP & pe=LONG_BUILDUP & ctrl=CALL_WRITERS_DOMINATING_CEILING & dom=BEARS_DOMINATING -> BUY_PE": {
     "rule_id": "RULE_003",
@@ -142,7 +146,9 @@
     "expectancy_r": -0.24,
     "intraday_losses": 0,
     "last_lot_loss": true,
-    "muted_on_day": "2026-09-29"
+    "muted_on_day": "2026-09-29",
+    "pruned_on_day": "2026-10-23",
+    "prune_count": 1
   },
   "IF wall=PUT_SIDE_GT_50L & ce=LONG_BUILDUP & pe=SHORT_BUILDUP & ctrl=PUT_WRITERS_DOMINATING_FLOOR & dom=BULLS_DOMINATING -> BUY_CE": {
     "rule_id": "RULE_007",
@@ -165,7 +171,9 @@
     "expectancy_r": 0.88,
     "intraday_losses": 0,
     "last_lot_loss": true,
-    "muted_on_day": ""
+    "muted_on_day": "",
+    "pruned_on_day": "2026-10-23",
+    "prune_count": 1
   },
   "IF wall=CALL_SIDE_GT_50L & ce=LONG_UNWINDING & pe=LONG_BUILDUP & ctrl=CALL_WRITERS_DOMINATING_CEILING & dom=BEARS_DOMINATING -> BUY_PE": {
     "rule_id": "RULE_008",

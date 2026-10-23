@@ -1,0 +1,30 @@
+{
+  "calendar_days": 60,
+  "variant": "before",
+  "sessions": 41,
+  "trades": 4,
+  "gross": 3.25,
+  "net": -254.75,
+  "net_wins": 1,
+  "net_losses": 3,
+  "avg_net_win": 939.75,
+  "avg_net_loss": 398.1666666666667,
+  "zero_trade_days": 37,
+  "unvalidated": 0,
+  "exit_reasons": {
+    "INITIAL_SL_HIT": 3,
+    "ASYMMETRIC_TRAIL_PROFIT": 1
+  },
+  "entry_rejection_observations": {
+    "Need matched five-minute strike OI": 376,
+    "Need prior-session data and five closed session candles": 737,
+    "No marked level with both closed-candle reaction and supportive same-strike OI": 14249,
+    "Learned-rule/premium/wall-room or other execution selection veto": 4
+  },
+  "limitations": [
+    "Previously examined dates, exploratory comparison, not untouched validation",
+    "Historical OI is a relative-strike subset without previous-day OI",
+    "Same-expiry assumption; full-chain buildup cannot be reconstructed",
+    "One-minute adverse-slippage replay; daily stop applies to realized net only, not the intratrade daily-profit exit"
+  ]
+}

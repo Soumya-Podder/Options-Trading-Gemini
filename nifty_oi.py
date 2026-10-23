@@ -71,7 +71,13 @@ class NiftyOITracker:
         supports=sorted((r for r in rows if r['side']=='pe' and r['strike']<=spot),key=lambda r:r['oi'],reverse=True)[:5]
         resistances=sorted((r for r in rows if r['side']=='ce' and r['strike']>=spot),key=lambda r:r['oi'],reverse=True)[:5]
         totals={side:sum(n['oi'] for (k,s),n in nodes.items() if s==side) for side in ('ce','pe')}
-        info={'ready':ready,'reason':reason,'expiry':expiry,'snapshot_received_epoch':now,
+        def building(row):
+            return (row['change_over_5m'] or 0)>0 or (row['change_from_previous_day'] or 0)>0
+        building_supports=sorted((r for r in rows if r['side']=='pe' and r['strike']<=spot and building(r)),key=lambda r:-r['strike'])
+        building_resistances=sorted((r for r in rows if r['side']=='ce' and r['strike']>=spot and building(r)),key=lambda r:r['strike'])
+        nearest_support=building_supports[0] if building_supports else None
+        nearest_resistance=building_resistances[0] if building_resistances else None
+        info={'room_to_resistance':round(nearest_resistance['strike']-spot,1) if nearest_resistance else None,'room_to_support':round(spot-nearest_support['strike'],1) if nearest_support else None,'building_support':nearest_support,'building_resistance':nearest_resistance,'level_basis':'Nearest strike with rising five-minute OI or positive buildup since previous close','ready':ready,'reason':reason,'expiry':expiry,'snapshot_received_epoch':now,
               'reference_age_seconds':round(now-prior['time'],2) if prior else None,
               'comparison':'Same six current strike/side contracts; not a changing ATM basket',
               'oi_units':'Raw Dhan OI units, without lot conversion',
