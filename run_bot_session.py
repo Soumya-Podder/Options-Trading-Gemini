@@ -2,8 +2,8 @@
 """
 DhanHQ v4.5 Automated Session Manager & Clean Shutdown Controller
 =================================================================
-Launches the real-data self-learning options bot (dhan_bot_engine.py)
-and live terminal dashboard (bot_dashboard.py), monitors their runtime,
+Launches the index and stock-options bots and live terminal dashboard,
+monitors their runtime,
 and triggers a clean shutdown at 03:46 PM IST.
 """
 
@@ -45,7 +45,9 @@ def main():
     print(f"[{datetime.now()}] Session Manager started. Mode: {MODE}")
     
     bot_process = None
+    stock_process = None
     dashboard_process = None
+    reported_exits = set()
 
     try:
         # 1. Launch the Real-Data Self-Learning Options Bot Engine
@@ -55,6 +57,12 @@ def main():
 
         print(f"[{datetime.now()}] Launching {' '.join(cmd)} (Mode: {MODE})...")
         bot_process = subprocess.Popen(cmd)
+
+        stock_cmd = [PYTHON_EXEC, "dhan_dynamic_fno_stock_bot.py"]
+        if MODE == "LIVE":
+            stock_cmd.append("--live")
+        print(f"[{datetime.now()}] Launching {' '.join(stock_cmd)} (Mode: {MODE})...")
+        stock_process = subprocess.Popen(stock_cmd)
 
         # Give the bot 3 seconds to initialize connections & local state
         time.sleep(3.0)
@@ -68,8 +76,15 @@ def main():
             time.sleep(10)
             
             # Check if processes crashed unexpectedly
-            if bot_process.poll() is not None:
-                print(f"[{datetime.now()}] Warning: Bot process exited with code {bot_process.returncode}.")
+            # The stock bot may finish normally after its daily cap or cutoff.
+            # Keep supervising the other engine until it also finishes.
+            exits = {}
+            for name, proc in (("Index bot", bot_process), ("Stock-options bot", stock_process)):
+                exits[name] = proc.poll()
+                if exits[name] is not None and name not in reported_exits:
+                    print(f"[{datetime.now()}] {name} exited with code {exits[name]}.")
+                    reported_exits.add(name)
+            if all(code is not None for code in exits.values()):
                 break
             
             # Check if past 03:46 PM IST shutdown time
@@ -82,7 +97,7 @@ def main():
         print(f"\n[{datetime.now()}] Manual stop requested (Ctrl+C). Cleaning up...")
     finally:
         # Graceful termination sequence
-        for name, proc in [("Dashboard", dashboard_process), ("Bot", bot_process)]:
+        for name, proc in [("Dashboard", dashboard_process), ("Stock-options bot", stock_process), ("Index bot", bot_process)]:
             if proc and proc.poll() is None:
                 print(f"[{datetime.now()}] Stopping {name} (PID {proc.pid})...")
                 try:
@@ -92,7 +107,7 @@ def main():
                     proc.kill()
                     print(f"[{datetime.now()}] Forced kill on {name}.")
         
-        print(f"[{datetime.now()}] Session closed cleanly. All ledgers and brain weights saved.")
+        print(f"[{datetime.now()}] Session processes stopped. Check bot logs and ledgers for saved state.")
 
 
 if __name__ == "__main__":

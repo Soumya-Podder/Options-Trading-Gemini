@@ -1,0 +1,231 @@
+{
+  "selection_rule": "Prefer complete replay, minimum training trades, count of 10k blocks, worst training block, total gross",
+  "minimum_training_trades": 10,
+  "training_results": [
+    {
+      "config": {
+        "name": "oi_permanent_pruning",
+        "stop": 6.15,
+        "entry": "oi_same_contract",
+        "signal_minutes": 1,
+        "fixed_lots": 1,
+        "max_trades": 4
+      },
+      "blocks": [
+        {
+          "start": "2026-07-17",
+          "end": "2026-07-30",
+          "sessions": 10,
+          "gross": -1878.5,
+          "net": -3362.0,
+          "trades": 23,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-07-31",
+          "end": "2026-08-13",
+          "sessions": 10,
+          "gross": -2843.75,
+          "net": -3553.25,
+          "trades": 11,
+          "unvalidated_days": 0,
+          "target_met": false
+        }
+      ],
+      "gross": -4722.25,
+      "unvalidated": 0,
+      "training_trade_count": 34
+    },
+    {
+      "config": {
+        "name": "oi_next_day_retry",
+        "stop": 6.15,
+        "entry": "oi_same_contract",
+        "signal_minutes": 1,
+        "fixed_lots": 1,
+        "max_trades": 4,
+        "next_day_retry": true
+      },
+      "blocks": [
+        {
+          "start": "2026-07-17",
+          "end": "2026-07-30",
+          "sessions": 10,
+          "gross": -2502.5,
+          "net": -4050.5,
+          "trades": 24,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-07-31",
+          "end": "2026-08-13",
+          "sessions": 10,
+          "gross": -1384.5,
+          "net": -2610.0,
+          "trades": 19,
+          "unvalidated_days": 0,
+          "target_met": false
+        }
+      ],
+      "gross": -3887.0,
+      "unvalidated": 0,
+      "training_trade_count": 43
+    },
+    {
+      "config": {
+        "name": "oi_no_permanent_pruning",
+        "stop": 6.15,
+        "entry": "oi_same_contract",
+        "signal_minutes": 1,
+        "fixed_lots": 1,
+        "max_trades": 4,
+        "static": true
+      },
+      "blocks": [
+        {
+          "start": "2026-07-17",
+          "end": "2026-07-30",
+          "sessions": 10,
+          "gross": -1826.5,
+          "net": -3439.0,
+          "trades": 25,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-07-31",
+          "end": "2026-08-13",
+          "sessions": 10,
+          "gross": 968.5,
+          "net": -386.0,
+          "trades": 21,
+          "unvalidated_days": 0,
+          "target_met": false
+        }
+      ],
+      "gross": -858.0,
+      "unvalidated": 0,
+      "training_trade_count": 46
+    },
+    {
+      "config": {
+        "name": "oi_structure_next_day_retry",
+        "stop": 6.15,
+        "entry": "oi_same_contract",
+        "signal_minutes": 1,
+        "fixed_lots": 1,
+        "max_trades": 4,
+        "next_day_retry": true,
+        "structure": true
+      },
+      "blocks": [
+        {
+          "start": "2026-07-17",
+          "end": "2026-07-30",
+          "sessions": 10,
+          "gross": -1966.25,
+          "net": -2353.25,
+          "trades": 6,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-07-31",
+          "end": "2026-08-13",
+          "sessions": 10,
+          "gross": 412.75,
+          "net": 348.25,
+          "trades": 1,
+          "unvalidated_days": 0,
+          "target_met": false
+        }
+      ],
+      "gross": -1553.5,
+      "unvalidated": 0,
+      "training_trade_count": 7
+    }
+  ],
+  "chosen": {
+    "config": {
+      "name": "oi_no_permanent_pruning",
+      "stop": 6.15,
+      "entry": "oi_same_contract",
+      "signal_minutes": 1,
+      "fixed_lots": 1,
+      "max_trades": 4,
+      "static": true
+    },
+    "blocks": [
+      {
+        "start": "2026-07-17",
+        "end": "2026-07-30",
+        "sessions": 10,
+        "gross": -1826.5,
+        "net": -3439.0,
+        "trades": 25,
+        "unvalidated_days": 0,
+        "target_met": false
+      },
+      {
+        "start": "2026-07-31",
+        "end": "2026-08-13",
+        "sessions": 10,
+        "gross": 968.5,
+        "net": -386.0,
+        "trades": 21,
+        "unvalidated_days": 0,
+        "target_met": false
+      }
+    ],
+    "gross": -858.0,
+    "unvalidated": 0,
+    "training_trade_count": 46
+  },
+  "holdout_days": [
+    "2026-08-14",
+    "2026-08-17",
+    "2026-08-18",
+    "2026-08-19",
+    "2026-08-20",
+    "2026-08-21",
+    "2026-08-24",
+    "2026-08-25",
+    "2026-08-26",
+    "2026-08-27",
+    "2026-08-28",
+    "2026-08-31",
+    "2026-09-01",
+    "2026-09-02",
+    "2026-09-03",
+    "2026-09-04",
+    "2026-09-07",
+    "2026-09-08",
+    "2026-09-09",
+    "2026-09-10",
+    "2026-09-11",
+    "2026-09-15",
+    "2026-09-16",
+    "2026-09-17",
+    "2026-09-18",
+    "2026-09-21",
+    "2026-09-22",
+    "2026-09-23",
+    "2026-09-24",
+    "2026-09-25",
+    "2026-09-28",
+    "2026-09-29",
+    "2026-09-30",
+    "2026-10-01",
+    "2026-10-05",
+    "2026-10-06",
+    "2026-10-07",
+    "2026-10-08",
+    "2026-10-09",
+    "2026-10-12",
+    "2026-10-13",
+    "2026-10-14"
+  ],
+  "training_target_passed": false
+}

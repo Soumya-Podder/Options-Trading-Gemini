@@ -33,6 +33,9 @@ from typing import Dict, Any, List, Optional, Tuple, Set, Deque
 import requests
 
 from telegram_notifier import TelegramNotifier
+from nifty_market_structure import assess_nifty_structure
+from index_option_replay import replay_option_trade, ReplayDataError
+from nifty_oi import NiftyOITracker
 
 LOG_FILE = "dhan_bot_session.log"
 CACHE_DIR = "dhan_hist_cache"
@@ -131,6 +134,8 @@ class DhanV2RestClient:
         self.last_hist_ts = 0.0
         self.oc_poll_gap = 3.6
         self.session = requests.Session()
+        self.structure_snapshot = None
+        self.structure_received = 0.0
         self.session.headers.update({
             "access-token": self.access_token,
             "client-id": self.client_id,
@@ -240,6 +245,38 @@ class DhanV2RestClient:
             self.logger.error(f"Live Order exception: {e}")
         return None
 
+    def fetch_nifty_structure_candles(self, from_date, to_date, historical=False):
+        """Actual index OHLC for level mapping, independently of rolling premiums."""
+        payload={"securityId":"13","exchangeSegment":"IDX_I","instrument":"INDEX",
+                 "interval":"5","fromDate":from_date,"toDate":to_date}
+        key=hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()
+        path=os.path.join(CACHE_DIR,f"nifty_structure_{key}.json")
+        if historical and os.path.exists(path):
+            try:
+                with open(path,encoding="utf-8") as f:
+                    return json.load(f)
+            except (OSError,ValueError):
+                pass
+        if not historical and time.time()-self.structure_received<30:
+            return self.structure_snapshot
+        self._wait_hist_rate_limit()
+        data=None
+        try:
+            response=self.session.post(f"{self.BASE_URL}/charts/intraday",json=payload,timeout=(5,15))
+            if response.status_code==200:
+                candidate=response.json()
+                if isinstance(candidate,dict) and candidate.get("timestamp"):
+                    data=candidate
+                    if historical:
+                        atomic_write_json(path,data)
+            else:
+                self.logger.warning("Nifty structure history unavailable (HTTP %s)",response.status_code)
+        except (requests.RequestException,ValueError):
+            self.logger.warning("Nifty structure history request failed")
+        if not historical:
+            self.structure_snapshot,self.structure_received=data,time.time()
+        return data
+
     def fetch_rolling_option_window(
         self,
         idx_name: str,
@@ -253,6 +290,19 @@ class DhanV2RestClient:
         cache_hash = hashlib.md5(cache_key.encode("utf-8")).hexdigest()[:12]
         cache_path = os.path.join(CACHE_DIR, f"{cache_key}_{cache_hash}.json")
 
+        def bounded(data):
+            if not isinstance(data,dict) or not data.get("timestamp"):
+                return None
+            start=datetime.strptime(from_date,"%Y-%m-%d").timestamp()
+            end=datetime.strptime(to_date,"%Y-%m-%d").timestamp()
+            stamps=data["timestamp"]
+            keep=[i for i,t in enumerate(stamps) if start<=float(t)<end]
+            if not keep:
+                return None
+            if any(isinstance(v,list) and v and len(v)!=len(stamps) for v in data.values()):
+                return None
+            return {k:[v[i] for i in keep] if isinstance(v,list) and v else v for k,v in data.items()}
+
         if os.path.exists(cache_path):
             try:
                 with open(cache_path, "r", encoding="utf-8") as f:
@@ -261,7 +311,7 @@ class DhanV2RestClient:
                     if cached.get("empty"):
                         return None
                     if cached.get("timestamp"):
-                        return cached
+                        return bounded(cached)
             except Exception:
                 pass
 
@@ -297,7 +347,7 @@ class DhanV2RestClient:
                     body = resp.json()
                     data_node = body.get("data", {})
                     side_key = "ce" if opt_type == "CALL" else "pe"
-                    leg_data = data_node.get(side_key) if isinstance(data_node, dict) else None
+                    leg_data = bounded(data_node.get(side_key)) if isinstance(data_node, dict) else None
                     if leg_data and leg_data.get("timestamp"):
                         atomic_write_json(cache_path, leg_data)
                         return leg_data
@@ -326,6 +376,7 @@ class DhanV2RestClient:
 
 class MarketMicrostructureAnalyzer:
     def __init__(self):
+        self.nifty_oi_tracker=NiftyOITracker()
         self.prev_bar: Dict[str, Dict[str, Any]] = {}
         self.live_history: Dict[str, Deque[Dict[str, Any]]] = {
             "NIFTY": deque(maxlen=150),
@@ -361,6 +412,8 @@ class MarketMicrostructureAnalyzer:
         atm_ce_sec_id: str = "",
         atm_pe_sec_id: str = "",
         live_ts: Optional[float] = None,
+        reference_snapshot=None,
+        require_reference=False,
     ) -> Dict[str, Any]:
         cfg = INDICES_CONFIG[idx_name]
         step = cfg["strike_step"]
@@ -377,7 +430,9 @@ class MarketMicrostructureAnalyzer:
             "atm_ce_strike": call_strikes[0],
         }
 
-        if live_ts is not None:
+        if require_reference:
+            prev_snap=reference_snapshot
+        elif live_ts is not None:
             hist = self.live_history[idx_name]
             hist.append(current_snap)
             ref_snap = hist[0]
@@ -398,13 +453,22 @@ class MarketMicrostructureAnalyzer:
         else:
             d_spot = spot - prev_snap["spot"]
             strike_shift = call_strikes[0] - prev_snap["atm_ce_strike"]
-            d_ce_prem = (ce_prem - prev_snap["ce_prem"]) + (strike_shift * 1.35)
-            d_pe_prem = (pe_prem - prev_snap["pe_prem"]) - (strike_shift * 1.35)
-            d_ce_oi = ce_oi - prev_snap["ce_oi"]
-            d_pe_oi = pe_oi - prev_snap["pe_oi"]
+            if idx_name=="NIFTY" and strike_shift:
+                # Different strike baskets cannot establish premium/OI changes.
+                # Wait for a comparable reference instead of inventing a delta.
+                d_ce_prem=d_pe_prem=0.0
+                d_ce_oi=d_pe_oi=0
+            else:
+                d_ce_prem = (ce_prem - prev_snap["ce_prem"]) + (strike_shift * 1.35)
+                d_pe_prem = (pe_prem - prev_snap["pe_prem"]) - (strike_shift * 1.35)
+                d_ce_oi = ce_oi - prev_snap["ce_oi"]
+                d_pe_oi = pe_oi - prev_snap["pe_oi"]
 
         ce_q = self.classify_quadrant(d_ce_prem, d_ce_oi)
         pe_q = self.classify_quadrant(d_pe_prem, d_pe_oi)
+        if require_reference:
+            if d_ce_oi==0:ce_q="NO_OI_CHANGE"
+            if d_pe_oi==0:pe_q="NO_OI_CHANGE"
 
         raw_diff = ce_oi - pe_oi
         diff_lakhs = round(raw_diff / 100_000.0, 2)
@@ -474,6 +538,10 @@ class MarketMicrostructureAnalyzer:
             "pe_3strike_lakhs": round(pe_oi / 100_000.0, 2),
             "diff_ce_minus_pe_lakhs": diff_lakhs,
             "raw_diff_oi": raw_diff,
+            "ce_oi_change_5m":d_ce_oi,
+            "pe_oi_change_5m":d_pe_oi,
+            "ce_premium_change_5m":round(d_ce_prem,2),
+            "pe_premium_change_5m":round(d_pe_prem,2),
             "exceeds_50_lakhs": exceeds_50l,
             "wall_tag": wall_tag,
             "ce_quadrant": ce_q,
@@ -488,10 +556,10 @@ class MarketMicrostructureAnalyzer:
             "atm_pe_ltp": round(atm_pe_ltp, 2),
             "atm_ce_sec_id": atm_ce_sec_id,
             "atm_pe_sec_id": atm_pe_sec_id,
-            "data_health": "LIVE_CLEAN",
+            "data_health": "OI_REFERENCE_UNAVAILABLE" if require_reference and prev_snap is None else "ATM_ROLLOVER_WAIT" if idx_name=="NIFTY" and prev_snap is not None and call_strikes[0]!=prev_snap["atm_ce_strike"] else "LIVE_CLEAN",
         }
 
-    def evaluate_chain(self, idx_name: str, oc_data: Dict[str, Any]) -> Dict[str, Any]:
+    def evaluate_chain(self, idx_name: str, oc_data: Dict[str, Any], expiry=None, snapshot_time=None) -> Dict[str, Any]:
         cfg = INDICES_CONFIG[idx_name]
         step = cfg["strike_step"]
         spot = float(oc_data.get("last_price", 0.0))
@@ -528,12 +596,16 @@ class MarketMicrostructureAnalyzer:
             pe_prem += ltp
             pe_iv += float(node.get("implied_volatility", 0.0))
 
-        return self.evaluate_snapshot(
+        received=time.time() if snapshot_time is None else float(snapshot_time)
+        reference,oi_info=self.nifty_oi_tracker.assess(oc,spot,received,expiry) if idx_name=="NIFTY" else (None,None)
+        result=self.evaluate_snapshot(
             idx_name, spot, call_strikes, put_strikes,
             ce_oi, pe_oi, ce_prem, pe_prem, ce_iv, pe_iv,
             atm_ce_ltp, atm_pe_ltp, atm_ce_sec_id, atm_pe_sec_id,
-            live_ts=time.time()
+            live_ts=received,reference_snapshot=reference,require_reference=idx_name=="NIFTY"
         )
+        if oi_info is not None:result["oi_analysis"]=oi_info
+        return result
 
 
 class SelfLearningBrain:
@@ -591,6 +663,8 @@ class SelfLearningBrain:
         self, analysis: Dict[str, Any], consec_losses: int, bar_time: Optional[dtime] = None
     ) -> Tuple[str, Optional[str]]:
         if not analysis["exceeds_50_lakhs"] or analysis["recommended_dir"] == "HOLD":
+            return "HOLD", None
+        if analysis["index"] == "NIFTY" and not analysis.get("market_structure",{}).get("allowed",False):
             return "HOLD", None
 
         cfg = INDICES_CONFIG[analysis["index"]]
@@ -793,95 +867,15 @@ def book_target_one(ledger, position, price, timestamp):
 
 
 def evaluate_real_option_trade_bars(
-    entry_idx: int,
-    is_ce: bool,
-    timestamps: List[int],
-    opens: List[float],
-    highs: List[float],
-    lows: List[float],
-    closes: List[float],
-    strikes: List[Any],
-    sl_points: float,
-    interval_min: int = 5,
-    index: str = "", lots: int = 1, lot_size: int = 1, exit_fills=None
-) -> Tuple[int, float, float, str]:
-    entry_price = float(closes[entry_idx])
-    entry_strike = int(float(strikes[entry_idx] or 0))
-    entry_day = datetime.fromtimestamp(timestamps[entry_idx]).strftime("%Y-%m-%d")
-
-    split = nifty_target_quantities(index, lots, lot_size)
-    fills = exit_fills if exit_fills is not None else []
-    remaining = lots*lot_size
-    def finish(j, price, reason):
-        if split:
-            fills.append({"qty":remaining,"price":round(price,2),"timestamp":str(datetime.fromtimestamp(timestamps[j])),"reason":reason})
-            average = sum(f["price"]*f["qty"] for f in fills)/(lots*lot_size)
-            return j, average, round((average-entry_price)/sl_points,2), reason
-        return j, round(price,2), round((price-entry_price)/sl_points,2), reason
-
-    current_sl = round(entry_price - sl_points, 2)
-    highest_high = entry_price
-    ratchet_armed = False
-    n_bars = len(timestamps)
-
-    for j in range(entry_idx + 1, n_bars):
-        dt = datetime.fromtimestamp(timestamps[j])
-        day_str = dt.strftime("%Y-%m-%d")
-        bar_strike = int(float(strikes[j] or 0))
-
-        if day_str != entry_day or dt.time() >= EOD_SQUAREOFF_TIME:
-            exit_p = float(opens[j]) if day_str != entry_day else float(closes[j])
-            r_mult = round((exit_p - entry_price) / sl_points, 2)
-            return finish(j, exit_p, "EOD_SQUAREOFF")
-
-        bar_o = float(opens[j])
-        bar_h = float(highs[j])
-        bar_l = float(lows[j])
-        bar_c = float(closes[j])
-
-        if bar_strike != 0 and entry_strike != 0 and bar_strike != entry_strike:
-            strike_diff = bar_strike - entry_strike
-            adj = (strike_diff * 0.55) if is_ce else (-strike_diff * 0.55)
-            bar_o = max(0.5, round(bar_o + adj, 2))
-            bar_h = max(0.5, round(bar_h + adj, 2))
-            bar_l = max(0.5, round(bar_l + adj, 2))
-            bar_c = max(0.5, round(bar_c + adj, 2))
-
-        if bar_l <= current_sl:
-            exit_p = current_sl
-            r_mult = round((exit_p - entry_price) / sl_points, 2)
-            reason = "ASYMMETRIC_TRAIL_PROFIT" if ratchet_armed and r_mult > 0 else "INITIAL_SL_HIT"
-            return finish(j, exit_p, reason)
-
-        if split:
-            if not fills and bar_h >= entry_price+10:
-                fills.append({"qty":split[0],"price":entry_price+10,"timestamp":str(dt),"reason":"TARGET_1_10_POINTS"})
-                remaining -= split[0]
-            if bar_h >= entry_price+20:
-                return finish(j, entry_price+20, "TARGET_2_20_POINTS")
-
-        if bar_h > highest_high:
-            highest_high = bar_h
-            if not split:
-                current_sl, is_armed = update_ratchet_sl(entry_price, current_sl, highest_high, sl_points)
-                ratchet_armed = ratchet_armed or is_armed
-
-        if bar_c < bar_o and bar_c <= current_sl:
-            exit_p = current_sl
-            r_mult = round((exit_p - entry_price) / sl_points, 2)
-            reason = "ASYMMETRIC_TRAIL_PROFIT" if ratchet_armed and r_mult > 0 else "INITIAL_SL_HIT"
-            return finish(j, exit_p, reason)
-
-        elapsed_min = (j - entry_idx) * interval_min
-        if elapsed_min >= 25 and (highest_high - entry_price) < (0.80 * sl_points):
-            exit_p = bar_c
-            r_mult = round((exit_p - entry_price) / sl_points, 2)
-            return finish(j, exit_p, "THETA_TIME_STOP")
-
-    last_idx = n_bars - 1
-    exit_p = float(closes[last_idx])
-    r_mult = round((exit_p - entry_price) / sl_points, 2)
-    return finish(last_idx, exit_p, "END_OF_WINDOW")
+    entry_idx, is_ce, timestamps, opens, highs, lows, closes, strikes,
+    sl_points, interval_min=5, index="", lots=1, lot_size=1, exit_fills=None,
+    entry_at_open=False, expected_strike=None, slippage_pct=0.0,
+    require_session_end=False,
+):
+    return replay_option_trade(entry_idx,is_ce,timestamps,opens,highs,lows,closes,
+        strikes,sl_points,interval_min,index,lots,lot_size,exit_fills,
+        nifty_target_quantities(index,lots,lot_size),update_ratchet_sl,
+        EOD_SQUAREOFF_TIME,entry_at_open,expected_strike,slippage_pct,require_session_end)
 
 
 def record_closed_trade(
@@ -904,7 +898,8 @@ def record_closed_trade(
     sig: str,
     state_vec: List[float],
     data_health: str,
-    exit_fills=None, booked_gross: float = 0, booked_net: float = 0
+    exit_fills=None, booked_gross: float = 0, booked_net: float = 0, market_structure=None,
+    ledger_path="paper_trade_ledger.json",
 ) -> float:
     gross_pnl = round((exit_price - entry_price) * qty, 2)
     charges = round(40.0 + (lots * 24.5) + 20.0*max(0,len(exit_fills or [])-1), 2)
@@ -937,6 +932,8 @@ def record_closed_trade(
         trade_record["exit_fills"] = exit_fills
         trade_record["exit_price"] = round(exit_price,4)
         ledger.pop("active_position",None)
+    if market_structure is not None:
+        trade_record["market_structure"]=market_structure
     ledger["trades"].append(trade_record)
     ledger["total_trades"] = len(ledger["trades"])
 
@@ -948,7 +945,7 @@ def record_closed_trade(
         ledger["win_to_loss_ratio"] = round(ledger["avg_winning_value_rs"] / ledger["avg_losing_value_rs"], 2)
 
     brain.learn_from_trade(day_str, sig, state_vec, 1 if opt_type == "CE" else 2, r_mult, lots=lots)
-    atomic_write_json("paper_trade_ledger.json", ledger)
+    atomic_write_json(ledger_path, ledger)
     return gross_pnl
 
 
@@ -958,6 +955,8 @@ def run_real_historical_backtest(
     interval: str,
     logger: logging.Logger
 ) -> None:
+    if "NIFTY" in indices_to_test and str(interval)!="5":
+        raise ValueError("Nifty market-structure replay requires five-minute option candles")
     env = load_dotenv_file(".env")
     client_id = env.get("DHAN_CLIENT_ID", "")
     access_token = env.get("DHAN_ACCESS_TOKEN", "")
@@ -1008,11 +1007,17 @@ def run_real_historical_backtest(
     seen_bars: Set[Tuple[str, int]] = set()
     daily_stats: Dict[Tuple[str, str], Dict[str, int]] = {}
     last_view_by_index: Dict[str, Dict[str, Any]] = {}
+    structure_counts={"checked":0,"unavailable":0,"allowed":0,"rejected":0}
+    missing_option_windows=[]
+    unvalidated_trades=[]
 
     for w_from, w_to in windows:
         for idx_name in indices_to_test:
             cfg = INDICES_CONFIG[idx_name]
             logger.info(f"Fetching/Loading REAL Rolling Options for {idx_name} ({w_from} -> {w_to})...")
+            structure_candles = dhan.fetch_nifty_structure_candles(
+                (datetime.strptime(w_from,"%Y-%m-%d")-timedelta(days=10)).strftime("%Y-%m-%d 00:00:00"),
+                w_to+" 00:00:00",historical=True) if idx_name=="NIFTY" else None
 
             ce_legs: Dict[str, Dict[str, List[Any]]] = {}
             pe_legs: Dict[str, Dict[str, List[Any]]] = {}
@@ -1028,11 +1033,20 @@ def run_real_historical_backtest(
                     pe_legs[s_lbl] = res
 
             if "ATM" not in ce_legs or "ATM" not in pe_legs:
+                missing_option_windows.append({"index":idx_name,"from":w_from,"to_exclusive":w_to})
                 logger.warning(f"No trading session bars in ({w_from} -> {w_to}) for {idx_name}. Continuing.")
                 continue
 
             atm_ce = ce_legs["ATM"]
             atm_pe = pe_legs["ATM"]
+            # Cross-strike OI must describe the same time, never equal array indices
+            # from series with different missing timestamps.
+            canonical=atm_ce["timestamp"]
+            if any(data["timestamp"]!=canonical for data in list(ce_legs.values())+list(pe_legs.values())):
+                missing_option_windows.append({"index":idx_name,"from":w_from,"to_exclusive":w_to,
+                                               "reason":"Unaligned option timestamps"})
+                logger.warning("Unaligned option histories for %s (%s -> %s); window excluded",idx_name,w_from,w_to)
+                continue
             avail_ce = [k for k in call_strikes_rel if k in ce_legs]
             avail_pe = [k for k in put_strikes_rel if k in pe_legs]
 
@@ -1086,6 +1100,19 @@ def run_real_historical_backtest(
                     atm_ce_ltp=atm_ce_close,
                     atm_pe_ltp=atm_pe_close,
                 )
+                if idx_name=="NIFTY":
+                    historical_chain={}
+                    for side,legs in (("ce",ce_legs),("pe",pe_legs)):
+                        for data in legs.values():
+                            if "strike" in data and i<len(data["strike"]):
+                                strike=str(float(data["strike"][i]))
+                                historical_chain.setdefault(strike,{})[side]={"oi":data["oi"][i]}
+                    structure=assess_nifty_structure(structure_candles,historical_chain,ts_val+300,spot,analysis["recommended_dir"])
+                    structure["oi_source"]="ROLLING_STRIKES_SUBSET_NOT_FULL_CHAIN"
+                    analysis["market_structure"]=structure
+                    if dtime(9,40)<=datetime.fromtimestamp(ts_val+300).time()<=LAST_ENTRY_TIME:
+                        structure_counts["checked"]+=1
+                        structure_counts["unavailable" if not structure["ready"] else "allowed" if structure["allowed"] else "rejected"]+=1
                 last_view_by_index[idx_name] = analysis
 
                 if i <= skip_until_idx:
@@ -1101,7 +1128,7 @@ def run_real_historical_backtest(
                 d_stat = daily_stats[day_key]
                 if dt.time() < dtime(9, 20) or dt.time() > LAST_ENTRY_TIME:
                     continue
-                if d_stat["trades"] >= MAX_TRADES_PER_DAY or d_stat["consec_losses"] >= MAX_CONSECUTIVE_LOSSES_PER_DAY:
+                if d_stat.get("unvalidated_position") or d_stat["trades"] >= MAX_TRADES_PER_DAY or d_stat["consec_losses"] >= MAX_CONSECUTIVE_LOSSES_PER_DAY:
                     continue
 
                 action_dir, sig = brain.select_action(analysis, d_stat["consec_losses"], bar_time=dt.time())
@@ -1112,7 +1139,13 @@ def run_real_historical_backtest(
                 leg = atm_ce if is_ce else atm_pe
                 opt_type = "CE" if is_ce else "PE"
                 strike_val = atm_ce_strike if is_ce else atm_pe_strike
-                entry_price = round(float(leg["close"][i]), 2)
+                entry_idx=i+1
+                if entry_idx>=n_bars:
+                    continue
+                entry_time=datetime.fromtimestamp(leg["timestamp"][entry_idx])
+                if entry_time.date()!=dt.date() or entry_time.time()>LAST_ENTRY_TIME:
+                    continue
+                entry_price=math.ceil(float(leg["open"][entry_idx])*1.001*20-1e-9)/20
 
                 lots = brain.compute_lots(
                     idx_name,
@@ -1124,8 +1157,9 @@ def run_real_historical_backtest(
                 qty = lots * cfg["lot_size"]
                 exit_fills = []
 
-                exit_idx, exit_price, r_mult, exit_reason = evaluate_real_option_trade_bars(
-                    entry_idx=i,
+                try:
+                    exit_idx, exit_price, r_mult, exit_reason = evaluate_real_option_trade_bars(
+                    entry_idx=entry_idx,
                     is_ce=is_ce,
                     timestamps=leg["timestamp"][:n_bars],
                     opens=leg["open"][:n_bars],
@@ -1136,14 +1170,25 @@ def run_real_historical_backtest(
                     sl_points=cfg["sl_points"],
                     interval_min=interval_min,
                     index=idx_name, lots=lots, lot_size=cfg["lot_size"], exit_fills=exit_fills,
-                )
+                    entry_at_open=True,expected_strike=strike_val,slippage_pct=0.1,require_session_end=True,
+                    )
+                except ReplayDataError as error:
+                    # Do not score an invented exit or assume an unresolved position
+                    # freed capital for more trades on the same day.
+                    d_stat["trades"]+=1
+                    d_stat["unvalidated_position"]=True
+                    unvalidated_trades.append({"index":idx_name,"entry_timestamp":entry_time.isoformat(),
+                        "strike":strike_val,"option_type":opt_type,"reason":error.reason,
+                        "last_observation_index":error.index,"known_partial_fills":exit_fills})
+                    logger.warning("[UNVALIDATED REPLAY] %s %s | %s",idx_name,entry_time,error.reason)
+                    continue
 
                 skip_until_idx = (exit_idx + cooldown_bars) if r_mult < 0 else (exit_idx + win_cooldown_bars)
                 gross_pnl = record_closed_trade(
                     ledger=ledger,
                     brain=brain,
                     day_str=day_str,
-                    entry_ts=dt.strftime("%Y-%m-%d %H:%M:%S"),
+                    entry_ts=entry_time.strftime("%Y-%m-%d %H:%M:%S"),
                     exit_ts=datetime.fromtimestamp(leg["timestamp"][exit_idx]).strftime("%Y-%m-%d %H:%M:%S"),
                     idx_name=idx_name,
                     strike_val=strike_val,
@@ -1159,18 +1204,36 @@ def run_real_historical_backtest(
                     sig=sig,
                     state_vec=analysis["state_vec"],
                     data_health="DHAN_REAL_HISTORICAL", exit_fills=exit_fills,
+                    market_structure=analysis.get("market_structure"),
                 )
+                ledger["trades"][-1].update(signal_timestamp=datetime.fromtimestamp(ts_val+interval_min*60).isoformat(),
+                    execution_model="NEXT_BAR_OPEN_0.1PCT_ADVERSE_SLIPPAGE",
+                    exit_time_precision="five-minute bar; exact intrabar fill time unknown")
 
                 d_stat["trades"] += 1
                 d_stat["consec_losses"] = d_stat["consec_losses"] + 1 if gross_pnl <= 0 else 0
 
                 logger.info(
-                    f"[REAL BACKTEST TRADE] {dt.strftime('%Y-%m-%d %H:%M')} | {idx_name} {strike_val}_{opt_type} (Lots:{lots}) "
+                    f"[REAL BACKTEST TRADE] {entry_time.strftime('%Y-%m-%d %H:%M')} | {idx_name} {strike_val}_{opt_type} (Lots:{lots}) "
                     f"| Entry: Rs.{entry_price:.2f} -> Exit: Rs.{exit_price:.2f} ({exit_reason}) "
                     f"| 5m Spot: {analysis['d_spot_5m']:+.1f} | OI Diff: {analysis['diff_ce_minus_pe_lakhs']:+.1f}L "
                     f"| Gross PnL: Rs.{gross_pnl:+,.2f} ({r_mult:+.2f}R)"
                 )
 
+    ledger["support_resistance_coverage"]=structure_counts
+    ledger["missing_option_windows"]=missing_option_windows
+    ledger["unvalidated_trades"]=unvalidated_trades
+    ledger["full_strategy_validated"]=False
+    ledger["backtest_status"]=("INCOMPLETE_OPTION_REPLAY" if unvalidated_trades else "INCOMPLETE_MARKET_STRUCTURE" if structure_counts["unavailable"] or ("NIFTY" in indices_to_test and not structure_counts["checked"])
+                               else "REPLAY_WITH_MISSING_OPTION_WINDOWS" if missing_option_windows else "REPLAY_COMPLETED")
+    ledger["limitations"]=["Historical OI walls use available rolling strikes, not the full historical option chain",
+                           "Five-minute OHLC and modeled fills do not establish live execution or an 80% win rate",
+                           "Entry at next bar open; 0.1% adverse modeled slippage on buys and sells",
+                           "Stop-first when intrabar order is unknown; gap stops use worse opening price",
+                           "Trailing changes only apply on later bars; strike changes/gaps are unvalidated",
+                           "Unvalidated outcomes excluded from P&L and learning; remaining same-day entries blocked"]
+    if structure_counts["unavailable"]:
+        logger.warning("Nifty backtest has %d snapshots without verified structure; result is incomplete",structure_counts["unavailable"])
     atomic_write_json("paper_trade_ledger.json", ledger)
     if last_view_by_index:
         atomic_write_json("live_telemetry.json", {
@@ -1189,7 +1252,10 @@ def run_real_historical_backtest(
     )
 
 
-def run_intraday_market_session(live_mode: bool, logger: logging.Logger) -> None:
+def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices_to_trade=None) -> None:
+    selected_indices=list(dict.fromkeys(indices_to_trade or ("NIFTY","SENSEX")))
+    if not selected_indices or any(name not in INDICES_CONFIG for name in selected_indices):
+        raise ValueError("Select supported trading indices")
     env = load_dotenv_file(".env")
     client_id = env.get("DHAN_CLIENT_ID", "")
     access_token = env.get("DHAN_ACCESS_TOKEN", "")
@@ -1225,10 +1291,8 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger) -> None
         else:
             break
 
-    expiries = {
-        "NIFTY": dhan.fetch_nearest_expiry(13, "IDX_I") or today_str,
-        "SENSEX": dhan.fetch_nearest_expiry(51, "IDX_I") or today_str,
-    }
+    expiries = {name:dhan.fetch_nearest_expiry(INDICES_CONFIG[name]["security_id"], "IDX_I") or today_str
+                for name in selected_indices}
     logger.info(
         f"Started 09:10-15:30 IST Live Session | Mode: {'LIVE' if live_mode else 'PAPER'} "
         f"| Expiries: {expiries} | Today Trades So Far: {day_trades}/{MAX_TRADES_PER_DAY}"
@@ -1245,6 +1309,10 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger) -> None
     active_pos: Optional[Dict[str, Any]] = None
     saved_partial = ledger.get("active_position")
     if saved_partial:
+        if saved_partial.get("index") not in selected_indices:
+            logger.error("Saved position belongs to an unselected index; reconcile it before starting.")
+            telegram.close()
+            return
         if live_mode or ledger.get("mode") != "PAPER" or not saved_partial.get("entry_ts", "").startswith(today_str):
             logger.error("Unresolved partial position in ledger; reconcile it before starting a new session.")
             telegram.close()
@@ -1254,6 +1322,8 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger) -> None
         logger.info("Resuming Nifty paper remainder after target 1: Qty %d", active_pos["qty"])
     cooldown_until: Optional[datetime] = None
     cycle = 0
+    last_structure_log=None
+    last_oi_log=0.0
 
     while True:
         now = datetime.now()
@@ -1278,12 +1348,32 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger) -> None
             )
             break
 
-        idx_name = active_pos["index"] if active_pos else ("NIFTY" if cycle % 2 == 0 else "SENSEX")
+        idx_name = active_pos["index"] if active_pos else selected_indices[cycle % len(selected_indices)]
         cfg = INDICES_CONFIG[idx_name]
         raw_oc = dhan.fetch_option_chain(cfg["security_id"], cfg["exchange_segment"], expiries[idx_name])
 
         if raw_oc:
-            view = analyzer.evaluate_chain(idx_name, raw_oc)
+            view = analyzer.evaluate_chain(idx_name, raw_oc,expiry=expiries[idx_name])
+            if idx_name=="NIFTY":
+                if time.time()-last_oi_log>=30:
+                    oi=view["oi_analysis"]
+                    logger.info("[NIFTY OI] %s",json.dumps({
+                        "ready":oi["ready"],"reason":oi["reason"],"reference_age_seconds":oi.get("reference_age_seconds"),
+                        "ce_oi_change_5m":view["ce_oi_change_5m"],"pe_oi_change_5m":view["pe_oi_change_5m"],
+                        "ce_quadrant":view["ce_quadrant"],"pe_quadrant":view["pe_quadrant"],
+                        "full_chain_pcr":oi.get("full_chain_pcr"),
+                        "support_put_oi":oi.get("support_put_oi",[])[:2],
+                        "resistance_call_oi":oi.get("resistance_call_oi",[])[:2]},sort_keys=True))
+                    last_oi_log=time.time()
+                structure_candles=dhan.fetch_nifty_structure_candles(
+                    (now-timedelta(days=10)).strftime("%Y-%m-%d 00:00:00"),
+                    now.strftime("%Y-%m-%d %H:%M:%S"))
+                structure=assess_nifty_structure(structure_candles,raw_oc.get("oc",{}),time.time(),view["spot"],view["recommended_dir"])
+                view["market_structure"]=structure
+                log_key=(structure.get("confirmation_close"),structure["reason"])
+                if log_key!=last_structure_log:
+                    logger.info("[NIFTY STRUCTURE] %s",json.dumps(structure,sort_keys=True))
+                    last_structure_log=log_key
             telemetry_state["indices"][idx_name] = view
             telemetry_state["updated_at"] = now.strftime("%H:%M:%S")
             telemetry_state["api_poll_interval_sec"] = round(dhan.oc_poll_gap, 1)
@@ -1371,6 +1461,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger) -> None
                         state_vec=active_pos["state_vec"],
                         data_health="LIVE_CLEAN", exit_fills=fills,
                         booked_gross=active_pos.get("partial_gross",0),booked_net=active_pos.get("partial_net",0),
+                        market_structure=active_pos.get("market_structure"),
                     )
                     day_trades += 1
                     if gross_pnl <= 0:
@@ -1436,6 +1527,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger) -> None
                             "oi_diff_lakhs": view["diff_ce_minus_pe_lakhs"],
                             "rule_used": sig,
                             "state_vec": view["state_vec"],
+                            "market_structure":view.get("market_structure"),
                         }
                         split = nifty_target_quantities(idx_name,lots,cfg["lot_size"])
                         if split:
@@ -1464,7 +1556,7 @@ if __name__ == "__main__":
     parser.add_argument("--backtest-days", type=int, default=0, help="Run REAL DhanHQ historical backtest for past N days (e.g. 60, 180, 365)")
     parser.add_argument("--backtest-years", type=int, default=0, help="Run REAL DhanHQ historical backtest for past N years (1, 2, 3, or 5)")
     parser.add_argument("--interval", type=str, default="5", choices=["1", "5", "15", "25", "60"], help="Candle interval in minutes (default: 5)")
-    parser.add_argument("--indices", type=str, default="NIFTY", help="Comma-separated indices to backtest (default: NIFTY)")
+    parser.add_argument("--indices", type=str, default=None, help="Comma-separated indices; default NIFTY for backtests, NIFTY,SENSEX for sessions")
     parser.add_argument("--reset-brain", action="store_true", help="Clear all state (brain, rules, ledger, log) before running")
     parser.add_argument("--reset-wallet-keep-brain", action="store_true", help="Reset paper wallet to Rs. 30,000 while keeping learned rules & brain")
     parser.add_argument("--prepare-live-paper", action="store_true", help="Reset paper_trade_ledger.json to Rs. 30,000 (0 trades) for live session while keeping learned rules")
@@ -1510,11 +1602,14 @@ if __name__ == "__main__":
     elif args.reset_wallet_keep_brain:
         logger.info("Reset Paper Wallet to Rs. 30,000 while preserving learned_rules.json and bot_brain_state.json.")
 
-    selected_indices = [x.strip().upper() for x in args.indices.split(",") if x.strip().upper() in INDICES_CONFIG]
+    requested_indices=args.indices or ("NIFTY" if args.backtest_years>0 or args.backtest_days>0 else "NIFTY,SENSEX")
+    selected_indices = [x.strip().upper() for x in requested_indices.split(",")]
+    if not selected_indices or any(x not in INDICES_CONFIG for x in selected_indices):
+        parser.error("--indices must contain NIFTY and/or SENSEX")
 
     if args.backtest_years > 0:
         run_real_historical_backtest(days=args.backtest_years * 365, indices_to_test=selected_indices, interval=args.interval, logger=logger)
     elif args.backtest_days > 0:
         run_real_historical_backtest(days=args.backtest_days, indices_to_test=selected_indices, interval=args.interval, logger=logger)
     else:
-        run_intraday_market_session(live_mode=args.live, logger=logger)
+        run_intraday_market_session(live_mode=args.live, logger=logger,indices_to_trade=selected_indices)

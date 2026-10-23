@@ -292,6 +292,15 @@ def render_dashboard(
         lines.append(f"{CYAN}|{RESET}   {GREEN}3 Puts  ({p_str}){RESET}: {BOLD}{pe_l:>6.2f}L{RESET}   PE Quadrant: {format_quadrant_badge(pe_q)}")
         lines.append(f"{CYAN}|{RESET}   {BOLD}Diff (CE-PE):{RESET} {tug_bar}")
         lines.append(f"{CYAN}|{RESET}   {BOLD}Controller  :{RESET} {CYAN}{ctrl}{RESET}")
+        if idx_name=="NIFTY":
+            structure=info.get("market_structure") or {}
+            levels=structure.get("levels",{})
+            if levels:
+                lines.append(f"{CYAN}|{RESET}   CLOSED-5M RANGE: {levels['day_low']:,.2f} - {levels['day_high']:,.2f} | Previous day: {levels['previous_day_low']:,.2f} - {levels['previous_day_high']:,.2f}")
+                lines.append(f"{CYAN}|{RESET}   OPENING RANGE: {levels['opening_low']:,.2f} - {levels['opening_high']:,.2f}")
+            if structure.get("put_oi_wall") and structure.get("call_oi_wall"):
+                lines.append(f"{CYAN}|{RESET}   OI LEVELS: Put {structure['put_oi_wall']['strike']:,.2f} | Call {structure['call_oi_wall']['strike']:,.2f}")
+            lines.append(f"{CYAN}|{RESET}   STRUCTURE: {'ELIGIBLE' if structure.get('allowed') else 'WAIT'} | {structure.get('reason','Awaiting verified price/OI levels')}")
         lines.append(border)
 
     active_pos = telemetry.get("active_position")

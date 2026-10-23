@@ -5,6 +5,21 @@ still occur. Failed or partial historical requests must not become a clean resul
 
 ## Current stock-only settings
 
+`python run_bot_session.py` now launches both the index engine and the stock-options
+engine, plus the index dashboard. Both engines follow the launcher's PAPER/LIVE
+mode; current local `PAPER_MODE=true` keeps them in paper mode. The stock bot may
+finish after its own daily limit or cutoff while the index engine continues.
+Standalone stock scanning is `python dhan_dynamic_fno_stock_bot.py --scan-once`.
+Initial signal, chain-selection, quote qualification and recheck failures are
+logged under `OPTSTK REJECT` or `OPTSTK RECHECK REJECT`.
+
+The latest local `.env` profile overrides the defaults below: 10% target ceiling,
+5% stop, Rs.1,000 minimum estimated net target, Rs.1,500 estimated risk cap,
+minimum net RR 1.2, four-day DTE and 2.5% spread cap. The two-trade daily cap and
+two-lot maximum remain unchanged. Credentials and this local profile stay ignored
+by Git. Dhan's rolling-options documentation explicitly supports both index and
+stock options; OPTSTK history is not disabled on the basis of an index-only claim.
+
 Defaults: at most two entries/day and two lots/entry, 12% premium target ceiling,
 5% premium stop, Rs.1,200 minimum estimated net target, Rs.1,800 maximum estimated
 loss, and minimum estimated net reward/risk 1.5. The planner can raise the rupee

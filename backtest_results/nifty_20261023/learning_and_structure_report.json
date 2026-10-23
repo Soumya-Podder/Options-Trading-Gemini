@@ -1,0 +1,577 @@
+{
+  "run": "E:\\Options-TradingBot-Gemini\\dhan_hist_cache\\nifty_research_20261023\\run_20261023_094008",
+  "chosen": {
+    "name": "oi_no_permanent_pruning",
+    "stop": 6.15,
+    "entry": "oi_same_contract",
+    "signal_minutes": 1,
+    "fixed_lots": 1,
+    "max_trades": 4,
+    "static": true
+  },
+  "execution_interval_minutes": 1,
+  "minimum_training_trades": 10,
+  "minimum_training_trades_met": true,
+  "validation_note": "Settings selected only on first 20 days. Later dates previously examined with five-minute execution.",
+  "training_target_passed": false,
+  "training_blocks": [
+    {
+      "start": "2026-07-17",
+      "end": "2026-07-30",
+      "sessions": 10,
+      "gross": -1826.5,
+      "net": -3439.0,
+      "trades": 25,
+      "unvalidated_days": 0,
+      "target_met": false
+    },
+    {
+      "start": "2026-07-31",
+      "end": "2026-08-13",
+      "sessions": 10,
+      "gross": 968.5,
+      "net": -386.0,
+      "trades": 21,
+      "unvalidated_days": 0,
+      "target_met": false
+    }
+  ],
+  "validation_block": [
+    {
+      "start": "2026-08-14",
+      "end": "2026-08-27",
+      "sessions": 10,
+      "gross": 1306.5,
+      "net": 16.5,
+      "trades": 20,
+      "unvalidated_days": 0,
+      "target_met": false
+    }
+  ],
+  "test_blocks": [
+    {
+      "start": "2026-08-28",
+      "end": "2026-09-10",
+      "sessions": 10,
+      "gross": -3646.5,
+      "net": -5001.0,
+      "trades": 21,
+      "unvalidated_days": 0,
+      "target_met": false
+    },
+    {
+      "start": "2026-09-11",
+      "end": "2026-09-25",
+      "sessions": 10,
+      "gross": 864.5,
+      "net": -812.5,
+      "trades": 26,
+      "unvalidated_days": 0,
+      "target_met": false
+    },
+    {
+      "start": "2026-09-28",
+      "end": "2026-10-12",
+      "sessions": 10,
+      "gross": -1153.75,
+      "net": -2830.75,
+      "trades": 26,
+      "unvalidated_days": 0,
+      "target_met": false
+    },
+    {
+      "start": "2026-10-13",
+      "end": "2026-10-14",
+      "sessions": 2,
+      "gross": 822.25,
+      "net": 435.25,
+      "trades": 6,
+      "unvalidated_days": 0,
+      "target_met": false
+    }
+  ],
+  "all_full_holdout_blocks_passed": false,
+  "unvalidated_attempts": [],
+  "coverage": {
+    "verified_session_count": 62,
+    "excluded_sessions": [],
+    "verified_days": [
+      "2026-07-17",
+      "2026-07-20",
+      "2026-07-21",
+      "2026-07-22",
+      "2026-07-23",
+      "2026-07-24",
+      "2026-07-27",
+      "2026-07-28",
+      "2026-07-29",
+      "2026-07-30",
+      "2026-07-31",
+      "2026-08-03",
+      "2026-08-04",
+      "2026-08-05",
+      "2026-08-06",
+      "2026-08-07",
+      "2026-08-10",
+      "2026-08-11",
+      "2026-08-12",
+      "2026-08-13",
+      "2026-08-14",
+      "2026-08-17",
+      "2026-08-18",
+      "2026-08-19",
+      "2026-08-20",
+      "2026-08-21",
+      "2026-08-24",
+      "2026-08-25",
+      "2026-08-26",
+      "2026-08-27",
+      "2026-08-28",
+      "2026-08-31",
+      "2026-09-01",
+      "2026-09-02",
+      "2026-09-03",
+      "2026-09-04",
+      "2026-09-07",
+      "2026-09-08",
+      "2026-09-09",
+      "2026-09-10",
+      "2026-09-11",
+      "2026-09-15",
+      "2026-09-16",
+      "2026-09-17",
+      "2026-09-18",
+      "2026-09-21",
+      "2026-09-22",
+      "2026-09-23",
+      "2026-09-24",
+      "2026-09-25",
+      "2026-09-28",
+      "2026-09-29",
+      "2026-09-30",
+      "2026-10-01",
+      "2026-10-05",
+      "2026-10-06",
+      "2026-10-07",
+      "2026-10-08",
+      "2026-10-09",
+      "2026-10-12",
+      "2026-10-13",
+      "2026-10-14"
+    ],
+    "limitation": "Index-observed sessions checked; absent dates are not automatically classified as holidays"
+  },
+  "target": "Rs.10,000 gross per 10 trading days",
+  "limitations": [
+    "1-minute execution OHLC; adverse 0.1% slippage and stop-first ambiguity handling",
+    "Same day, exact strike, WEEK expiryCode 1; prices never synthesized",
+    "Only ATM +/-3 coverage; missing held-strike bars invalidate outcomes",
+    "Three rolling strikes per side approximate OI walls, not full historical chain",
+    "Research maximum estimated initial gross stop risk Rs.1,000; gaps can exceed this",
+    "Independent fresh learning per candidate; online learning continues chronologically"
+  ],
+  "control_comparison": [
+    {
+      "config": {
+        "name": "oi_permanent_pruning",
+        "stop": 6.15,
+        "entry": "oi_same_contract",
+        "signal_minutes": 1,
+        "fixed_lots": 1,
+        "max_trades": 4
+      },
+      "blocks": [
+        {
+          "start": "2026-07-17",
+          "end": "2026-07-30",
+          "sessions": 10,
+          "gross": -1878.5,
+          "net": -3362.0,
+          "trades": 23,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-07-31",
+          "end": "2026-08-13",
+          "sessions": 10,
+          "gross": -2843.75,
+          "net": -3553.25,
+          "trades": 11,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-08-14",
+          "end": "2026-08-27",
+          "sessions": 10,
+          "gross": -926.25,
+          "net": -1184.25,
+          "trades": 4,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-08-28",
+          "end": "2026-09-10",
+          "sessions": 10,
+          "gross": 0.0,
+          "net": 0.0,
+          "trades": 0,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-09-11",
+          "end": "2026-09-25",
+          "sessions": 10,
+          "gross": 0.0,
+          "net": 0.0,
+          "trades": 0,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-09-28",
+          "end": "2026-10-12",
+          "sessions": 10,
+          "gross": 0.0,
+          "net": 0.0,
+          "trades": 0,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-10-13",
+          "end": "2026-10-14",
+          "sessions": 2,
+          "gross": 0.0,
+          "net": 0.0,
+          "trades": 0,
+          "unvalidated_days": 0,
+          "target_met": false
+        }
+      ],
+      "gross": -5648.5,
+      "net": -8099.5,
+      "closed_trades": 38,
+      "unvalidated": 0,
+      "gross_win_rate": 0.2631578947368421,
+      "average_gross_win": 355.875,
+      "average_gross_loss": 328.83035714285717,
+      "exit_reasons": {
+        "INITIAL_SL_HIT": 27,
+        "ASYMMETRIC_TRAIL_PROFIT": 9,
+        "THETA_TIME_STOP": 2
+      },
+      "stopouts_within_one_minute": 3,
+      "zero_trade_days": 46,
+      "final_rule_status_counts": {
+        "PRUNED": 8
+      }
+    },
+    {
+      "config": {
+        "name": "oi_next_day_retry",
+        "stop": 6.15,
+        "entry": "oi_same_contract",
+        "signal_minutes": 1,
+        "fixed_lots": 1,
+        "max_trades": 4,
+        "next_day_retry": true
+      },
+      "blocks": [
+        {
+          "start": "2026-07-17",
+          "end": "2026-07-30",
+          "sessions": 10,
+          "gross": -2502.5,
+          "net": -4050.5,
+          "trades": 24,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-07-31",
+          "end": "2026-08-13",
+          "sessions": 10,
+          "gross": -1384.5,
+          "net": -2610.0,
+          "trades": 19,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-08-14",
+          "end": "2026-08-27",
+          "sessions": 10,
+          "gross": 1420.25,
+          "net": 259.25,
+          "trades": 18,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-08-28",
+          "end": "2026-09-10",
+          "sessions": 10,
+          "gross": -2840.5,
+          "net": -4001.5,
+          "trades": 18,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-09-11",
+          "end": "2026-09-25",
+          "sessions": 10,
+          "gross": 1010.75,
+          "net": -795.25,
+          "trades": 28,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-09-28",
+          "end": "2026-10-12",
+          "sessions": 10,
+          "gross": -341.25,
+          "net": -2018.25,
+          "trades": 26,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-10-13",
+          "end": "2026-10-14",
+          "sessions": 2,
+          "gross": -156.0,
+          "net": -414.0,
+          "trades": 4,
+          "unvalidated_days": 0,
+          "target_met": false
+        }
+      ],
+      "gross": -4793.75,
+      "net": -13630.25,
+      "closed_trades": 137,
+      "unvalidated": 0,
+      "gross_win_rate": 0.35036496350364965,
+      "average_gross_win": 528.53125,
+      "average_gross_loss": 338.9129213483146,
+      "exit_reasons": {
+        "INITIAL_SL_HIT": 87,
+        "ASYMMETRIC_TRAIL_PROFIT": 47,
+        "THETA_TIME_STOP": 3
+      },
+      "stopouts_within_one_minute": 22,
+      "zero_trade_days": 6,
+      "final_rule_status_counts": {
+        "PRUNED": 2,
+        "CANDIDATE": 6
+      }
+    },
+    {
+      "config": {
+        "name": "oi_no_permanent_pruning",
+        "stop": 6.15,
+        "entry": "oi_same_contract",
+        "signal_minutes": 1,
+        "fixed_lots": 1,
+        "max_trades": 4,
+        "static": true
+      },
+      "blocks": [
+        {
+          "start": "2026-07-17",
+          "end": "2026-07-30",
+          "sessions": 10,
+          "gross": -1826.5,
+          "net": -3439.0,
+          "trades": 25,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-07-31",
+          "end": "2026-08-13",
+          "sessions": 10,
+          "gross": 968.5,
+          "net": -386.0,
+          "trades": 21,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-08-14",
+          "end": "2026-08-27",
+          "sessions": 10,
+          "gross": 1306.5,
+          "net": 16.5,
+          "trades": 20,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-08-28",
+          "end": "2026-09-10",
+          "sessions": 10,
+          "gross": -3646.5,
+          "net": -5001.0,
+          "trades": 21,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-09-11",
+          "end": "2026-09-25",
+          "sessions": 10,
+          "gross": 864.5,
+          "net": -812.5,
+          "trades": 26,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-09-28",
+          "end": "2026-10-12",
+          "sessions": 10,
+          "gross": -1153.75,
+          "net": -2830.75,
+          "trades": 26,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-10-13",
+          "end": "2026-10-14",
+          "sessions": 2,
+          "gross": 822.25,
+          "net": 435.25,
+          "trades": 6,
+          "unvalidated_days": 0,
+          "target_met": false
+        }
+      ],
+      "gross": -2665.0,
+      "net": -12017.5,
+      "closed_trades": 145,
+      "unvalidated": 0,
+      "gross_win_rate": 0.3448275862068966,
+      "average_gross_win": 589.81,
+      "average_gross_loss": 338.4789473684211,
+      "exit_reasons": {
+        "INITIAL_SL_HIT": 93,
+        "ASYMMETRIC_TRAIL_PROFIT": 48,
+        "THETA_TIME_STOP": 4
+      },
+      "stopouts_within_one_minute": 25,
+      "zero_trade_days": 6,
+      "final_rule_status_counts": {
+        "PRUNED": 1,
+        "CANDIDATE": 7
+      }
+    },
+    {
+      "config": {
+        "name": "oi_structure_next_day_retry",
+        "stop": 6.15,
+        "entry": "oi_same_contract",
+        "signal_minutes": 1,
+        "fixed_lots": 1,
+        "max_trades": 4,
+        "next_day_retry": true,
+        "structure": true
+      },
+      "blocks": [
+        {
+          "start": "2026-07-17",
+          "end": "2026-07-30",
+          "sessions": 10,
+          "gross": -1966.25,
+          "net": -2353.25,
+          "trades": 6,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-07-31",
+          "end": "2026-08-13",
+          "sessions": 10,
+          "gross": 412.75,
+          "net": 348.25,
+          "trades": 1,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-08-14",
+          "end": "2026-08-27",
+          "sessions": 10,
+          "gross": 412.75,
+          "net": 348.25,
+          "trades": 1,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-08-28",
+          "end": "2026-09-10",
+          "sessions": 10,
+          "gross": 0.0,
+          "net": 0.0,
+          "trades": 0,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-09-11",
+          "end": "2026-09-25",
+          "sessions": 10,
+          "gross": 1816.75,
+          "net": 1558.75,
+          "trades": 4,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-09-28",
+          "end": "2026-10-12",
+          "sessions": 10,
+          "gross": -591.5,
+          "net": -849.5,
+          "trades": 4,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-10-13",
+          "end": "2026-10-14",
+          "sessions": 2,
+          "gross": 1066.0,
+          "net": 1001.5,
+          "trades": 1,
+          "unvalidated_days": 0,
+          "target_met": false
+        }
+      ],
+      "gross": 1150.5,
+      "net": 54.0,
+      "closed_trades": 17,
+      "unvalidated": 0,
+      "gross_win_rate": 0.4117647058823529,
+      "average_gross_win": 655.5714285714286,
+      "average_gross_loss": 343.85,
+      "exit_reasons": {
+        "INITIAL_SL_HIT": 10,
+        "ASYMMETRIC_TRAIL_PROFIT": 7
+      },
+      "stopouts_within_one_minute": 3,
+      "zero_trade_days": 48,
+      "final_rule_status_counts": {
+        "CANDIDATE": 3,
+        "ACTIVE": 2
+      }
+    }
+  ]
+}

@@ -1,0 +1,197 @@
+{
+  "selection_rule": "Prefer complete replay, minimum training trades, count of 10k blocks, worst training block, total gross",
+  "minimum_training_trades": 10,
+  "training_results": [
+    {
+      "config": {
+        "name": "oi_trailing_exit",
+        "stop": 6.15,
+        "entry": "oi_same_contract",
+        "signal_minutes": 1,
+        "fixed_lots": 1,
+        "max_trades": 4,
+        "static": true
+      },
+      "blocks": [
+        {
+          "start": "2026-07-17",
+          "end": "2026-07-30",
+          "sessions": 10,
+          "gross": -1826.5,
+          "net": -3439.0,
+          "trades": 25,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-07-31",
+          "end": "2026-08-13",
+          "sessions": 10,
+          "gross": 968.5,
+          "net": -386.0,
+          "trades": 21,
+          "unvalidated_days": 0,
+          "target_met": false
+        }
+      ],
+      "gross": -858.0,
+      "unvalidated": 0,
+      "training_trade_count": 46
+    },
+    {
+      "config": {
+        "name": "oi_fixed_10_exit",
+        "stop": 6.15,
+        "entry": "oi_same_contract",
+        "signal_minutes": 1,
+        "fixed_lots": 1,
+        "max_trades": 4,
+        "static": true,
+        "target": 10
+      },
+      "blocks": [
+        {
+          "start": "2026-07-17",
+          "end": "2026-07-30",
+          "sessions": 10,
+          "gross": -2850.25,
+          "net": -4462.75,
+          "trades": 25,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-07-31",
+          "end": "2026-08-13",
+          "sessions": 10,
+          "gross": -1842.75,
+          "net": -3132.75,
+          "trades": 20,
+          "unvalidated_days": 0,
+          "target_met": false
+        }
+      ],
+      "gross": -4693.0,
+      "unvalidated": 0,
+      "training_trade_count": 45
+    },
+    {
+      "config": {
+        "name": "oi_fixed_20_exit",
+        "stop": 6.15,
+        "entry": "oi_same_contract",
+        "signal_minutes": 1,
+        "fixed_lots": 1,
+        "max_trades": 4,
+        "static": true,
+        "target": 20
+      },
+      "blocks": [
+        {
+          "start": "2026-07-17",
+          "end": "2026-07-30",
+          "sessions": 10,
+          "gross": -2587.0,
+          "net": -4070.5,
+          "trades": 23,
+          "unvalidated_days": 0,
+          "target_met": false
+        },
+        {
+          "start": "2026-07-31",
+          "end": "2026-08-13",
+          "sessions": 10,
+          "gross": 1254.5,
+          "net": 29.0,
+          "trades": 19,
+          "unvalidated_days": 0,
+          "target_met": false
+        }
+      ],
+      "gross": -1332.5,
+      "unvalidated": 0,
+      "training_trade_count": 42
+    }
+  ],
+  "chosen": {
+    "config": {
+      "name": "oi_trailing_exit",
+      "stop": 6.15,
+      "entry": "oi_same_contract",
+      "signal_minutes": 1,
+      "fixed_lots": 1,
+      "max_trades": 4,
+      "static": true
+    },
+    "blocks": [
+      {
+        "start": "2026-07-17",
+        "end": "2026-07-30",
+        "sessions": 10,
+        "gross": -1826.5,
+        "net": -3439.0,
+        "trades": 25,
+        "unvalidated_days": 0,
+        "target_met": false
+      },
+      {
+        "start": "2026-07-31",
+        "end": "2026-08-13",
+        "sessions": 10,
+        "gross": 968.5,
+        "net": -386.0,
+        "trades": 21,
+        "unvalidated_days": 0,
+        "target_met": false
+      }
+    ],
+    "gross": -858.0,
+    "unvalidated": 0,
+    "training_trade_count": 46
+  },
+  "holdout_days": [
+    "2026-08-14",
+    "2026-08-17",
+    "2026-08-18",
+    "2026-08-19",
+    "2026-08-20",
+    "2026-08-21",
+    "2026-08-24",
+    "2026-08-25",
+    "2026-08-26",
+    "2026-08-27",
+    "2026-08-28",
+    "2026-08-31",
+    "2026-09-01",
+    "2026-09-02",
+    "2026-09-03",
+    "2026-09-04",
+    "2026-09-07",
+    "2026-09-08",
+    "2026-09-09",
+    "2026-09-10",
+    "2026-09-11",
+    "2026-09-15",
+    "2026-09-16",
+    "2026-09-17",
+    "2026-09-18",
+    "2026-09-21",
+    "2026-09-22",
+    "2026-09-23",
+    "2026-09-24",
+    "2026-09-25",
+    "2026-09-28",
+    "2026-09-29",
+    "2026-09-30",
+    "2026-10-01",
+    "2026-10-05",
+    "2026-10-06",
+    "2026-10-07",
+    "2026-10-08",
+    "2026-10-09",
+    "2026-10-12",
+    "2026-10-13",
+    "2026-10-14"
+  ],
+  "training_target_passed": false
+}

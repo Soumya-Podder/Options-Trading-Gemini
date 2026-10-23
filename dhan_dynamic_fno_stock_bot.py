@@ -419,7 +419,7 @@ class DhanStockOptionsClient(HistoricalDataMixin):
         self.last_chain_ts = time.monotonic()
         try:
             response = self.session.post(f"{self.BASE_URL}/optionchain", json={
-                "UnderlyingScrip": int(underlying_id), "UnderlyingSeg": "NSE_EQ", "Expiry": expiry}, timeout=12)
+    "UnderlyingScrip": int(underlying_id), "UnderlyingSeg": "NSE_EQ", "Expiry": expiry}, timeout=12)
             if response.status_code == 200:
                 chain = response.json().get("data", {}).get("oc", {})
                 received = time.time()
@@ -507,25 +507,33 @@ def shortlist_movers(quotes, cfg):
     return sorted(bulls, reverse=True)[:8] + sorted(bears)[:8]
 
 
-def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day_change_pct, cfg):
+def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day_change_pct, cfg, reasons=None):
+    def reject(reason):
+        if reasons is not None:
+            reasons.append(reason)
+        return None
     candles = client.fetch_intraday_candles(stock_info["eq_security_id"], interval="5")
     if not candles:
-        return None
+        return reject("Underlying candle history unavailable")
     sig = evaluate_stock_setup(candles, time.time(), cfg.min_day_change_pct, cfg.ema_period)
     if not sig:
-        return None
+        return reject("No fresh confirmed momentum setup (EMA/VWAP/volume/body/proximity)")
     current = client.fetch_batch_ohlc([stock_info["eq_security_id"]]).get("NSE_EQ", {}).get(str(stock_info["eq_security_id"]), {})
     spot_ltp = float(current.get("last_price", 0) or 0)
     if spot_ltp <= 0:
-        return None
+        return reject("Current underlying quote unavailable")
     # Require the current underlying quote to hold confirmation, without chasing.
     direction = 1 if sig["opt_type"] == "CE" else -1
     advance = direction * (spot_ltp - sig["conf_close"])
     if advance < -0.15 * sig["atr_5m"] or advance > sig["atr_5m"]:
-        return None
+        return reject(f"Underlying follow-through {advance:.2f} outside {-0.15*sig['atr_5m']:.2f} to {sig['atr_5m']:.2f}")
     chain = client.fetch_option_chain(stock_info["eq_security_id"], stock_info["nearest_expiry"])
+    if not chain:
+        return reject(f"Option chain unavailable for expiry {stock_info['nearest_expiry']}")
     contract = DynamicStockOptionsUniverse.resolve_atm_option(stock_info, spot_ltp, sig["opt_type"], chain, cfg)
-    return {**sig, **contract, "spot_ltp": spot_ltp, "eq_security_id": stock_info["eq_security_id"]} if contract else None
+    if not contract:
+        return reject("No master-matched option with valid broker Greeks in the delta band")
+    return {**sig, **contract, "spot_ltp": spot_ltp, "eq_security_id": stock_info["eq_security_id"]}
 
 
 def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
@@ -742,7 +750,8 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
             for change, sec_id, ltp in shortlist:
                 if sec_id not in universe or universe[sec_id]["symbol"] in used_symbols:
                     continue
-                sig = verify_live_scanx_and_resolve_stock_option(client, universe[sec_id], ltp, change, cfg)
+                signal_reasons = []
+                sig = verify_live_scanx_and_resolve_stock_option(client, universe[sec_id], ltp, change, cfg, reasons=signal_reasons)
                 if sig:
                     signals.append(sig)
                     depth = client.fetch_option_quotes([sig["opt_security_id"]])
@@ -752,22 +761,30 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                         candidates.append(qualified)
                     else:
                         logger.info("[OPTSTK REJECT] %s %s | %s", sig["symbol"], sig["opt_type"], reasons[0] if reasons else "Unspecified rejection")
+                else:
+                    logger.info("[OPTSTK REJECT] %s | %s", universe[sec_id]["symbol"], signal_reasons[0] if signal_reasons else "Setup unavailable")
             ranked = rank_candidates(candidates)
             logger.info("Shortlist %d | confirmed %d | qualified %d", len(shortlist), len(signals), len(ranked))
             if scan_once:
                 return
             capacity = min(cfg.max_concurrent-len(positions), cfg.max_daily_trades-consumed)
-            for best in ranked[:capacity]:
+            entered = 0
+            for best in ranked:
+                if entered >= capacity:
+                    break
                 current = client.fetch_batch_ohlc([best["eq_security_id"]]).get("NSE_EQ", {}).get(str(best["eq_security_id"]), {})
                 spot = float(current.get("last_price", 0) or 0)
                 advance = (1 if best["opt_type"] == "CE" else -1)*(spot-best["conf_close"])
                 if spot <= 0 or not -0.15*best["atr_5m"] <= advance <= best["atr_5m"]:
+                    logger.info("[OPTSTK RECHECK REJECT] %s | Spot %.2f, follow-through %.2f outside %.2f to %.2f",
+                                best["symbol"],spot,advance,-0.15*best["atr_5m"],best["atr_5m"])
                     continue
                 # Ranking may have taken minutes. Rebuild the candidate from current
                 # closed candles and a newly received chain before any reservation.
-                best = verify_live_scanx_and_resolve_stock_option(client, universe[best["eq_security_id"]], spot, 0, cfg)
+                signal_reasons = []
+                best = verify_live_scanx_and_resolve_stock_option(client, universe[best["eq_security_id"]], spot, 0, cfg, reasons=signal_reasons)
                 if not best:
-                    logger.info("[OPTSTK RECHECK REJECT] Setup no longer current")
+                    logger.info("[OPTSTK RECHECK REJECT] %s", signal_reasons[0] if signal_reasons else "Setup no longer current")
                     continue
                 fresh = client.fetch_option_quotes([best["opt_security_id"]])
                 reasons = []
@@ -788,6 +805,7 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                     "entry_epoch": now.timestamp(), "entry_id": f"STOCK_{today}_{slot}"}
                 if not gate.reserve(today, {"mode": "LIVE" if live_mode else "PAPER", "position": pos}, slot):
                     return
+                entered += 1
                 wallet -= pos["entry_price"]*pos["qty"] + pos["estimated_costs"]
                 if live_mode:
                     oid = client.place_option_super_order(best["trading_symbol"], best["opt_security_id"],

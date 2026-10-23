@@ -288,6 +288,15 @@ class IntegrationTests(unittest.TestCase):
         self.assertIsNone(bot.DynamicStockOptionsUniverse.resolve_atm_option(stock,100,"CE",chain,self.cfg))
 
     def test_session_submits_two_sized_brackets_with_real_trail(self):
+        self.run_ranked_session(False)
+
+    def test_rejected_top_candidates_do_not_hide_next_valid_entry(self):
+        self.run_ranked_session(True)
+
+    def test_paper_entry_uses_next_valid_candidate_and_persists_position(self):
+        self.run_ranked_session(True,live=False)
+
+    def run_ranked_session(self, reject_top, live=True):
         from unittest.mock import MagicMock
         cfg = self.cfg
         cfg.initial_capital = 200000
@@ -295,30 +304,45 @@ class IntegrationTests(unittest.TestCase):
         candidates = [{**plan, "symbol":name,"opt_type":"CE","signal_quality":90,
             "expected_net_rr":3,"eq_security_id":str(i),"opt_security_id":str(i+10),
             "conf_close":100,"atr_5m":20,"strike":100,"trading_symbol":name,
-            "opt_ltp":100,"spread_pct":0.05} for i,name in enumerate(("AAA","BBB"),1)]
+            "opt_ltp":100,"spread_pct":0.05} for i,name in enumerate(("AAA","BBB","CCC"),1)]
         client = MagicMock()
-        client.fetch_batch_ohlc.return_value = {"NSE_EQ":{"1":{"last_price":100},"2":{"last_price":100}}}
-        client.fetch_option_quotes.return_value = {"11":{},"12":{}}
+        client.fetch_batch_ohlc.return_value = {"NSE_EQ":{str(i):{"last_price":100} for i in range(1,4)}}
+        client.fetch_option_quotes.return_value = {"11":{},"12":{},"13":{}}
         client.place_option_super_order.return_value = "order-id"
-        universe = {str(i):{"symbol":name} for i,name in enumerate(("AAA","BBB"),1)}
+        universe = {str(i):{"symbol":name} for i,name in enumerate(("AAA","BBB","CCC"),1)}
+        attempts = {}
+        def verify(client,stock,*args,**kwargs):
+            name=stock["symbol"]
+            attempts[name]=attempts.get(name,0)+1
+            if reject_top and name in ("AAA","BBB") and attempts[name]>1:
+                kwargs["reasons"].append("Setup changed during recheck")
+                return None
+            return next(x for x in candidates if x["symbol"]==name)
         with tempfile.TemporaryDirectory() as folder:
             cfg.gate_dir = folder
             with patch.object(bot,"datetime") as clock, patch.object(bot,"DhanStockOptionsClient",return_value=client), \
                  patch.object(bot.DynamicStockOptionsUniverse,"load_universe",return_value=universe), \
                  patch.object(bot,"load_dotenv_file",return_value={"DHAN_CLIENT_ID":"test","DHAN_ACCESS_TOKEN":"test"}), \
                  patch.object(bot,"load_or_init_ledger",return_value={"trades":[],"virtual_balance_net":200000}), \
-                 patch.object(bot,"shortlist_movers",return_value=[(3,"1",100),(3,"2",100)]), \
-                 patch.object(bot,"verify_live_scanx_and_resolve_stock_option",side_effect=lambda client,stock,*args: next(x for x in candidates if x["symbol"]==stock["symbol"])), \
+                 patch.object(bot,"shortlist_movers",return_value=[(3,str(i),100) for i in range(1,4)]), \
+                 patch.object(bot,"verify_live_scanx_and_resolve_stock_option",side_effect=verify), \
                  patch.object(bot,"qualify_quote",side_effect=lambda sig,*args,**kwargs: sig), \
+                 patch.object(bot.time,"sleep",side_effect=lambda *_: setattr(clock.now,"return_value",self.now.replace(day=23))), \
                  patch.object(bot,"TelegramNotifier",None):
                 clock.now.return_value = self.now
-                bot.run_dynamic_stock_options_session(True,False,cfg,logging.getLogger("test"))
-            self.assertEqual(client.place_option_super_order.call_count,2)
+                bot.run_dynamic_stock_options_session(live,False,cfg,logging.getLogger("test"))
+            expected=1 if reject_top else 2
+            self.assertEqual(client.place_option_super_order.call_count,expected if live else 0)
+            if reject_top and live:
+                self.assertEqual(client.place_option_super_order.call_args.args[0],"CCC")
             for call in client.place_option_super_order.call_args_list:
                 self.assertEqual(call.args[2],plan["qty"])
                 self.assertEqual(call.args[4],plan["rupee_target_price"])
                 self.assertGreater(call.args[6],0)
-            self.assertEqual(bot.DailyTradeGate(folder,2).count_entries("2026-10-22"),2)
+            self.assertEqual(bot.DailyTradeGate(folder,2).count_entries("2026-10-22"),expected)
+            if not live:
+                saved=bot.DailyTradeGate(folder,2).read("2026-10-22",1)
+                self.assertEqual(saved["details"]["position"]["symbol"],"CCC")
 
     def test_net_metrics_count_fee_loser_as_loss(self):
         ledger = {"initial_capital":1000, "trades":[{"gross_pnl":10, "net_pnl":-40}, {"gross_pnl":200,"net_pnl":150}]}
