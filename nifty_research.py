@@ -12,7 +12,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import time
-import importlib.util
+import types
 import subprocess
 import os
 
@@ -478,6 +478,17 @@ def blocks(daily):
             for i in range(0,len(daily),10) if (part:=daily[i:i+10])]
 
 
+def load_previous_engine():
+    """Load the committed comparison baseline without creating a source copy."""
+    recovered=subprocess.run(
+        ['git','-c','core.fsmonitor=false','show','2ba4ea8:dhan_bot_engine.py'],
+        cwd=ROOT,capture_output=True,check=True)
+    previous=types.ModuleType('previous_research_engine')
+    previous.__file__=str(ROOT/'dhan_bot_engine.py')
+    exec(compile(recovered.stdout,'git:2ba4ea8:dhan_bot_engine.py','exec'),previous.__dict__)
+    return previous,hashlib.sha256(recovered.stdout).hexdigest()
+
+
 def evaluate(finer_execution=False,entry_research=False,reversal_research=False,early_research=False,oi_research=False,learning_research=False,exit_research=False):
     legs,index,sessions=load_market()
     execution=None
@@ -501,10 +512,7 @@ def evaluate(finer_execution=False,entry_research=False,reversal_research=False,
     holdout=dict(list(sessions.items())[20:])
     run=WORK/('run_'+datetime.now(IST).strftime('%Y%m%d_%H%M%S'))
     run.mkdir(parents=True)
-    source=WORK/'previous_engine_2ba4ea8.py'
-    if not source.exists():
-        recovered=subprocess.run(['git','-c','core.fsmonitor=false','show','2ba4ea8:dhan_bot_engine.py'],cwd=ROOT,capture_output=True,check=True)
-        source.write_bytes(recovered.stdout)
+    previous,previous_hash=load_previous_engine()
     candidates=EXIT_CANDIDATES if exit_research else LEARNING_CANDIDATES if learning_research else OI_CANDIDATES if oi_research else EARLY_CANDIDATES if early_research else REVERSAL_CANDIDATES if reversal_research else ENTRY_CANDIDATES if entry_research else CANDIDATES
     structure_history={}
     if any(c.get('structure') for c in candidates):
@@ -514,17 +522,12 @@ def evaluate(finer_execution=False,entry_research=False,reversal_research=False,
             start=end-timedelta(days=11)
             indices=[i for i,t in enumerate(data['timestamp']) if start.timestamp()<=t<end.timestamp()]
             structure_history[day]={k:[v[i] for i in indices] for k,v in data.items() if isinstance(v,list) and len(v)==len(data['timestamp'])}
-    sources=(Path(__file__),ROOT/'dhan_bot_engine.py',ROOT/'index_option_replay.py',ROOT/'nifty_oi.py',ROOT/'nifty_market_structure.py',source)
-    for p in sources:
-        dest=run/'sources'/p.name
-        dest.parent.mkdir(parents=True,exist_ok=True)
-        dest.write_bytes(p.read_bytes())
+    sources=(Path(__file__),ROOT/'dhan_bot_engine.py',ROOT/'index_option_replay.py',ROOT/'nifty_oi.py',ROOT/'nifty_market_structure.py')
     write(run/'declared_plan.json',{'candidates':candidates,'training_days':list(training),'holdout_days':list(holdout),
           'execution_interval':1 if finer_execution else 5,
           'previously_examined_later_dates':finer_execution,
-          'source_hashes':{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources}})
-    spec=importlib.util.spec_from_file_location('previous_research_engine',source)
-    previous=importlib.util.module_from_spec(spec);spec.loader.exec_module(previous)
+          'source_hashes':{**{p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in sources},
+                           'git:2ba4ea8:dhan_bot_engine.py':previous_hash}})
     training_results=[]
     for config in candidates:
         result=run_candidate(config,training,legs,index,run/(config['name']+'_training'),previous.MarketMicrostructureAnalyzer,execution,structure_history)

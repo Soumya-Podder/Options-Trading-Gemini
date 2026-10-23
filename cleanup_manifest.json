@@ -265,6 +265,27 @@
         "stock_option_signals"
       ]
     },
-    "reason": "Preserved all regression checks while eliminating redundant standalone test modules and an unreferenced historical source copy. No production logic changes."
+    "reason": "Preserved all regression checks while eliminating redundant standalone test modules and an unreferenced historical source copy. No production logic changes.",
+    "second_pass": {
+      "removed": [
+        "test_nifty_oi.py",
+        "test_nifty_level_entry.py",
+        "test_stock_option_signals.py",
+        "dhan_hist_cache/nifty_research_20261023/previous_engine_2ba4ea8.py"
+      ],
+      "consolidated_into": [
+        "test_nifty_market_structure.py",
+        "test_stock_option_integration.py"
+      ],
+      "root_python_files_remaining": 21,
+      "remaining_test_modules": 9,
+      "tests_passed": 213,
+      "legacy_baseline_read_from_git_without_source_copy": true,
+      "research_source_snapshot_folders_disabled": true,
+      "remaining_cached_python_scripts": [
+        "dhan_hist_cache/nifty_regime_review_20261023/run.py",
+        "dhan_hist_cache/stock_regime_review_20261023/run.py"
+      ]
+    }
   }
 }

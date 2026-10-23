@@ -80,7 +80,7 @@ Limitations include one-minute intrabar uncertainty, simplified modeled charges/
 
 Official API reference: https://dhanhq.co/docs/v2/expired-options-data/.
 
-## Current implementation audit — 23 October 2026
+## Current implementation audit â€” 23 October 2026
 
 The current-policy replay uses the shared daily net-liquidation helper inside an
 open trade, current dynamic lot selection, the existing daily trade/loss limits,
@@ -133,3 +133,5 @@ diagnostic with explicit selection and sample limits, not full strategy
 validation. No experimental trading policy was promoted. Stock close records
 now retain spread/stop geometry, Greeks, quote/signal ages and 15m EMA context.
 Nifty entries retain LTP/bid/ask evidence. All 207 regression checks pass.
+
+Legacy comparison code is loaded from its Git commit in memory. Research plans retain source hashes; new evaluations do not write duplicate engine modules or a source-copy folder.

@@ -14,6 +14,17 @@ def row(strike, close=100):
 
 
 class FixedContractTests(unittest.TestCase):
+    def test_legacy_baseline_is_loaded_from_git_without_source_copy(self):
+        source=b'class MarketMicrostructureAnalyzer: pass\n'
+        with patch.object(research.subprocess,'run',return_value=MagicMock(stdout=source)) as git_read,\
+             patch.object(Path,'write_bytes',side_effect=AssertionError('Unnecessary source copy')):
+            previous,digest=research.load_previous_engine()
+        self.assertTrue(hasattr(previous,'MarketMicrostructureAnalyzer'))
+        self.assertEqual(digest,research.hashlib.sha256(source).hexdigest())
+        self.assertEqual(previous.__name__,'previous_research_engine')
+        self.assertEqual(git_read.call_args.args[0][-2:],['show','2ba4ea8:dhan_bot_engine.py'])
+        self.assertTrue(git_read.call_args.kwargs['check'])
+
     def test_enters_analyzer_selected_contract_instead_of_rolling_atm(self):
         analysis={'atm_ce_strike':22050,'atm_pe_strike':22000}
         self.assertEqual(research.selected_entry_strike(analysis,'CALL'),22050)

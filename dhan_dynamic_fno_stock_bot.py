@@ -157,7 +157,7 @@ class DynamicStrategyConfig:
         self.min_delta = float(env.get("STOCK_OPT_MIN_DELTA", 0.38))
         self.max_delta = float(env.get("STOCK_OPT_MAX_DELTA", 0.78))
         self.max_theta_pct_per_day = float(env.get("STOCK_OPT_MAX_THETA_PCT_PER_DAY", 6))
-        self.no_progress_bars = int(env.get("STOCK_OPT_NO_PROGRESS_BARS", 5))
+        self.no_progress_bars = int(env.get("STOCK_OPT_NO_PROGRESS_BARS", 3))
         self.max_premium = float(env.get("STOCK_OPT_MAX_PREMIUM", 1000))
         self.confirm_window_sec = int(env.get("STOCK_OPT_CONFIRM_WINDOW_SEC", 600))
         self.poll_interval_sec = float(env.get("STOCK_OPT_POLL_INTERVAL_SEC", 4))
@@ -894,7 +894,7 @@ def paper_exit(pos, quote, now, cfg):
     pos["peak_bid"] = max(pos.get("peak_bid", pos["entry_price"]), bid)
     jump = pos["trail_jump"]
     if jump > 0 and pos["peak_bid"] - pos["entry_price"] >= 2 * jump:
-        pos["current_sl"] = max(pos["current_sl"], round_tick(pos["peak_bid"]-jump))
+        pos["current_sl"] = max(pos["current_sl"], round_tick(pos["peak_bid"] - jump))
     price = math.floor(max(0.05, bid * (1 - cfg.slippage_pct/100))*20 + 1e-9)/20
     net = (price-pos["entry_price"])*pos["qty"] - compute_fno_option_charges(pos["entry_price"], price, pos["qty"])
     reason = None

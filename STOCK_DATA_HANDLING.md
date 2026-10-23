@@ -102,7 +102,7 @@ reconstruct a fixed contract's historical OHLC, so those trades are not scored.
 Regression checks:
 
 ```powershell
-python -m unittest test_stock_data_quality test_stock_option_policy test_stock_option_signals test_stock_option_integration test_index_option_replay
+python -m unittest test_stock_data_quality test_stock_option_policy test_stock_option_integration test_index_option_replay
 ```
 
 Official references:

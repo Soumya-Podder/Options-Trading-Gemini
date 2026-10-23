@@ -7,7 +7,7 @@ from stock_option_signals import IST
 from stock_option_signals import evaluate_stock_setup
 from stock_option_policy import premium_plan, stock_reentry_reason
 import dhan_dynamic_fno_stock_bot as stock
-import test_nifty_level_entry as level_fixtures
+import test_nifty_market_structure as level_fixtures
 from nifty_market_structure import apply_nifty_level_entry
 
 
