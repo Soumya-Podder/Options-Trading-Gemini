@@ -13,24 +13,24 @@ Standalone stock scanning is `python dhan_dynamic_fno_stock_bot.py --scan-once`.
 Initial signal, chain-selection, quote qualification and recheck failures are
 logged under `OPTSTK REJECT` or `OPTSTK RECHECK REJECT`.
 
-The 2026-10-23 clear-mover profile uses a Rs.900 minimum estimated net
-stock target, minimum planned net RR 1.3, a 3.5% base spread cap and a 600-second
+The revised 2026-10-23 local profile uses a Rs.1,250 minimum estimated net
+stock target, minimum planned net RR 1.4, a 2.5% base spread cap and a 600-second
 confirmation window after a five-minute candle closes. Set these with
 `STOCK_OPT_RUPEE_TARGET`, `STOCK_OPT_MIN_NET_RR`, `STOCK_OPT_MAX_SPREAD_PCT` and
 `STOCK_OPT_CONFIRM_WINDOW_SEC`. The window must be 300–900 seconds, is exclusive
 at its upper boundary, and is shared by signal detection and quote qualification.
 Future/forming candles and gaps between required confirmation bars remain invalid.
 
-The current local risk ceiling remains Rs.1,000, with at most three lots and two
-entries/day. Defaults without local overrides are a Rs.1,800 estimated risk cap,
-two lots, 12% premium target reference and 5% stop; the local percentage reference
-is 10%, with the existing cash-target extension enabled. Full planned RR and risk,
+The current local estimated risk ceiling is Rs.1,600, with at most two lots and two
+entries/day. The local percentage target reference is 14%, the premium stop is 7%,
+and adverse modeled slippage is 0.05%, with the existing cash-target extension enabled.
+Defaults without local overrides remain separate from the selected local profile. Full planned RR and risk,
 wallet, depth for the selected quantity and bid-above-stop are still required.
 These are modeled constraints, not guaranteed fills, profit, or maximum loss.
 
 A strong mover means an absolute underlying day change of at least 6%, based on
-the latest confirmed signal. It can use one extra spread percentage point (4.5%
-with the current profile), a 55% minimum of the required net target in the 1.8-ATR
+the latest confirmed signal. It can use one extra spread percentage point (3.5%
+with the current local profile), a 55% minimum of the required net target in the 1.5-ATR
 Greek scenario, and a chain IV-range cutoff of 90% instead of 80%. This is a
 cross-sectional min/max IV position, not historical IV rank or a percentile of
 contracts. At the cutoff the option is rejected. Normal movers retain the 75%
@@ -44,11 +44,11 @@ moves such as the observed Swiggy decline. A later rally in a put premium does
 not establish that an earlier entry would survive its stop. This profile requires
 replay and paper observation; it does not ensure capture of that move.
 
-Minimum DTE remains four calendar days; delta band is 0.38–0.78; premium floor is
-Rs.3; maximum hold is 12 five-minute bars, with no-progress checking after five
+Minimum DTE remains four calendar days; local delta band is 0.40–0.75; premium floor is
+Rs.3; local maximum hold is 16 five-minute bars, with no-progress checking after eight
 bars; daily theta limit is 6%. Quotes must have been received within 30 seconds
-and Greek snapshots within 120 seconds. The underlying follow-through band stays
--0.15 to +1.0 five-minute ATR. Valid broker Greeks remain mandatory.
+and Greek snapshots within 120 seconds. Both underlying follow-through checks use
+-0.10 to +0.85 five-minute ATR. Valid broker Greeks remain mandatory.
 
 Nifty confirmation now also defaults to 600 seconds (validated 300–900). The
 range of already-closed current-session candles must reach 80 points before body
@@ -174,3 +174,5 @@ diagnostic with explicit selection and sample limits, not full strategy
 validation. No experimental trading policy was promoted. Stock close records
 now retain spread/stop geometry, Greeks, quote/signal ages and 15m EMA context.
 Nifty entries retain LTP/bid/ask evidence. All 207 regression checks pass.
+
+This revised local profile was applied after the stored 30/60-day results. Those results do not establish the profitability of these changes. Existing positions and ledger balances are not reset when configuration changes.

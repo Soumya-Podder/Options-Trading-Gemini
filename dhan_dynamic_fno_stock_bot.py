@@ -205,7 +205,7 @@ class DynamicStockOptionsUniverse:
         return True
 
     @classmethod
-    def load_universe(cls, logger: logging.Logger, min_days_to_expiry=12) -> Dict[str, Dict[str, Any]]:
+    def load_universe(cls, logger: logging.Logger, min_days_to_expiry=4) -> Dict[str, Dict[str, Any]]:
         today_str = datetime.now().strftime("%Y-%m-%d")
         cache_file = os.path.join(CACHE_DIR, f"dynamic_optstk_universe_{today_str}_dte{min_days_to_expiry}.json")
         if os.path.exists(cache_file):
@@ -719,8 +719,8 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
     # Require the current underlying quote to hold confirmation, without chasing.
     direction = 1 if sig["opt_type"] == "CE" else -1
     advance = direction * (spot_ltp - sig["conf_close"])
-    if advance < -0.15 * sig["atr_5m"] or advance > sig["atr_5m"]:
-        return reject(f"Underlying follow-through {advance:.2f} outside {-0.15*sig['atr_5m']:.2f} to {sig['atr_5m']:.2f}")
+    if advance < -0.10 * sig["atr_5m"] - 1e-9 or advance > 0.85 * sig["atr_5m"] + 1e-9:
+        return reject(f"Underlying follow-through {advance:.2f} outside {-0.10*sig['atr_5m']:.2f} to {0.85*sig['atr_5m']:.2f}")
     chain = client.fetch_option_chain(stock_info["eq_security_id"], stock_info["nearest_expiry"])
     if not chain:
         return reject(f"Option chain unavailable for expiry {stock_info['nearest_expiry']}")
@@ -766,7 +766,7 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
             # must not veto a larger affordable lot count that fits both the
             # target-move estimate and the unchanged cash-risk ceiling.
             delta,theta,gamma=(float(sig[k]) for k in ('delta','theta','gamma'))
-            move=1.8*float(sig['atr_5m'])
+            move=1.5*float(sig['atr_5m'])
             decay=max(0,-theta)*cfg.max_hold_bars_5m*5/(24*60)
             premium_move=abs(delta)*move+0.5*gamma*move*move-decay
             # Strong movers use the explicit 55% scenario screen below; the
@@ -803,13 +803,13 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         decay = max(0, -theta) * cfg.max_hold_bars_5m * 5 / (24*60)
         if decay*qty >= cfg.rupee_target:
             return reject(f"Decay over hold Rs.{decay*qty:.0f} exceeds the Rs.{cfg.rupee_target:.0f} target")
-        move = 1.8 * float(sig["atr_5m"])
+        move = 1.5 * float(sig["atr_5m"])
         expected_gain = abs(delta)*move + 0.5*gamma*move*move - decay
         net_gain = expected_gain*qty - plan["target_estimated_costs"]
         minimum_fraction=0.55 if strong_mover else (1.0 if cfg.extend_rupee_target else 0.75)
         required_gain=max(cfg.rupee_target,plan.get('net_profit_target',cfg.rupee_target))*minimum_fraction
         if net_gain < required_gain:
-            return reject(f"A 1.8 ATR move nets only Rs.{net_gain:.0f} of the required Rs.{required_gain:.0f} ({minimum_fraction:.0%} minimum)")
+            return reject(f"A 1.5 ATR move nets only Rs.{net_gain:.0f} of the required Rs.{required_gain:.0f} ({minimum_fraction:.0%} minimum)")
         # Cross-sectional IV range in the same expiry/side, not historical IV rank.
         low, high = float(sig["iv_range_low"]), float(sig["iv_range_high"])
         if not all(math.isfinite(v) for v in (low, high)) or high <= low:
@@ -1069,9 +1069,9 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                 current = client.fetch_batch_ohlc([best["eq_security_id"]]).get("NSE_EQ", {}).get(str(best["eq_security_id"]), {})
                 spot = float(current.get("last_price", 0) or 0)
                 advance = (1 if best["opt_type"] == "CE" else -1)*(spot-best["conf_close"])
-                if spot <= 0 or not -0.15*best["atr_5m"] <= advance <= best["atr_5m"]:
+                if spot <= 0 or not -0.10*best["atr_5m"]-1e-9 <= advance <= 0.85*best["atr_5m"]+1e-9:
                     logger.info("[OPTSTK RECHECK REJECT] %s | Spot %.2f, follow-through %.2f outside %.2f to %.2f",
-                                best["symbol"],spot,advance,-0.15*best["atr_5m"],best["atr_5m"])
+                                best["symbol"],spot,advance,-0.10*best["atr_5m"],0.85*best["atr_5m"])
                     continue
                 # Ranking may have taken minutes. Rebuild the candidate from current
                 # closed candles and a newly received chain before any reservation.

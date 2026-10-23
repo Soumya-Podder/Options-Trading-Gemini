@@ -18,6 +18,17 @@ def rule():
 
 
 class LearningFeedbackTests(unittest.TestCase):
+    def test_explicit_entry_risk_is_used_for_net_learning_on_flat_exit(self):
+        ledger=dict(initial_capital=30000,virtual_balance_gross=30000,
+                    virtual_balance_net=30000,trades=[])
+        brain=MagicMock()
+        with patch.object(bot,'atomic_write_json'):
+            bot.record_closed_trade(ledger,brain,'2026-10-23','2026-10-23 10:00:00',
+                '2026-10-23 10:05:00','NIFTY',22000,'CE',1,65,22000,0,
+                150,150,0,'TIME_EXIT','rule',[0]*10,'PAPER',initial_risk_points=12.5)
+        self.assertEqual(ledger['trades'][0]['initial_risk_points'],12.5)
+        self.assertAlmostEqual(brain.learn_from_trade.call_args.args[4],-64.5/(12.5*65),places=6)
+
     def test_halving_preserves_win_and_consistency(self):
         stats={'wins_count':1,'losses_count':3,'total_win_r':2,'total_loss_r':3}
         bot.SelfLearningBrain.halve_rule_history(stats)

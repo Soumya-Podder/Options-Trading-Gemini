@@ -9,6 +9,29 @@ import dhan_bot_engine as bot
 
 
 class ReplayTests(unittest.TestCase):
+    def test_premium_scaled_nifty_stop_is_clamped_and_index_specific(self):
+        for premium,expected in ((45,6.15),(100,8.5),(150,12.5),(300,12.5)):
+            self.assertEqual(bot.option_stop_points('NIFTY',premium),expected)
+        self.assertEqual(bot.option_stop_points('SENSEX',150),20)
+
+    def test_nifty_ratchet_waits_then_locks_and_never_lowers_stop(self):
+        self.assertEqual(bot.update_ratchet_sl(100,90,111.5,10),(90,False))
+        self.assertEqual(bot.update_ratchet_sl(100,90,115,10),(102.5,True))
+        self.assertEqual(bot.update_ratchet_sl(100,90,122,10),(116,True))
+        self.assertEqual(bot.update_ratchet_sl(100,90,130,10),(123.5,True))
+        self.assertEqual(bot.update_ratchet_sl(100,124,130,10),(124,True))
+
+    def test_current_replay_uses_entry_premium_for_initial_risk(self):
+        start=datetime(2026,10,22,10)
+        stamps=[int((start+timedelta(minutes=i)).timestamp()) for i in range(2)]
+        args=(0,True,stamps,[150,150],[151,151],[140,149],[150,150],[22000,22000],6.15)
+        current=bot.evaluate_real_option_trade_bars(*args,interval_min=1,index='NIFTY',
+            lots=1,lot_size=65,entry_at_open=True,current_session_policy=True)
+        legacy=bot.evaluate_real_option_trade_bars(*args,interval_min=1,index='NIFTY',
+            lots=1,lot_size=65,entry_at_open=True,current_session_policy=False)
+        self.assertEqual(current[3],'END_OF_WINDOW')
+        self.assertEqual(legacy[3],'INITIAL_SL_HIT')
+
     def test_daily_target_includes_prior_losses_and_partial_profit_once(self):
         position={'entry_price':100,'qty':65,'lots':1}
         self.assertTrue(bot.daily_target_reached(0,position,120))

@@ -52,7 +52,7 @@ INDICES_CONFIG = {
         "instrument": "OPTIDX",
         "lot_size": 65,
         "strike_step": 50,
-        "sl_points": 6.15,           # 1R = Rs. 399.75 per lot
+        "sl_points": 6.15,           # Floor; Nifty entry stop scales to 8.5%, capped at 12.50.
         "min_option_premium": 45.0,  # Blocks low-delta / high-theta decay traps < Rs. 45
         "min_spot_impulse": 8.5,
         "max_spot_impulse": 28.5,    # Blocks exhaustion spikes > 28.5 pts
@@ -927,21 +927,24 @@ class SelfLearningBrain:
                          sig,r_mult,self.rules.get(sig,{}).get("status","UNKNOWN"))
 
 
+def option_stop_points(index: str, entry_price: float) -> float:
+    """Freeze Nifty initial risk at entry; other indices keep their configured stop."""
+    if index == "NIFTY":
+        return round(max(6.15, min(12.50, float(entry_price) * 0.085)), 2)
+    return INDICES_CONFIG[index]["sl_points"]
+
+
 def update_ratchet_sl(entry_price: float, current_sl: float, highest_ltp: float, sl_points: float) -> Tuple[float, bool]:
     peak_r = (highest_ltp - entry_price) / sl_points
     armed = False
     new_sl = current_sl
-    if peak_r >= 3.0:
-        new_sl = max(current_sl, round(highest_ltp - (0.80 * sl_points), 2))
+    if peak_r >= 2.20:
+        new_sl = max(current_sl, round(entry_price + 1.60 * sl_points, 2),
+                     round(highest_ltp - 0.65 * sl_points, 2))
         armed = True
-    elif peak_r >= 2.0:
-        new_sl = max(current_sl, round(entry_price + (1.05 * sl_points), 2))
+    elif peak_r >= 1.50:
+        new_sl = max(current_sl, round(entry_price + 0.25 * sl_points, 2))
         armed = True
-    elif peak_r >= 1.15:
-        new_sl = max(current_sl, round(entry_price + (0.20 * sl_points), 2))
-        armed = True
-    elif peak_r >= 0.65:
-        new_sl = max(current_sl, round(entry_price - (0.45 * sl_points), 2))
     return new_sl, armed
 
 
@@ -981,7 +984,8 @@ def evaluate_real_option_trade_bars(
         strikes,sl_points,interval_min,index,lots,lot_size,exit_fills,
         nifty_target_quantities(index,lots,lot_size),update_ratchet_sl,
         EOD_SQUAREOFF_TIME,entry_at_open,expected_strike,slippage_pct,require_session_end,
-        session_profit_check,current_session_policy)
+        session_profit_check,current_session_policy,
+        option_stop_points if current_session_policy and index in INDICES_CONFIG else None)
 
 
 def record_closed_trade(
@@ -1005,13 +1009,14 @@ def record_closed_trade(
     state_vec: List[float],
     data_health: str,
     exit_fills=None, booked_gross: float = 0, booked_net: float = 0, market_structure=None,
-    ledger_path="paper_trade_ledger.json",
+    ledger_path="paper_trade_ledger.json", initial_risk_points=None,
 ) -> float:
     gross_pnl = round((exit_price - entry_price) * qty, 2)
     charges = round(40.0 + (lots * 24.5) + 20.0*max(0,len(exit_fills or [])-1), 2)
     net_pnl = round(gross_pnl - charges, 2)
     # Keep execution's gross R for audit, but train on the after-cost outcome.
-    risk_budget=gross_pnl/r_mult if r_mult and gross_pnl/r_mult>0 else INDICES_CONFIG[idx_name]["sl_points"]*qty
+    risk_budget=(float(initial_risk_points)*qty if initial_risk_points is not None else
+                 gross_pnl/r_mult if r_mult and gross_pnl/r_mult>0 else option_stop_points(idx_name,entry_price)*qty)
     learning_r=round(net_pnl/risk_budget,6)
 
     ledger["virtual_balance_gross"] = round(ledger["virtual_balance_gross"] + gross_pnl - booked_gross, 2)
@@ -1032,6 +1037,7 @@ def record_closed_trade(
         "exit_price": exit_price,
         "gross_pnl": gross_pnl,
         "net_pnl": net_pnl,
+        "initial_risk_points": round(risk_budget/qty, 4),
         "r_multiple": r_mult,
         "learning_r_multiple":learning_r,
         "learning_reward_basis":"NET_AFTER_MODELED_CHARGES",
@@ -1330,6 +1336,7 @@ def run_real_historical_backtest(
                     data_health="DHAN_REAL_HISTORICAL", exit_fills=exit_fills,
                     market_structure=analysis.get("market_structure"),
                     ledger_path=backtest_ledger_path,
+                    initial_risk_points=option_stop_points(idx_name,entry_price),
                 )
                 ledger["trades"][-1].update(signal_timestamp=datetime.fromtimestamp(ts_val+interval_min*60).isoformat(),
                     execution_model="NEXT_BAR_OPEN_0.1PCT_ADVERSE_SLIPPAGE",
@@ -1559,6 +1566,8 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                 node = oc_dict.get(f"{strike_k:.6f}", oc_dict.get(str(strike_k), {})).get(opt_side, {})
                 curr_ltp = float(node.get("last_price", active_pos["current_ltp"]))
                 active_pos["current_ltp"] = curr_ltp
+                # Restored older positions retain their original fixed stop distance.
+                position_risk = active_pos.get("initial_risk_points", cfg["sl_points"])
 
                 elapsed_min = (now - active_pos["entry_dt"]).total_seconds() / 60.0
                 exit_reason = None
@@ -1569,7 +1578,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         if active_pos["ratchet_armed"] and curr_ltp > active_pos["entry_price"]
                         else "INITIAL_SL_HIT"
                     )
-                elif elapsed_min >= 25.0 and (active_pos["highest_ltp"] - active_pos["entry_price"]) < (0.80 * cfg["sl_points"]):
+                elif elapsed_min >= 25.0 and (active_pos["highest_ltp"] - active_pos["entry_price"]) < (0.80 * position_risk):
                     exit_reason = "THETA_TIME_STOP"
                 elif now.time() >= EOD_SQUAREOFF_TIME:
                     exit_reason = "EOD_SQUAREOFF"
@@ -1595,7 +1604,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     active_pos["highest_ltp"] = curr_ltp
                     new_sl, armed = update_ratchet_sl(
                         active_pos["entry_price"], active_pos["current_sl"],
-                        active_pos["highest_ltp"], cfg["sl_points"]
+                        active_pos["highest_ltp"], position_risk
                     )
                     active_pos["current_sl"] = new_sl
                     active_pos["ratchet_armed"] = active_pos["ratchet_armed"] or armed
@@ -1618,7 +1627,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     fills = active_pos.get("exit_fills",[]) + ([{"qty":active_pos["qty"],"price":exit_price,"timestamp":now.strftime("%Y-%m-%d %H:%M:%S"),"reason":exit_reason}] if staged else [])
                     if fills:
                         exit_price = sum(f["qty"]*f["price"] for f in fills)/active_pos["original_qty"]
-                    r_mult = round((exit_price - active_pos["entry_price"]) / cfg["sl_points"], 2)
+                    r_mult = round((exit_price - active_pos["entry_price"]) / position_risk, 2)
                     gross_pnl = record_closed_trade(
                         ledger=ledger,
                         brain=brain,
@@ -1641,6 +1650,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         data_health="LIVE_CLEAN", exit_fills=fills,
                         booked_gross=active_pos.get("partial_gross",0),booked_net=active_pos.get("partial_net",0),
                         market_structure=active_pos.get("market_structure"),
+                        initial_risk_points=position_risk,
                     )
                     day_net_pnl = round(day_net_pnl + float(ledger["trades"][-1]["net_pnl"]), 2)
                     day_trades += 1
@@ -1703,7 +1713,8 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             if not entry_order or entry_order=="None":
                                 logger.error("Entry submission unconfirmed; slot remains consumed. Reconcile before restarting.")
                                 break
-                        init_sl = round(entry_p - cfg["sl_points"], 2)
+                        initial_risk = option_stop_points(idx_name, entry_p)
+                        init_sl = round(entry_p - initial_risk, 2)
                         active_pos = {
                             "index": idx_name,
                             "strike": strike_k,
@@ -1715,6 +1726,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             "current_ltp": entry_p,
                             "highest_ltp": entry_p,
                             "current_sl": init_sl,
+                            "initial_risk_points": initial_risk,
                             "ratchet_armed": False,
                             "entry_dt": now,
                             "entry_ts": now.strftime("%Y-%m-%d %H:%M:%S"),

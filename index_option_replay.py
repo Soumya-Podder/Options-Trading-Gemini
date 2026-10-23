@@ -13,7 +13,8 @@ def replay_option_trade(entry_idx,is_ce,timestamps,opens,highs,lows,closes,strik
                         sl_points,interval_min,index,lots,lot_size,exit_fills,
                         split,ratchet,eod_time,entry_at_open=False,
                         expected_strike=None,slippage_pct=0.0,require_session_end=False,
-                        session_profit_check=None,current_session_policy=False):
+                        session_profit_check=None,current_session_policy=False,
+                        stop_points_for_entry=None):
     arrays=(opens,highs,lows,closes,strikes)
     if (not timestamps or any(len(a)!=len(timestamps) for a in arrays)
             or not 0<=entry_idx<len(timestamps) or not math.isfinite(sl_points) or sl_points<=0
@@ -42,6 +43,8 @@ def replay_option_trade(entry_idx,is_ce,timestamps,opens,highs,lows,closes,strik
             raise ReplayDataError("Missing entry bar",entry_idx)
     raw_entry=values[0] if entry_at_open else values[3]
     entry=(math.ceil(raw_entry*(1+slippage_pct/100)*20-1e-9)/20 if slippage_pct else raw_entry)
+    if stop_points_for_entry is not None:
+        sl_points=stop_points_for_entry(index,entry)
     stop=round(entry-sl_points,2)
     if stop<=0:
         raise ReplayDataError("Nonpositive initial stop",entry_idx)

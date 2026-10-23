@@ -435,7 +435,8 @@ def run_candidate(config, sessions, legs, underlying, out, previous_analyzer, ex
                     datetime.fromtimestamp(execution_stamps[exit_i],IST).strftime('%Y-%m-%d %H:%M:%S'),'NIFTY',int(strike),
                     'CE' if side=='CALL' else 'PE',lots,lots*65,c[0]['spot'],analysis['diff_ce_minus_pe_lakhs'],
                     entry,exit_price,r,reason,sig,analysis['state_vec'],'ACTUAL_STRIKE_STITCHED_RESEARCH',fills,
-                    ledger_path=str(out/'paper_trade_ledger.json'),market_structure=analysis.get('market_structure'))
+                    ledger_path=str(out/'paper_trade_ledger.json'),market_structure=analysis.get('market_structure'),
+                    initial_risk_points=bot.option_stop_points('NIFTY',entry) if current else config['stop'])
                 day_gross+=gross;day_net+=ledger['trades'][-1]['net_pnl']
                 net_loss=ledger['trades'][-1]['net_pnl']<=0
                 count+=1;losses=losses+1 if net_loss else 0
@@ -456,6 +457,7 @@ def run_candidate(config, sessions, legs, underlying, out, previous_analyzer, ex
             'full_strategy_validated':False,
             'session_rules_match_current':current,
             'current_policy_notes':(['Dynamic learning-based lots; no additional research risk cap',
+                'Nifty entry stop: 8.5% premium clamped to 6.15-12.50 points; frozen risk for R and learning',
                 'Shared daily net liquidation helper; conservative stop-first OHLC ambiguity',
                 '25-minute time exit at first eligible bar open using prior peak',
                 'Close-time cooldown; actual intrabar exit time is unknown'] if current else []),

@@ -14,6 +14,27 @@ import dhan_dynamic_fno_stock_bot as bot
 
 
 class IntegrationTests(unittest.TestCase):
+    def test_requested_hold_profile_allows_consolidation_before_time_exits(self):
+        cfg=bot.DynamicStrategyConfig({'STOCK_OPT_STOP_PCT':'7','STOCK_OPT_TARGET_PCT':'14',
+            'STOCK_OPT_MIN_NET_RR':'1.4','STOCK_OPT_SLIPPAGE_PCT':'0.05',
+            'STOCK_OPT_RUPEE_TARGET':'1250','STOCK_OPT_RUPEE_MAX_RISK':'1600',
+            'STOCK_OPT_MAX_LOTS':'2','STOCK_OPT_NO_PROGRESS_BARS':'8',
+            'STOCK_OPT_MAX_HOLD_BARS_5M':'16'},argparse.Namespace())
+        plan=cfg.plan(100,100)
+        self.assertIsNotNone(plan)
+        quote=copy.deepcopy(self.quote)
+        quote['depth']['buy'][0]['price']=100
+        for elapsed in (15,39):
+            pos={**plan,'entry_price':100,'entry_epoch':self.now.timestamp()-elapsed*60,
+                 'current_sl':plan['initial_sl']}
+            self.assertIsNone(bot.paper_exit(pos,quote,self.now,cfg))
+        pos={**plan,'entry_price':100,'entry_epoch':self.now.timestamp()-40*60,
+             'current_sl':plan['initial_sl']}
+        self.assertEqual(bot.paper_exit(pos,quote,self.now,cfg)[1],'NO_PROGRESS')
+        pos={**plan,'entry_price':100,'entry_epoch':self.now.timestamp()-80*60,
+             'current_sl':plan['initial_sl'],'peak_bid':100+plan['trail_jump']}
+        self.assertEqual(bot.paper_exit(pos,quote,self.now,cfg)[1],'TIME_EXIT')
+
     def test_expiry_formats_and_invalid_dates(self):
         for raw in ("2026-10-29", "2026-10-29 14:30:00", "2026-10-29T14:30:00",
                     "29-Oct-2026", "29-October-2026", "29/10/2026", "29-10-2026"):
@@ -45,7 +66,7 @@ class IntegrationTests(unittest.TestCase):
         client=MagicMock()
         client.fetch_intraday_candles.return_value={"timestamp":[1]}
         for side,direction in (("CE",1),("PE",-1)):
-            for advance,allowed in ((-0.31,False),(-0.3,True),(0,True),(1,True),(2,True),(2.01,False)):
+            for advance,allowed in ((-0.21,False),(-0.2,True),(0,True),(1,True),(1.7,True),(1.71,False)):
                 with self.subTest(side=side,advance=advance):
                     client.fetch_batch_ohlc.return_value={"NSE_EQ":{"1":{"last_price":100+direction*advance}}}
                     sig={"opt_type":side,"conf_close":100,"atr_5m":2}
@@ -137,7 +158,7 @@ class IntegrationTests(unittest.TestCase):
     def test_strong_mover_expected_gain_floor_including_extended_plan(self):
         for extension in ('false','true'):
             cfg=bot.DynamicStrategyConfig({'STOCK_OPT_EXTEND_RUPEE_TARGET':extension},argparse.Namespace())
-            sig={**self.sig,'lot_size':100,'day_change_pct':6,'atr_5m':6}
+            sig={**self.sig,'lot_size':100,'day_change_pct':6,'atr_5m':7.2}
             result=bot.qualify_quote(sig,self.quote,cfg,60000,self.now.timestamp())
             self.assertIsNotNone(result)
             self.assertEqual(result['expected_gain_fraction'],0.55)
@@ -257,7 +278,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(result["expected_move_gain"],self.cfg.rupee_target)
         for edits,expected in (({"expiry":"2026-10-25"},"Only 3 days to expiry, need 4"),
                                ({"theta":-7},"Theta 7.00%/day above 6.00%"),
-                               ({"atr_5m":0.1},"A 1.8 ATR move nets only Rs."),
+                               ({"atr_5m":0.1},"A 1.5 ATR move nets only Rs."),
                                ({"iv":29},"IV in the top"),
                                ({"delta":float("nan")},"Non-finite broker Greeks")):
             with self.subTest(edits=edits):
