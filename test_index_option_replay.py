@@ -93,7 +93,6 @@ class ReplayTests(unittest.TestCase):
              patch.object(bot,"MarketMicrostructureAnalyzer",return_value=analyzer), \
              patch.object(bot,"SelfLearningBrain",return_value=brain), \
              patch.object(bot,"load_dotenv_file",return_value={"DHAN_CLIENT_ID":"test","DHAN_ACCESS_TOKEN":"test"}), \
-             patch.object(bot,"assess_nifty_structure",return_value={"ready":True,"allowed":True}), \
              patch.object(bot,"atomic_write_json") as save:
             bot.run_real_historical_backtest(2,["NIFTY"],"5",logging.getLogger("test"))
         ledger=next(c.args[1] for c in save.call_args_list if str(c.args[0]).endswith("paper_trade_ledger.json"))

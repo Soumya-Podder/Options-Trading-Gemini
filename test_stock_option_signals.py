@@ -101,8 +101,13 @@ class StockSetupTests(unittest.TestCase):
     def test_confirmation_cannot_be_used_before_close(self):
         self.assertIsNone(evaluate_stock_setup(self.candles, self.as_of - 1))
 
+    def test_configured_freshness_window(self):
+        self.assertIsNotNone(evaluate_stock_setup(self.candles,self.as_of+599,confirm_window_sec=600))
+        self.assertIsNone(evaluate_stock_setup(self.candles,self.as_of+300,confirm_window_sec=300))
+        self.assertIsNone(evaluate_stock_setup(self.candles,self.as_of,confirm_window_sec=901))
+
     def test_stale_confirmation_rejected(self):
-        self.assertIsNone(evaluate_stock_setup(self.candles, self.as_of + 301))
+        self.assertIsNone(evaluate_stock_setup(self.candles, self.as_of + 600))
 
     def test_previous_day_signal_rejected(self):
         self.assertIsNone(evaluate_stock_setup(self.candles, self.as_of + 86400))

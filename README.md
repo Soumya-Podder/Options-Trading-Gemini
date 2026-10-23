@@ -58,7 +58,7 @@ Closed-trade learning does not automatically learn from trades never entered. En
 
 ## Active stock-options limits
 
-The project `.env` was restored at the user's request to `STOCK_OPT_RUPEE_TARGET=2000`, `STOCK_OPT_RUPEE_MAX_RISK=1000`, and `STOCK_OPT_MAX_LOTS=3`. The daily entry cap remains two. These are estimated net target/risk constraints, not guaranteed fills or results. The session launcher explicitly selects Nifty and starts stock options separately; either engine finishing normally no longer shuts down the other.
+The current requested profile uses `STOCK_OPT_RUPEE_TARGET=900`, `STOCK_OPT_MIN_NET_RR=1.3`, `STOCK_OPT_MAX_SPREAD_PCT=3.5`, and `STOCK_OPT_CONFIRM_WINDOW_SEC=600`. The existing `STOCK_OPT_RUPEE_MAX_RISK=1000` and `STOCK_OPT_MAX_LOTS=3` remain unchanged. Strong movers (absolute confirmed day change at least 6%) use the documented spread, IV-range and expected-gain exceptions in `STOCK_DATA_HANDLING.md`. The daily entry cap remains two. These are estimated net target/risk constraints, not guaranteed fills or results. The session launcher explicitly selects Nifty and starts stock options separately; either engine finishing normally no longer shuts down the other.
 
 Nifty selection now annotates `entry_decision` with the action and a specific final-selection reason. Entry review records are written after selection and include the current position, daily counts, loss streak, realized net and cooldown context. These diagnostics do not bypass risk or learning gates.
 
@@ -67,3 +67,9 @@ Nifty selection now annotates `entry_decision` with the action and a specific fi
 The non-secret `.env.example` records the selected settings. Nifty and stock options can recognize a fresh, confirmed opening-gap break or a later fresh consolidation break. Stock options can plan a cash target beyond the percentage reference, with fees, slippage and the same cash-risk cap; sizing also uses the broker-Greek move estimate. After a net stock loss, the enabled re-entry path requires a new confirmation after 15 minutes, available daily capacity and full requalification. The total daily stock cap remains two. The live history circuit can probe for recovery after 60 seconds. Direct commands and the launcher anchor their working directory to this project.
 
 These changes are for PAPER observation; a setup can still stop out. `backtest_results/entry_continuation_20261023/REPORT.md` includes the replay results and a Swiggy entry that loses despite the subsequent premium rise. The broader Nifty variants that performed worse remain disabled. Morning auto-start is not yet scheduled.
+
+## Project cleanup
+
+All root Python modules remain required for execution, session management, notifications, replay, or regression testing. Redundant archived source copies and a duplicate research-notes document were removed; Git commit `95d6213` retains the original snapshot. Trading ledgers, learning state, cached market bars, entry audits, research results, and session logs are retained for recovery and analysis. See `cleanup_manifest.json` for the removal record.
+
+Maintenance rule: update existing modules and documentation first. Create a new file only when a necessary responsibility cannot reasonably fit the existing structure. Avoid alternate implementation copies and one-off report/source snapshots; retain only necessary runtime state, reproducible evaluation evidence, and regression checks.

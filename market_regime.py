@@ -2,7 +2,8 @@
 import math
 
 
-def opening_trend(bars, min_gap_pct=0.5, min_drive_pct=None, allow_drive=False):
+def opening_trend(bars, min_gap_pct=0.5, min_drive_pct=None, allow_drive=False,
+                  min_body_fraction=0.5, min_close_fraction=0.7):
     """Recognize a fresh opening-range break; never authorize chasing a whole move.
 
     Caller validates candle times/OHLC and supplies only closed candles. The first
@@ -31,9 +32,9 @@ def opening_trend(bars, min_gap_pct=0.5, min_drive_pct=None, allow_drive=False):
     else:return None
     latest,previous=today[-1],today[-2]
     width=latest['high']-latest['low']
-    if width<=0 or sign*(latest['close']-latest['open'])/width<0.5:return None
+    if width<=0 or sign*(latest['close']-latest['open'])/width<min_body_fraction:return None
     strength=(latest['close']-latest['low'] if sign>0 else latest['high']-latest['close'])/width
-    if strength<0.7:return None
+    if strength<min_close_fraction:return None
     orb=max(b['high'] for b in today[:3]) if sign>0 else min(b['low'] for b in today[:3])
     if sign*(latest['close']-orb)<=0:return None
     first_break=sign*(previous['close']-orb)<=0

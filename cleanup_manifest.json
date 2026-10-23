@@ -157,5 +157,46 @@
       "bytes": 11254,
       "reason": "Unused duplicate; tests now exercise the active stock client"
     }
-  ]
+  ],
+  "cleanup_20261023_after_push": {
+    "reason": "Remove byte-identical archived source/document copies; retain active modules, tests, market data, outcome and learning state, and replay evidence",
+    "removed_files": [
+      "backtest_results/entry_continuation_20261023/sources/market_regime.py",
+      "backtest_results/entry_continuation_20261023/sources/nifty_market_structure.py",
+      "backtest_results/entry_continuation_20261023/sources/stock_option_policy.py",
+      "backtest_results/entry_continuation_20261023/sources/stock_option_signals.py",
+      "backtest_results/nifty_20261023/RESEARCH_NOTES.md"
+    ],
+    "removed_bytes": 59022,
+    "source_commit": "95d6213b3647a5517cb62e80c979115b94bdb488",
+    "removed_empty_directories": [
+      "backtest_results/entry_continuation_20261023/sources",
+      "dhan_hist_cache/index_backtest_20261022_120000_000000",
+      "dhan_hist_cache/runtime_tmp",
+      "dhan_hist_cache/test_tmp"
+    ]
+  },
+  "second_pass_20261023": {
+    "removed_unused_functions": [
+      "dhan_dynamic_fno_stock_bot.py:compute_atr_series",
+      "dhan_dynamic_fno_stock_bot.py:compute_ema_series",
+      "run_bot_session.py:is_market_hours"
+    ],
+    "removed_unused_imports": [
+      "dhan_dynamic_fno_stock_bot.py:Tuple",
+      "run_bot_session.py:signal",
+      "dhan_bot_engine.py:assess_nifty_structure"
+    ],
+    "removed_obsolete_test_mock": "test_index_option_replay.py:assess_nifty_structure",
+    "policy": "Update existing files; create a new file only when necessary.",
+    "removed_empty_folders": [
+      "dhan_hist_cache/index_backtest_20261022_120000_000000",
+      "dhan_hist_cache/nifty_controlled_comparison_20261023/legacy/dhan_hist_cache",
+      "dhan_hist_cache/nifty_controlled_comparison_20261023/legacy_committed/dhan_hist_cache",
+      "dhan_hist_cache/nifty_controlled_comparison_20261023/new_entries_corrected_replay_committed/dhan_hist_cache",
+      "dhan_hist_cache/nifty_controlled_comparison_20261023/original_entries_corrected_replay/dhan_hist_cache",
+      "dhan_hist_cache/nifty_controlled_comparison_20261023/original_entries_corrected_replay_committed/dhan_hist_cache"
+    ],
+    "verification": "187 tests passed; git diff --check passed"
+  }
 }

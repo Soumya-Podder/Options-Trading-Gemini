@@ -25,3 +25,56 @@ Dhan master lot size for these contracts: 1,825. Illustrative 190 PE entry at th
 The forensic result supports the user's observation of a profitable put-premium move. It does not establish that Swiggy was the best of all F&O stocks, that historical Greeks/depth passed, or that the current stop/trailing policy would have delivered the illustrative holding result. Later 13:00+ scans cannot disprove the morning opportunity.
 
 No strategy thresholds were relaxed, no trading history was fabricated, and no live order was placed during this investigation. Raw downloaded bars and chronological rejection details are retained under `dhan_hist_cache/swiggy_review_20261023/`.
+
+## Requested Rs.900 recovery profile replay
+
+Fixed actual 190/195 PE, October 27 expiry, 1825 units/lot, 09:35 next-bar entry, 5% stop and adverse modeled slippage. Five-minute OHLC stop-first treatment applies; this is an exit replay, not historical depth/Greek qualification.
+
+```json
+[
+  {
+    "variant": "before",
+    "strike": 190,
+    "entry": 4.5,
+    "stop": 4.3,
+    "target": 5.7,
+    "exit": 4.25,
+    "reason": "PREMIUM_STOP",
+    "gross": -456.25,
+    "net": -521.95
+  },
+  {
+    "variant": "before",
+    "strike": 195,
+    "entry": 7.15,
+    "stop": 6.8,
+    "target": 8.35,
+    "exit": 6.75,
+    "reason": "PREMIUM_STOP",
+    "gross": -730.0,
+    "net": -806.59
+  },
+  {
+    "variant": "after",
+    "strike": 190,
+    "entry": 4.5,
+    "stop": 4.3,
+    "target": 5.1,
+    "exit": 4.25,
+    "reason": "PREMIUM_STOP",
+    "gross": -456.25,
+    "net": -521.95
+  },
+  {
+    "variant": "after",
+    "strike": 195,
+    "entry": 7.15,
+    "stop": 6.8,
+    "target": 7.85,
+    "exit": 6.75,
+    "reason": "PREMIUM_STOP",
+    "gross": -730.0,
+    "net": -806.59
+  }
+]
+```

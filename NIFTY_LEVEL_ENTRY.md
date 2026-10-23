@@ -28,3 +28,7 @@ The nearest mapped put/call strike expansion is an explicit research option (`in
 ## Selected continuation profile
 
 `NIFTY_OPENING_TREND=true` enables a closed-candle opening-gap continuation path (minimum 0.5% overnight gap). The opening range is known before confirmation; later continuation requires a new local consolidation break. This path can begin after four closed session bars, with complete prior-session history. It retains candle strength, same-contract OI/premium confirmation, proximity, mapped room and structural RR. A non-strike opening price maps to the nearest observed option strike within 25 points, recorded as `oi_confirmation_strike`. Wider opening-drive and arbitrary price-level expansions are not enabled. See `backtest_results/entry_continuation_20261023/REPORT.md` for the positive, negative and limited evidence.
+
+## 23 October confirmation update
+
+Closed-candle confirmation is usable for 600 seconds by default (configurable function parameter, valid 300–900 seconds; upper bound excluded). When the range of already-closed session candles reaches 80 points, minimum body/close-strength ratios are 0.40/0.60; otherwise they remain 0.50/0.70. The same thresholds apply to Nifty opening-gap confirmation. Matching strike OI/premium confirmation and all existing chase, room, structural RR and data checks remain mandatory. Future candles cannot enable the exception.

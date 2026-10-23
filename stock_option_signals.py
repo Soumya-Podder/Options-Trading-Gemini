@@ -101,6 +101,7 @@ def evaluate_stock_setup(
     ema_period: int = 10,
     enable_opening_trend: bool = False,
     reasons=None,
+    confirm_window_sec: int = 600,
 ) -> Optional[dict]:
     """Return a selective CE/PE setup, or None when any confirmation is absent.
 
@@ -117,6 +118,8 @@ def evaluate_stock_setup(
         min_day_change_pct = float(min_day_change_pct)
         if not isfinite(as_of_epoch) or not isfinite(min_day_change_pct) or min_day_change_pct <= 0:
             return reject('Invalid decision time or day-change threshold')
+        if isinstance(confirm_window_sec, bool) or not isinstance(confirm_window_sec, int) or not 300 <= confirm_window_sec <= 900:
+            return reject("Invalid confirmation window")
         today = datetime.fromtimestamp(as_of_epoch, IST).date()
     except (TypeError, ValueError, OverflowError, OSError):
         return reject('Invalid decision time or day-change threshold')
@@ -124,7 +127,7 @@ def evaluate_stock_setup(
     if not bars or len(bars) < 11 or bars[-1]["date"] != today:
         return reject('Insufficient current-session or malformed closed candles')
     latest = bars[-1]
-    if as_of_epoch - (latest["timestamp"] + BAR_SECONDS) > BAR_SECONDS:
+    if not 0 <= as_of_epoch - (latest["timestamp"] + BAR_SECONDS) < confirm_window_sec:
         return reject('Stale closed confirmation candle')
     today_bars = [bar for bar in bars if bar["date"] == today]
     previous_bars = [bar for bar in bars if bar["date"] < today]

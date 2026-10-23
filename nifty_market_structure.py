@@ -8,12 +8,16 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 def assess_nifty_structure(candles, chain, as_of, spot, direction,
                            buffer=3.0, min_room=20.0, min_structure_rr=1.5, trigger_levels=None,
-                           include_nearest=False, enable_opening_trend=False, enable_opening_drive=False):
+                           include_nearest=False, enable_opening_trend=False, enable_opening_drive=False,
+                           confirm_window_sec=600):
     """Return auditable levels and a gate; never treat OI as a certain barrier."""
     result = {"allowed": False, "ready":False,"reason": "Price structure unavailable", "source": "INDEX_5M_OHLC"}
     try:
         now = datetime.fromtimestamp(as_of, IST)
         if not all(math.isfinite(x) for x in (as_of, spot, buffer, min_room, min_structure_rr)) or min(spot,buffer,min_room,min_structure_rr)<=0:
+            return result
+        if isinstance(confirm_window_sec, bool) or not isinstance(confirm_window_sec, int) or not 300 <= confirm_window_sec <= 900:
+            result["reason"]="Invalid confirmation window"
             return result
         fields = ("timestamp", "open", "high", "low", "close")
         if not isinstance(candles,dict) or any(len(candles[k]) != len(candles["timestamp"]) for k in fields):
@@ -42,7 +46,7 @@ def assess_nifty_structure(candles, chain, as_of, spot, direction,
             result["reason"]=f"Need prior-session data and {count} closed session candles"
             return result
         latest,previous=today[-1],today[-2]
-        if not 0<=as_of-(latest["ts"]+300)<300 or latest["ts"]-previous["ts"]!=300:
+        if not 0<=as_of-(latest["ts"]+300)<confirm_window_sec or latest["ts"]-previous["ts"]!=300:
             result["reason"]="Stale or gapped confirmation candles"
             return result
         previous_day=prior[-1]["date"]
@@ -64,8 +68,13 @@ def assess_nifty_structure(candles, chain, as_of, spot, direction,
                 "range_low_before_confirmation":min(b["low"] for b in today[:-1]),
                 "range_high_before_breakout":max(b["high"] for b in today[:-2]),
                 "range_low_before_breakout":min(b["low"] for b in today[:-2])}
+        day_range=levels["day_high"]-levels["day_low"]
+        min_body,min_close=(0.4,0.6) if day_range>=80 else (0.5,0.7)
+        result.update(day_range_points=day_range,min_body_fraction=min_body,min_close_fraction=min_close,
+                      confirm_window_sec=confirm_window_sec,confirmation_age_seconds=as_of-(latest["ts"]+300))
         regime=opening_trend(bars,min_gap_pct=0.2 if enable_opening_drive else 0.5,
-                             min_drive_pct=0.2,allow_drive=enable_opening_drive) if enable_opening_trend else None
+                             min_drive_pct=0.2,allow_drive=enable_opening_drive,
+                             min_body_fraction=min_body,min_close_fraction=min_close) if enable_opening_trend else None
         # A pivot needs two already-closed candles on each side.
         swings=[]
         for i in range(2,len(today)-2):
@@ -113,7 +122,7 @@ def assess_nifty_structure(candles, chain, as_of, spot, direction,
         candle_range=latest["high"]-latest["low"]
         body=abs(latest["close"]-latest["open"])
         close_strength=(latest["close"]-latest["low"] if bullish else latest["high"]-latest["close"])
-        if candle_range<=0 or body/candle_range<0.5 or close_strength/candle_range<0.7:
+        if candle_range<=0 or body/candle_range<min_body or close_strength/candle_range<min_close:
             result["reason"]="Weak follow-through candle body or closing location"
             return result
         recent=today[-10:]
@@ -174,7 +183,8 @@ def assess_nifty_structure(candles, chain, as_of, spot, direction,
 
 
 def apply_nifty_level_entry(analysis, candles, chain, as_of, include_nearest=False,
-                            enable_opening_trend=False, enable_opening_drive=False, enable_price_levels=False):
+                            enable_opening_trend=False, enable_opening_drive=False, enable_price_levels=False,
+                            confirm_window_sec=600):
     """Generate direction from a marked OI level, closed reaction and same-strike OI.
 
     Mark walls from the five-minute reference, before the confirmation candle.
@@ -184,7 +194,8 @@ def apply_nifty_level_entry(analysis, candles, chain, as_of, include_nearest=Fal
     """
     analysis["entry_model"]="LEVEL_CANDLE_AND_STRIKE_OI_V1"
     analysis['entry_profile']={'opening_trend':enable_opening_trend,'opening_drive':enable_opening_drive,
-                               'nearest_level_expansion':include_nearest,'price_level_confirmation':enable_price_levels}
+                               'nearest_level_expansion':include_nearest,'price_level_confirmation':enable_price_levels,
+                               'confirm_window_sec':confirm_window_sec,'strong_day_range_points':80}
     analysis["recommended_dir"]="HOLD"
     rejected={"ready":False,"allowed":False,"reason":"Need matched five-minute strike OI", "source":"INDEX_5M_OHLC"}
     analysis["market_structure"]=rejected
@@ -220,7 +231,8 @@ def apply_nifty_level_entry(analysis, candles, chain, as_of, include_nearest=Fal
     # Include local mapped levels, not just the largest walls. Same-strike
     # OI/premium confirmation remains mandatory for every trigger.
     probe=assess_nifty_structure(candles,marked,as_of,analysis["spot"],"HOLD",include_nearest=include_nearest,
-                                 enable_opening_trend=enable_opening_trend,enable_opening_drive=enable_opening_drive)
+                                 enable_opening_trend=enable_opening_trend,enable_opening_drive=enable_opening_drive,
+                                 confirm_window_sec=confirm_window_sec)
     if not probe.get("ready"):
         analysis["market_structure"]=probe
         return probe
@@ -254,7 +266,8 @@ def apply_nifty_level_entry(analysis, candles, chain, as_of, include_nearest=Fal
                 rows[level]=rows[nearest];triggers.add(level);oi_anchor=nearest
         structure=assess_nifty_structure(candles,marked,as_of,analysis["spot"],direction,
                                         trigger_levels=triggers,include_nearest=include_nearest,
-                                        enable_opening_trend=enable_opening_trend,enable_opening_drive=enable_opening_drive)
+                                        enable_opening_trend=enable_opening_trend,enable_opening_drive=enable_opening_drive,
+                                 confirm_window_sec=confirm_window_sec)
         structure.update(entry_model=analysis["entry_model"],level_reference_age_seconds=oi.get("reference_age_seconds"))
         checks[direction]={k:structure.get(k) for k in ("allowed","reason","trigger_level","setup","room_points","structure_rr")}
         checks[direction]["oi_confirmed_levels"]=sorted(triggers)

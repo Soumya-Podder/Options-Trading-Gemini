@@ -33,7 +33,7 @@ from typing import Dict, Any, List, Optional, Tuple, Set, Deque
 import requests
 
 from telegram_notifier import TelegramNotifier
-from nifty_market_structure import assess_nifty_structure, apply_nifty_level_entry
+from nifty_market_structure import apply_nifty_level_entry
 from index_option_replay import replay_option_trade, ReplayDataError
 from nifty_oi import NiftyOITracker
 

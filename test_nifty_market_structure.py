@@ -66,8 +66,26 @@ class MarketStructureTests(unittest.TestCase):
         self.add(datetime(2026,10,22,9,40,tzinfo=IST),24000,25000,22000,24500)
         self.assertEqual(self.assess(),expected)
 
+    def test_confirmation_window_and_strong_day_closed_range(self):
+        self.assertTrue(assess_nifty_structure(self.data,self.chain,self.now+599,23045,"BUY_CE")["ready"])
+        self.assertFalse(assess_nifty_structure(self.data,self.chain,self.now+600,23045,"BUY_CE")["ready"])
+        self.assertFalse(assess_nifty_structure(self.data,self.chain,self.now,23045,"BUY_CE",confirm_window_sec=901)["ready"])
+        self.data['open'][-1]=23032
+        quiet=self.assess()
+        self.assertEqual(quiet['reason'],'Weak follow-through candle body or closing location')
+        self.data['low'][-5]=22960
+        strong=self.assess()
+        self.assertEqual(strong['day_range_points'],90)
+        self.assertEqual(strong['min_body_fraction'],0.4)
+        self.assertEqual(strong['min_close_fraction'],0.6)
+        self.assertNotEqual(strong['reason'],'Weak follow-through candle body or closing location')
+        # A future candle cannot turn a quiet day into a strong-day exception.
+        self.data['low'][-5]=22990
+        self.add(datetime.fromtimestamp(self.now,IST),23045,23200,22800,23050)
+        self.assertEqual(self.assess()['min_body_fraction'],0.5)
+
     def test_stale_missing_oi_and_missing_prior_session_fail_closed(self):
-        self.assertFalse(assess_nifty_structure(self.data,self.chain,self.now+300,23030,"BUY_CE")["ready"])
+        self.assertFalse(assess_nifty_structure(self.data,self.chain,self.now+600,23030,"BUY_CE")["ready"])
         self.assertFalse(assess_nifty_structure(self.data,{},self.now,23030,"BUY_CE")["ready"])
         for key in self.data:
             self.data[key]=self.data[key][75:]

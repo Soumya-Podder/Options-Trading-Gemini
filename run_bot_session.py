@@ -11,7 +11,6 @@ import os
 import sys
 import time
 import subprocess
-import signal
 from datetime import datetime
 PROJECT_DIR=os.path.dirname(os.path.abspath(__file__))
 
@@ -28,18 +27,6 @@ except ImportError:
 PAPER_FLAG = os.environ.get("PAPER_MODE", "true").strip().lower()
 MODE = os.environ.get("DHAN_BOT_MODE", "PAPER" if PAPER_FLAG == "true" else "LIVE").upper()
 PYTHON_EXEC = sys.executable
-
-
-def is_market_hours() -> bool:
-    now = datetime.now()
-    # Check if weekday (Monday = 0, Friday = 4)
-    if now.weekday() >= 5:
-        return False
-    
-    current_time = now.time()
-    start_time = datetime.strptime("09:08", "%H:%M").time()
-    end_time = datetime.strptime("15:46", "%H:%M").time()
-    return start_time <= current_time <= end_time
 
 
 def main():

@@ -13,26 +13,49 @@ Standalone stock scanning is `python dhan_dynamic_fno_stock_bot.py --scan-once`.
 Initial signal, chain-selection, quote qualification and recheck failures are
 logged under `OPTSTK REJECT` or `OPTSTK RECHECK REJECT`.
 
-The latest local `.env` profile overrides the defaults below: 10% target ceiling,
-5% stop, Rs.1,000 minimum estimated net target, Rs.1,500 estimated risk cap,
-minimum net RR 1.2, four-day DTE and 2.5% spread cap. The two-trade daily cap and
-two-lot maximum remain unchanged. Credentials and this local profile stay ignored
-by Git. Dhan's rolling-options documentation explicitly supports both index and
-stock options; OPTSTK history is not disabled on the basis of an index-only claim.
+The 2026-10-23 clear-mover profile uses a Rs.900 minimum estimated net
+stock target, minimum planned net RR 1.3, a 3.5% base spread cap and a 600-second
+confirmation window after a five-minute candle closes. Set these with
+`STOCK_OPT_RUPEE_TARGET`, `STOCK_OPT_MIN_NET_RR`, `STOCK_OPT_MAX_SPREAD_PCT` and
+`STOCK_OPT_CONFIRM_WINDOW_SEC`. The window must be 300–900 seconds, is exclusive
+at its upper boundary, and is shared by signal detection and quote qualification.
+Future/forming candles and gaps between required confirmation bars remain invalid.
 
-Defaults: at most two entries/day and two lots/entry, 12% premium target ceiling,
-5% premium stop, Rs.1,200 minimum estimated net target, Rs.1,800 maximum estimated
-loss, and minimum estimated net reward/risk 1.5. The planner can raise the rupee
-target above Rs.1,200 to meet that ratio, within the percentage ceiling. Paper,
-live brackets and replay use that planned target. The local stop override is 5%.
-These are estimates, not guarantees of profit or maximum realized loss.
+The current local risk ceiling remains Rs.1,000, with at most three lots and two
+entries/day. Defaults without local overrides are a Rs.1,800 estimated risk cap,
+two lots, 12% premium target reference and 5% stop; the local percentage reference
+is 10%, with the existing cash-target extension enabled. Full planned RR and risk,
+wallet, depth for the selected quantity and bid-above-stop are still required.
+These are modeled constraints, not guaranteed fills, profit, or maximum loss.
 
-Minimum DTE is four calendar days; delta band is 0.38â€“0.78; maximum spread defaults
-to 2.5% (configurable up to 5%); premium floor is Rs.3; maximum hold is 12 five-minute
-bars, with no-progress checking after five bars; daily theta limit is 6%.
-The follow-through band is -0.15 to +1.0 five-minute ATR in the signal direction.
-The Greek gain filter uses a 1.8 ATR scenario and a 75% minimum of the configured
-rupee target. This is a screening heuristic, not a predicted or guaranteed move.
+A strong mover means an absolute underlying day change of at least 6%, based on
+the latest confirmed signal. It can use one extra spread percentage point (4.5%
+with the current profile), a 55% minimum of the required net target in the 1.8-ATR
+Greek scenario, and a chain IV-range cutoff of 90% instead of 80%. This is a
+cross-sectional min/max IV position, not historical IV rank or a percentile of
+contracts. At the cutoff the option is rejected. Normal movers retain the 75%
+scenario floor, or the stricter 100% scenario screen when cash-target extension
+is enabled. Strong-mover extension plans use the full cash target and risk/RR
+constraints before applying the explicit 55% scenario screen; otherwise the old
+forecast-price cap would silently defeat the requested relaxation.
+
+The rationale is to reduce stacked timing/spread/forecast rejections on large
+moves such as the observed Swiggy decline. A later rally in a put premium does
+not establish that an earlier entry would survive its stop. This profile requires
+replay and paper observation; it does not ensure capture of that move.
+
+Minimum DTE remains four calendar days; delta band is 0.38–0.78; premium floor is
+Rs.3; maximum hold is 12 five-minute bars, with no-progress checking after five
+bars; daily theta limit is 6%. Quotes must have been received within 30 seconds
+and Greek snapshots within 120 seconds. The underlying follow-through band stays
+-0.15 to +1.0 five-minute ATR. Valid broker Greeks remain mandatory.
+
+Nifty confirmation now also defaults to 600 seconds (validated 300–900). The
+range of already-closed current-session candles must reach 80 points before body
+and directional close-strength minima soften from 0.50/0.70 to 0.40/0.60. This
+range test alone does not establish a trend: marked-level reaction, matching
+strike OI/premium confirmation, chase/room and structural RR checks still apply.
+Future bars cannot activate the exception.
 
 Expiry inputs are normalized to ISO dates. The documented option-chain key is
 `security_id`; `securityId` is also accepted, but must match the scrip master.
@@ -56,8 +79,9 @@ reconstruct a fixed contract's historical OHLC, so those trades are not scored.
 - Option history is requested in five-day chunks, with OHLC and strike fields.
   A failed chunk is recorded; successful chunks can be reused on the next run.
 - Transient requests receive one retry. After three exhausted transient failures,
-  the client opens a circuit for that run instead of repeating long waits across
-  every stock. A new run creates a new client and can retry. No synthetic bars or
+  the client opens a circuit instead of repeating long waits across
+  every stock. Current-session requests can make a bounded recovery probe after
+  60 seconds; completed historical requests remain blocked for that run. No synthetic bars or
   successful empty-data cache entries are created.
 - Reports distinguish historical errors, missing entry bars, simulation gaps,
   premium exclusions, unavailable risk/target plans and insufficient funds.

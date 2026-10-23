@@ -40,3 +40,93 @@ Actual Swiggy underlying replay moves first PE eligibility from 12:00 to 09:35. 
 The live-history circuit now permits a bounded probe after 60 seconds for current-session requests instead of remaining blocked all day. Completed-history requests retain their fail-closed circuit behavior. Both direct bot commands and the launcher use the project directory, preventing misplaced configuration/data when launched from elsewhere.
 
 Nifty was reloaded in PAPER mode with no open position; learning and ledger history were retained. Stock source/configuration is ready for the next session; its existing 14:30 entry cutoff was not extended. A 09:10 weekday PAPER auto-start was offered separately and has not been scheduled without the user's answer. Credentials remain private in the project .env; .env.example contains only public profile settings and blank credential fields.
+
+## Source provenance
+
+The source used for this report is preserved in Git commit `95d6213b3647a5517cb62e80c979115b94bdb488`. Redundant copies from the report's `sources/` folder were removed after verifying they were byte-identical to the project modules. The original copies remain recoverable from that commit.
+
+
+## Requested filter recovery comparison — 23 October 2026
+
+Same cached dates, fixed one lot, stop 6.15, next-bar one-minute option execution with adverse slippage. Previous versus updated confirmation window and strong-day candle thresholds. Dates end 14 October; repeatedly examined data, not untouched validation. Partial-chain OI and same-expiry limitations remain. Daily cutoff uses realized net, not intratrade target exits.
+
+```json
+[
+  {
+    "calendar_days": 30,
+    "variant": "before_filter_recovery",
+    "sessions": 21,
+    "trades": 3,
+    "gross": 409.5,
+    "net": 216.0,
+    "wins": 1,
+    "unvalidated": 0,
+    "exit_reasons": {
+      "INITIAL_SL_HIT": 2,
+      "ASYMMETRIC_TRAIL_PROFIT": 1
+    }
+  },
+  {
+    "calendar_days": 30,
+    "variant": "after_filter_recovery",
+    "sessions": 21,
+    "trades": 3,
+    "gross": 409.5,
+    "net": 216.0,
+    "wins": 1,
+    "unvalidated": 0,
+    "exit_reasons": {
+      "INITIAL_SL_HIT": 2,
+      "ASYMMETRIC_TRAIL_PROFIT": 1
+    }
+  },
+  {
+    "calendar_days": 60,
+    "variant": "before_filter_recovery",
+    "sessions": 41,
+    "trades": 5,
+    "gross": 897.0,
+    "net": 574.5,
+    "wins": 2,
+    "unvalidated": 0,
+    "exit_reasons": {
+      "ASYMMETRIC_TRAIL_PROFIT": 2,
+      "INITIAL_SL_HIT": 3
+    }
+  },
+  {
+    "calendar_days": 60,
+    "variant": "after_filter_recovery",
+    "sessions": 41,
+    "trades": 7,
+    "gross": 780.0,
+    "net": 328.5,
+    "wins": 3,
+    "unvalidated": 0,
+    "exit_reasons": {
+      "ASYMMETRIC_TRAIL_PROFIT": 3,
+      "INITIAL_SL_HIT": 4
+    }
+  }
+]
+```
+
+## Stock filter recovery data limitation
+
+The requested 30/60-day comparison selected the first 50 current-universe symbols alphabetically. Initial requests failed with ConnectionError, leaving zero covered stocks. Those zero totals are unavailable results, not zero-profit backtests. A network-enabled retry was stopped after prolonged option-history requests without a completed comparison. No profit result from that retry is scored. The original stock ledger evidence is preserved, with the failed comparison explicitly marked profit_result_usable=false.
+
+Historical bid/ask depth, broker Greeks and chain IV ranges are also unavailable. Even an OHLC exit replay cannot validate profitability of the requested spread/IV/Greek-screen relaxations or delayed-data recovery. The fixed-contract Swiggy before/after exit replay is recorded in swiggy_20261023_REVIEW.md. Both early entries still stop out: 190 PE net -Rs.521.95; 195 PE net -Rs.806.59. One-minute 190 PE data shows 09:35 low Rs.4.00, before the 09:36 high Rs.5.60.
+
+## Requested profile and assessment
+
+Stock settings: minimum estimated net target Rs.900, minimum planned net RR 1.3, base spread cap 3.5%, confirmation 600s; existing local risk Rs.1000 and maximum three lots retained. Absolute confirmed day change >=6% permits 4.5% spread, 55% of required net target in the 1.8-ATR screening scenario, and a 0.90 cross-sectional IV-range cutoff. Normal cash-target-extension screening remains 100%. Nifty uses a 600s confirmation window and 0.40/0.60 body/close strength only after the closed-session range reaches 80 points; otherwise 0.50/0.70. Same-strike OI/premium confirmation and other risk/data gates remain.
+
+Nifty 30 days: unchanged at three trades, gross Rs.409.50, net Rs.216.00. Nifty 60 days: five to seven trades; gross Rs.897.00 to Rs.780.00; net Rs.574.50 to Rs.328.50. Added CE trades were August 17 (+Rs.10.25 net) and September 9 (-Rs.256.25 net). This sample does not demonstrate an improvement. Requested changes are applied to the PAPER configuration for subsequent launches; they were not used to alter actual trading outcomes or production learning.
+
+Validation: 192 regression tests pass, including timing boundaries, future-candle exclusion, strong-mover liquidity/IV/expected-gain exceptions, and retained risk limits. No new source module was created. Necessary replay ledgers/rule state were isolated under the existing research cache.
+
+Current source SHA256:
+- `dhan_dynamic_fno_stock_bot.py`: `3c0220a3d032ada568021e9c2bb3815b02318144ffeacaa407ef48e178cab218`
+- `nifty_market_structure.py`: `120edf807a346b35e1ef6aa7587c22c4c2be762aa5af04c5be14818ab0a6a5b2`
+- `market_regime.py`: `c9ab99466360be7da54d413e38c25d5cb27ce6260e59b0fe7d905550306301dc`
+- `stock_option_signals.py`: `98eacbbbe4c9d27abd49db666d56f611fccf5c34139cca02c192d73958dc4a27`

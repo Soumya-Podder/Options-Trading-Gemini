@@ -85,7 +85,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertIsNone(self.qualify(wallet=1000))
 
     def test_stale_confirmation_rejected(self):
-        self.sig["signal_timestamp"] -= 300
+        self.sig["signal_timestamp"] -= 600
         self.assertIsNone(self.qualify())
 
     def test_best_setup_is_not_first_or_largest_mover(self):
@@ -105,6 +105,42 @@ class IntegrationTests(unittest.TestCase):
             bot.DynamicStrategyConfig({"STOCK_OPT_MAX_DAILY_TRADES":"4"}, argparse.Namespace())
         cfg = bot.DynamicStrategyConfig({"STOCK_OPT_MAX_DAILY_TRADES":"1", "STOCK_OPT_MAX_CONCURRENT":"1"}, argparse.Namespace())
         self.assertEqual((cfg.max_daily_trades,cfg.max_concurrent), (1,1))
+
+    def test_confirmation_window_boundaries_and_validation(self):
+        for age, allowed in ((-1,False),(0,True),(300,True),(599,True),(600,False)):
+            with self.subTest(age=age):
+                sig={**self.sig,"signal_timestamp":self.now.timestamp()-300-age}
+                result=bot.qualify_quote(sig,self.quote,self.cfg,60000,self.now.timestamp())
+                self.assertEqual(result is not None,allowed)
+        for window in (299,901):
+            with self.assertRaises(ValueError):
+                bot.DynamicStrategyConfig({"STOCK_OPT_CONFIRM_WINDOW_SEC":str(window)},argparse.Namespace())
+
+    def test_strong_mover_spread_and_iv_still_require_depth_and_risk(self):
+        cfg=bot.DynamicStrategyConfig({"STOCK_OPT_RUPEE_MAX_RISK":"1000"},argparse.Namespace())
+        sig={**self.sig,"lot_size":100,"day_change_pct":-6,"opt_type":"PE","delta":-0.6,"iv":27.75}
+        quote=copy.deepcopy(self.quote);quote['depth']['buy'][0]['price']=96
+        good=bot.qualify_quote(sig,quote,cfg,60000,self.now.timestamp())
+        self.assertIsNotNone(good)
+        self.assertEqual(good['spread_limit_pct'],4.5)
+        self.assertLessEqual(good['expected_net_risk'],1000)
+        self.assertGreaterEqual(good['expected_net_rr'],1.3)
+        self.assertIsNone(bot.qualify_quote({**sig,'day_change_pct':-5.99},quote,cfg,60000,self.now.timestamp()))
+        self.assertIsNone(bot.qualify_quote({**sig,'iv':28.5},quote,cfg,60000,self.now.timestamp()))
+        quote['depth']['sell'][0]['quantity']=99
+        self.assertIsNone(bot.qualify_quote(sig,quote,cfg,60000,self.now.timestamp()))
+
+    def test_strong_mover_expected_gain_floor_including_extended_plan(self):
+        for extension in ('false','true'):
+            cfg=bot.DynamicStrategyConfig({'STOCK_OPT_EXTEND_RUPEE_TARGET':extension},argparse.Namespace())
+            sig={**self.sig,'lot_size':100,'day_change_pct':6,'atr_5m':6}
+            result=bot.qualify_quote(sig,self.quote,cfg,60000,self.now.timestamp())
+            self.assertIsNotNone(result)
+            self.assertEqual(result['expected_gain_fraction'],0.55)
+            self.assertGreaterEqual(result['expected_move_gain'],0.55*result['net_profit_target'])
+            self.assertLess(result['expected_move_gain'],0.75*result['net_profit_target'])
+            self.assertIsNone(bot.qualify_quote({**sig,'day_change_pct':5.99},self.quote,cfg,60000,self.now.timestamp()))
+            self.assertIsNone(bot.qualify_quote({**sig,'atr_5m':1},self.quote,cfg,60000,self.now.timestamp()))
 
     def bars(self):
         ts = int(self.now.timestamp())
@@ -153,7 +189,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertIsNone(self.qualify())
 
     def test_spread_default_override_and_validation_ceiling(self):
-        self.assertEqual(self.cfg.max_spread_pct,2.5)
+        self.assertEqual(self.cfg.max_spread_pct,3.5)
         for cap in (0.2,2.5,5):
             cfg=bot.DynamicStrategyConfig({"STOCK_OPT_MAX_SPREAD_PCT":str(cap)},argparse.Namespace())
             self.assertEqual(cfg.max_spread_pct,cap)
@@ -222,13 +258,13 @@ class IntegrationTests(unittest.TestCase):
     def test_new_defaults_preserve_rupee_risk_and_rr(self):
         cfg=bot.DynamicStrategyConfig({},argparse.Namespace())
         self.assertEqual((cfg.target_pct,cfg.stop_pct,cfg.rupee_target,cfg.rupee_max_risk,cfg.max_lots),
-                         (12,5,1200,1800,2))
+                         (12,5,900,1800,2))
         self.assertIsNone(cfg.plan(100,500))
         plan=cfg.plan(50,430)
         self.assertIsNotNone(plan)
         self.assertLessEqual(plan["expected_net_risk"],1800)
-        self.assertGreaterEqual(plan["expected_net_reward"],1200)
-        self.assertGreaterEqual(plan["expected_net_rr"],1.5)
+        self.assertGreaterEqual(plan["expected_net_reward"],900)
+        self.assertGreaterEqual(plan["expected_net_rr"],1.3)
         self.assertEqual(plan["initial_sl"],47.5)
 
     def test_old_last_trade_with_fresh_depth_receipt_can_be_evaluated(self):

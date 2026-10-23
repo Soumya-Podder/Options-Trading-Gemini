@@ -14,7 +14,7 @@ import hashlib
 import logging
 import argparse
 from datetime import datetime, timedelta, time as dtime, timezone
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional
 import requests
 from collections import Counter
 from pathlib import Path
@@ -81,27 +81,6 @@ def round_tick(price: float, tick: float = 0.05) -> float:
     return round(round(price / tick) * tick, 2)
 
 
-def compute_ema_series(closes: List[float], period: int) -> List[float]:
-    if not closes:
-        return []
-    k = 2.0 / (period + 1.0)
-    ema = [float(closes[0])]
-    for price in closes[1:]:
-        ema.append((float(price) * k) + (ema[-1] * (1.0 - k)))
-    return ema
-
-
-def compute_atr_series(highs: List[float], lows: List[float], closes: List[float], period: int = 10) -> List[float]:
-    if not closes:
-        return []
-    trs: List[float] = [max(0.05, float(highs[0]) - float(lows[0]))]
-    for i in range(1, len(closes)):
-        h, l, pc = float(highs[i]), float(lows[i]), float(closes[i - 1])
-        tr = max(h - l, abs(h - pc), abs(l - pc))
-        trs.append(max(0.05, tr))
-    return compute_ema_series(trs, period=period)
-
-
 def compute_fno_option_charges(buy_price: float, sell_price: float, qty: int) -> float:
     """Statutory Indian NSE_FNO Option Buying charges (Brokerage Rs.40 + STT + Exch + SEBI + Stamp + GST)."""
     buy_turn = buy_price * qty
@@ -164,11 +143,11 @@ class DynamicStrategyConfig:
 
         self.target_pct = float(env.get("STOCK_OPT_TARGET_PCT", 12.0))
         self.stop_pct = float(env.get("STOCK_OPT_STOP_PCT", 5.0))
-        self.min_rr_target = float(getattr(args, "min_rr", None) or env.get("STOCK_OPT_MIN_NET_RR", 1.5))
+        self.min_rr_target = float(getattr(args, "min_rr", None) or env.get("STOCK_OPT_MIN_NET_RR", 1.3))
         self.slippage_pct = float(env.get("STOCK_OPT_SLIPPAGE_PCT", 0.1))
-        self.max_spread_pct = float(env.get("STOCK_OPT_MAX_SPREAD_PCT", 2.5))
+        self.max_spread_pct = float(env.get("STOCK_OPT_MAX_SPREAD_PCT", 3.5))
         self.max_hold_bars_5m = int(env.get("STOCK_OPT_MAX_HOLD_BARS_5M", 12))
-        self.rupee_target = float(env.get("STOCK_OPT_RUPEE_TARGET", 1200))
+        self.rupee_target = float(env.get("STOCK_OPT_RUPEE_TARGET", 900))
         self.rupee_max_risk = float(env.get("STOCK_OPT_RUPEE_MAX_RISK", 1800))
         self.max_lots = int(env.get("STOCK_OPT_MAX_LOTS", 2))
         self.min_days_to_expiry = int(env.get("STOCK_OPT_MIN_DAYS_TO_EXPIRY", 4))
@@ -177,6 +156,7 @@ class DynamicStrategyConfig:
         self.max_theta_pct_per_day = float(env.get("STOCK_OPT_MAX_THETA_PCT_PER_DAY", 6))
         self.no_progress_bars = int(env.get("STOCK_OPT_NO_PROGRESS_BARS", 5))
         self.max_premium = float(env.get("STOCK_OPT_MAX_PREMIUM", 1000))
+        self.confirm_window_sec = int(env.get("STOCK_OPT_CONFIRM_WINDOW_SEC", 600))
         self.gate_dir = "stock_option_daily_entries"
         self.enable_opening_trend=env.get("STOCK_OPT_OPENING_TREND","false").strip().lower()=="true"
         self.extend_rupee_target=env.get("STOCK_OPT_EXTEND_RUPEE_TARGET","false").strip().lower()=="true"
@@ -192,6 +172,7 @@ class DynamicStrategyConfig:
                 and self.rupee_target > 0 and self.rupee_max_risk > 0 and self.max_lots >= 1
                 and 0 < self.min_delta < self.max_delta <= 1 and self.min_days_to_expiry >= 4
                 and self.max_theta_pct_per_day > 0 and self.max_premium >= 3
+                and 300 <= self.confirm_window_sec <= 900
                 and 1 <= self.no_progress_bars <= self.max_hold_bars_5m):
             raise ValueError("Invalid stock-option target, risk, Greek or entry limits")
 
@@ -710,7 +691,8 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
     if not candles:
         return reject("Underlying candle history unavailable")
     sig = evaluate_stock_setup(candles, time.time(), cfg.min_day_change_pct, cfg.ema_period,
-                               enable_opening_trend=cfg.enable_opening_trend,reasons=reasons)
+                               enable_opening_trend=cfg.enable_opening_trend,reasons=reasons,
+                               confirm_window_sec=cfg.confirm_window_sec)
     if not sig:
         if reasons:return None
         return reject("No fresh confirmed momentum setup (EMA/VWAP/volume/body/proximity)")
@@ -740,8 +722,14 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         return None
     try:
         now_epoch = time.time() if now_epoch is None else now_epoch
-        if not 0 <= now_epoch - (sig["signal_timestamp"] + 300) < 300:
-            return reject("Confirmation candle is stale or not yet tradable")
+        window = getattr(cfg, "confirm_window_sec", 600)
+        age_after_close = now_epoch - (float(sig["signal_timestamp"]) + 300)
+        if not 0 <= age_after_close < window:
+            return reject(f"Confirmation candle is stale or not yet tradable (age {age_after_close:.0f}s, window {window}s)")
+        change = float(sig.get("day_change_pct", 0))
+        if not math.isfinite(change):
+            return reject("Non-finite underlying day change")
+        strong_mover = abs(change) >= 6
         if not 0 <= quote_received_age(quote, now_epoch) <= 30:
             return reject("Option snapshot older than 30s or future-dated")
         bid_node, ask_node = quote["depth"]["buy"][0], quote["depth"]["sell"][0]
@@ -754,8 +742,9 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         if min(int(bid_node["quantity"]), int(ask_node["quantity"])) < qty:
             return reject("Displayed depth below one lot")
         spread = (ask - bid) / ask * 100
-        if spread > cfg.max_spread_pct:
-            return reject(f"Spread {spread:.2f}% above {cfg.max_spread_pct:.2f}%")
+        spread_limit = cfg.max_spread_pct + (1.0 if strong_mover else 0.0)
+        if spread > spread_limit:
+            return reject(f"Spread {spread:.2f}% above {spread_limit:.2f}%")
         if cfg.extend_rupee_target:
             # Feed the same option-move estimate into sizing. A small first lot
             # must not veto a larger affordable lot count that fits both the
@@ -764,7 +753,9 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
             move=1.8*float(sig['atr_5m'])
             decay=max(0,-theta)*cfg.max_hold_bars_5m*5/(24*60)
             premium_move=abs(delta)*move+0.5*gamma*move*move-decay
-            plan=cfg.plan(ask,qty,max_target_price=ask+premium_move)
+            # Strong movers use the explicit 55% scenario screen below; the
+            # cash target, full planned RR and cash-risk cap remain mandatory.
+            plan=cfg.plan(ask,qty,max_target_price=None if strong_mover else ask+premium_move)
         else:
             plan = cfg.plan(ask, qty)
         if not plan:
@@ -799,7 +790,7 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         move = 1.8 * float(sig["atr_5m"])
         expected_gain = abs(delta)*move + 0.5*gamma*move*move - decay
         net_gain = expected_gain*qty - plan["target_estimated_costs"]
-        minimum_fraction=1.0 if cfg.extend_rupee_target else 0.75
+        minimum_fraction=0.55 if strong_mover else (1.0 if cfg.extend_rupee_target else 0.75)
         required_gain=max(cfg.rupee_target,plan.get('net_profit_target',cfg.rupee_target))*minimum_fraction
         if net_gain < required_gain:
             return reject(f"A 1.8 ATR move nets only Rs.{net_gain:.0f} of the required Rs.{required_gain:.0f} ({minimum_fraction:.0%} minimum)")
@@ -807,7 +798,8 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         low, high = float(sig["iv_range_low"]), float(sig["iv_range_high"])
         if not all(math.isfinite(v) for v in (low, high)) or high <= low:
             return reject("Unusable chain IV range")
-        if (iv-low)/(high-low) >= 0.8:
+        iv_limit = 0.9 if strong_mover else 0.8
+        if (iv-low)/(high-low) >= iv_limit:
             return reject(f"IV in the top {100*(1-(iv-low)/(high-low)):.0f}% of the chain")
         try:
             last_trade_age = now_epoch - datetime.strptime(quote["last_trade_time"], "%d/%m/%Y %H:%M:%S").replace(tzinfo=IST).timestamp()
@@ -815,6 +807,9 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
             last_trade_age = None
         return {**sig, **plan, "opt_ltp": ask, "bid": bid, "spread_pct": spread,
                 "dte": dte, "theta_pct_per_day": theta_pct, "expected_move_gain": net_gain,
+                "strong_mover": strong_mover, "spread_limit_pct": spread_limit,
+                "confirmation_age_seconds": age_after_close, "confirm_window_sec": window,
+                "expected_gain_fraction": minimum_fraction, "iv_range_limit": iv_limit,
                 "quote_age_seconds": quote_received_age(quote, now_epoch),
                 "last_trade_age_seconds": last_trade_age,
                 "greeks_receipt_age_seconds": now_epoch-sig.get("greeks_received_epoch",sig["greeks_timestamp"])}
@@ -1135,12 +1130,13 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger):
             # Slice to already-closed bars; identical setup evaluator to live scanning.
             prefix = {k: v[:i+1] for k, v in candles.items() if isinstance(v, list)}
             sig = evaluate_stock_setup(prefix, ts+300, cfg.min_day_change_pct, cfg.ema_period,
-                                        enable_opening_trend=cfg.enable_opening_trend)
+                                        enable_opening_trend=cfg.enable_opening_trend,confirm_window_sec=cfg.confirm_window_sec)
             if sig:
                 signals[(ts+300, sec)] = sig
     ledger = {"mode": "BACKTEST", "initial_capital": cfg.initial_capital, "trades": [],
               "entry_configuration":{"opening_trend":cfg.enable_opening_trend,"extend_rupee_target":cfg.extend_rupee_target,
-                  "rupee_target":cfg.rupee_target,"rupee_max_risk":cfg.rupee_max_risk,"max_lots":cfg.max_lots},
+                  "rupee_target":cfg.rupee_target,"rupee_max_risk":cfg.rupee_max_risk,"max_lots":cfg.max_lots,
+                  "min_net_rr":cfg.min_rr_target,"max_spread_pct":cfg.max_spread_pct,"confirm_window_sec":cfg.confirm_window_sec},
               "limitations": ["Current universe and lot sizes; historical membership not reconstructed",
                               "Five-minute OHLC lacks bid/ask and intrabar path; modeled slippage, not verified fills",
                               "Missing bars or rolling ATM strike changes are unvalidated, never synthetic",

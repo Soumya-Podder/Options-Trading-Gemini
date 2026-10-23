@@ -17,6 +17,7 @@ import subprocess
 import os
 
 import dhan_bot_engine as bot
+from nifty_market_structure import assess_nifty_structure
 
 ROOT = Path(__file__).resolve().parent
 WORK = ROOT / 'dhan_hist_cache' / 'nifty_research_20261023'
@@ -370,7 +371,7 @@ def run_candidate(config, sessions, legs, underlying, out, previous_analyzer, ex
                 analysis['market_structure']={'allowed':config['entry']!='trend' or trend_allowed(stamps,i,underlying,analysis['recommended_dir'])}
                 if config.get('structure'):
                     if structure_history is None:raise ValueError('Structure candles required for full-gate study')
-                    analysis['market_structure']=bot.assess_nifty_structure(structure_history[day],oc,t+signal_minutes*60,c[0]['spot'],analysis['recommended_dir'])
+                    analysis['market_structure']=assess_nifty_structure(structure_history[day],oc,t+signal_minutes*60,c[0]['spot'],analysis['recommended_dir'])
                 if config['entry']=='level_oi':
                     if structure_history is None:raise ValueError('Structure candles required for level-first entry')
                     if config.get('opening_trend'):
