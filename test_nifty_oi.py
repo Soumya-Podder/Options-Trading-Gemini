@@ -12,6 +12,12 @@ def chain(oi=10000,price=100):
 
 
 class OITests(unittest.TestCase):
+    def test_wall_direction(self):
+        analysis={'recommended_dir':'BUY_CE','oi_analysis':{'ready':True,'room_to_resistance':24}}
+        self.assertFalse(bot.SelfLearningBrain.has_wall_room(analysis))
+        analysis['oi_analysis']['room_to_resistance']=25
+        self.assertTrue(bot.SelfLearningBrain.has_wall_room(analysis))
+
     def setUp(self):
         self.tracker=NiftyOITracker()
         self.t=datetime(2026,10,23,10,tzinfo=IST).timestamp()

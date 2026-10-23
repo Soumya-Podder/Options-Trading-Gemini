@@ -1,202 +1,270 @@
 {
-  "reason": "Obsolete snapshots, duplicate credentials, supplied images and disposable bytecode/temp files; active market data and trading state retained",
+  "reason": "Removed supplied screenshots, obsolete replay copies, old experiment outputs and disposable test caches. Retained latest reproducible backtests, raw market data, bot sources, configuration, credentials, tests and live learning/trade state.",
+  "completed_at": "2026-10-23T20:13:03.1583231+05:30",
   "targets": [
     {
       "path": ".codex-remote-attachments",
-      "files": 33,
-      "bytes": 5437534
-    },
-    {
-      "path": "__pycache__",
-      "files": 4,
-      "bytes": 62560
+      "files": 2,
+      "bytes": 362605.0
     },
     {
       "path": "dhan_hist_cache\\test_tmp",
       "files": 0,
-      "bytes": 0
+      "bytes": null
     },
     {
-      "path": "dhan_hist_cache\\runtime_tmp",
+      "path": "dhan_hist_cache\\index_backtest_20261022_120000_000000",
       "files": 0,
-      "bytes": 0
+      "bytes": null
     },
     {
-      "path": "dhan_hist_cache\\nifty_backtest_20261022_225505\\telegram_notifier.py",
-      "files": 1,
-      "bytes": 4931
+      "path": "dhan_hist_cache\\nifty_30_60_updated_20261023",
+      "files": 11,
+      "bytes": 55109.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_entry_replay_20261023\\.env",
-      "files": 1,
-      "bytes": 864
+      "path": "dhan_hist_cache\\nifty_backtest_20261022_225505",
+      "files": 328,
+      "bytes": 4437829.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_structure_backtest_20261023\\telegram_notifier.py",
-      "files": 1,
-      "bytes": 4931
+      "path": "dhan_hist_cache\\nifty_controlled_comparison_20261023",
+      "files": 33,
+      "bytes": 842726.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_entry_replay_20261023\\dhan_bot_engine.py",
-      "files": 1,
-      "bytes": 73669
+      "path": "dhan_hist_cache\\nifty_entry_replay_20261023",
+      "files": 344,
+      "bytes": 5137398.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_structure_backtest_20261023\\nifty_market_structure.py",
-      "files": 1,
-      "bytes": 7301
+      "path": "dhan_hist_cache\\nifty_opportunity_review_20261023",
+      "files": 24,
+      "bytes": 199508.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_entry_replay_20261023\\telegram_notifier.py",
-      "files": 1,
-      "bytes": 4931
+      "path": "dhan_hist_cache\\nifty_price_level_review_20261023",
+      "files": 17,
+      "bytes": 289761.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_controlled_comparison_20261023\\previous_engine.py",
-      "files": 1,
-      "bytes": 67559
+      "path": "dhan_hist_cache\\nifty_regime_drive_review_20261023",
+      "files": 17,
+      "bytes": 254334.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_controlled_comparison_20261023\\compare.py",
-      "files": 1,
-      "bytes": 2944
+      "path": "dhan_hist_cache\\nifty_structure_backtest_20261023",
+      "files": 343,
+      "bytes": 5152819.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_entry_replay_20261023\\tmp",
-      "files": 0,
-      "bytes": 0
+      "path": "dhan_hist_cache\\swiggy_review_20261023",
+      "files": 10,
+      "bytes": 64184.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_backtest_20261022_225505\\dhan_bot_engine.py",
-      "files": 1,
-      "bytes": 67557
+      "path": "dhan_hist_cache\\nifty_research_20261023\\run_20261023_090036",
+      "files": 23,
+      "bytes": 382228.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_entry_replay_20261023\\dhan_bot_session.log",
-      "files": 1,
-      "bytes": 8893
+      "path": "dhan_hist_cache\\nifty_research_20261023\\run_20261023_090347",
+      "files": 23,
+      "bytes": 340988.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_structure_backtest_20261023\\dhan_bot_engine.py",
-      "files": 1,
-      "bytes": 73587
+      "path": "dhan_hist_cache\\nifty_research_20261023\\run_20261023_090601",
+      "files": 30,
+      "bytes": 417847.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_controlled_comparison_20261023\\original_engine.py",
-      "files": 1,
-      "bytes": 61947
+      "path": "dhan_hist_cache\\nifty_research_20261023\\run_20261023_090748",
+      "files": 24,
+      "bytes": 295992.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_backtest_20261022_225505\\dhan_bot_session.log",
-      "files": 1,
-      "bytes": 7202
+      "path": "dhan_hist_cache\\nifty_research_20261023\\run_20261023_091932",
+      "files": 18,
+      "bytes": 398990.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_structure_backtest_20261023\\run_review.py",
-      "files": 1,
-      "bytes": 1725
+      "path": "dhan_hist_cache\\nifty_research_20261023\\run_20261023_092340",
+      "files": 7,
+      "bytes": 24105.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_structure_backtest_20261023\\boundary_check_first_pass",
-      "files": 6,
-      "bytes": 30146
+      "path": "dhan_hist_cache\\nifty_research_20261023\\run_20261023_092425",
+      "files": 9,
+      "bytes": 101154.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_structure_backtest_20261023\\.env",
-      "files": 1,
-      "bytes": 864
+      "path": "dhan_hist_cache\\nifty_research_20261023\\run_20261023_093334",
+      "files": 11,
+      "bytes": 145228.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_structure_backtest_20261023\\dhan_bot_session.log",
-      "files": 1,
-      "bytes": 5024
+      "path": "dhan_hist_cache\\nifty_research_20261023\\run_20261023_093904",
+      "files": 23,
+      "bytes": 532860.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_structure_backtest_20261023\\tmp",
-      "files": 0,
-      "bytes": 0
+      "path": "dhan_hist_cache\\nifty_research_20261023\\run_20261023_094008",
+      "files": 35,
+      "bytes": 923504.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_entry_replay_20261023\\index_option_replay.py",
-      "files": 1,
-      "bytes": 5778
+      "path": "dhan_hist_cache\\nifty_research_20261023\\run_20261023_094228",
+      "files": 27,
+      "bytes": 1042594.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_structure_backtest_20261023\\optional_empty_field_check",
-      "files": 3,
-      "bytes": 4299
+      "path": "dhan_hist_cache\\nifty_regime_review_20261023\\30days_after_filter_recovery",
+      "files": 4,
+      "bytes": 16018.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_entry_replay_20261023\\nifty_market_structure.py",
-      "files": 1,
-      "bytes": 8873
+      "path": "dhan_hist_cache\\nifty_regime_review_20261023\\30days_before_filter_recovery",
+      "files": 4,
+      "bytes": 15935.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_entry_replay_20261023\\run_review.py",
-      "files": 1,
-      "bytes": 3282
+      "path": "dhan_hist_cache\\nifty_regime_review_20261023\\30days_opening_trend",
+      "files": 5,
+      "bytes": 17750.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_backtest_20261022_225505\\sandbox_network_attempt.log",
-      "files": 1,
-      "bytes": 10470
+      "path": "dhan_hist_cache\\nifty_regime_review_20261023\\60days_after_filter_recovery",
+      "files": 4,
+      "bytes": 30956.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_backtest_20261022_225505\\tmp",
-      "files": 0,
-      "bytes": 0
+      "path": "dhan_hist_cache\\nifty_regime_review_20261023\\60days_before_filter_recovery",
+      "files": 4,
+      "bytes": 25949.0
     },
     {
-      "path": "dhan_hist_cache\\nifty_backtest_20261022_225505\\.env",
-      "files": 1,
-      "bytes": 689
+      "path": "dhan_hist_cache\\nifty_regime_review_20261023\\60days_opening_trend",
+      "files": 5,
+      "bytes": 27775.0
     },
     {
-      "path": "stock_data_quality.py",
-      "files": 1,
-      "bytes": 11254,
-      "reason": "Unused duplicate; tests now exercise the active stock client"
+      "path": "dhan_hist_cache\\nifty_regime_review_20261023\\current_20261023_164110_slippage_0.1",
+      "files": 4,
+      "bytes": 163759.0
+    },
+    {
+      "path": "dhan_hist_cache\\nifty_regime_review_20261023\\current_20261023_164110_slippage_0.3",
+      "files": 4,
+      "bytes": 163749.0
+    },
+    {
+      "path": "dhan_hist_cache\\nifty_regime_review_20261023\\current_20261023_182902_slippage_0.1",
+      "files": 4,
+      "bytes": 153014.0
+    },
+    {
+      "path": "dhan_hist_cache\\nifty_regime_review_20261023\\current_20261023_182902_slippage_0.3",
+      "files": 4,
+      "bytes": 152982.0
     }
   ],
-  "cleanup_20261023_after_push": {
-    "reason": "Remove byte-identical archived source/document copies; retain active modules, tests, market data, outcome and learning state, and replay evidence",
-    "removed_files": [
-      "backtest_results/entry_continuation_20261023/sources/market_regime.py",
-      "backtest_results/entry_continuation_20261023/sources/nifty_market_structure.py",
-      "backtest_results/entry_continuation_20261023/sources/stock_option_policy.py",
-      "backtest_results/entry_continuation_20261023/sources/stock_option_signals.py",
-      "backtest_results/nifty_20261023/RESEARCH_NOTES.md"
+  "python_cleanup": {
+    "removed": [
+      "test_screenshot_rules.py",
+      "test_nifty_partial_targets.py",
+      "dhan_hist_cache/nifty_regime_review_20261023/before_structure.py"
     ],
-    "removed_bytes": 59022,
-    "source_commit": "95d6213b3647a5517cb62e80c979115b94bdb488",
-    "removed_empty_directories": [
-      "backtest_results/entry_continuation_20261023/sources",
-      "dhan_hist_cache/index_backtest_20261022_120000_000000",
-      "dhan_hist_cache/runtime_tmp",
-      "dhan_hist_cache/test_tmp"
-    ]
-  },
-  "second_pass_20261023": {
-    "removed_unused_functions": [
-      "dhan_dynamic_fno_stock_bot.py:compute_atr_series",
-      "dhan_dynamic_fno_stock_bot.py:compute_ema_series",
-      "run_bot_session.py:is_market_hours"
+    "consolidated_into": [
+      "test_index_option_replay.py",
+      "test_learning_feedback.py",
+      "test_nifty_oi.py",
+      "test_stock_data_quality.py"
     ],
-    "removed_unused_imports": [
-      "dhan_dynamic_fno_stock_bot.py:Tuple",
-      "run_bot_session.py:signal",
-      "dhan_bot_engine.py:assess_nifty_structure"
-    ],
-    "removed_obsolete_test_mock": "test_index_option_replay.py:assess_nifty_structure",
-    "policy": "Update existing files; create a new file only when necessary.",
-    "removed_empty_folders": [
-      "dhan_hist_cache/index_backtest_20261022_120000_000000",
-      "dhan_hist_cache/nifty_controlled_comparison_20261023/legacy/dhan_hist_cache",
-      "dhan_hist_cache/nifty_controlled_comparison_20261023/legacy_committed/dhan_hist_cache",
-      "dhan_hist_cache/nifty_controlled_comparison_20261023/new_entries_corrected_replay_committed/dhan_hist_cache",
-      "dhan_hist_cache/nifty_controlled_comparison_20261023/original_entries_corrected_replay/dhan_hist_cache",
-      "dhan_hist_cache/nifty_controlled_comparison_20261023/original_entries_corrected_replay_committed/dhan_hist_cache"
-    ],
-    "verification": "187 tests passed; git diff --check passed"
+    "root_python_files_remaining": 24,
+    "retained_runtime_modules": 11,
+    "retained_research_entrypoint": "nifty_research.py",
+    "retained_test_modules": 12,
+    "regression_tests_passed": 212,
+    "local_import_graph": {
+      "bot_dashboard.py": [],
+      "dhan_bot_engine.py": [
+        "index_option_replay",
+        "nifty_market_structure",
+        "nifty_oi",
+        "telegram_notifier"
+      ],
+      "dhan_dynamic_fno_stock_bot.py": [
+        "stock_option_policy",
+        "stock_option_signals",
+        "telegram_notifier"
+      ],
+      "index_option_replay.py": [],
+      "market_regime.py": [],
+      "nifty_market_structure.py": [
+        "market_regime"
+      ],
+      "nifty_oi.py": [],
+      "nifty_research.py": [
+        "dhan_bot_engine",
+        "nifty_market_structure"
+      ],
+      "run_bot_session.py": [],
+      "stock_option_policy.py": [],
+      "stock_option_signals.py": [
+        "market_regime"
+      ],
+      "telegram_notifier.py": [],
+      "test_index_option_replay.py": [
+        "dhan_bot_engine"
+      ],
+      "test_learning_feedback.py": [
+        "dhan_bot_engine",
+        "stock_option_policy",
+        "test_nifty_market_structure"
+      ],
+      "test_market_regime.py": [
+        "dhan_dynamic_fno_stock_bot",
+        "market_regime",
+        "nifty_market_structure",
+        "stock_option_policy",
+        "stock_option_signals",
+        "test_nifty_level_entry"
+      ],
+      "test_nifty_level_entry.py": [
+        "dhan_bot_engine",
+        "nifty_market_structure",
+        "nifty_oi",
+        "test_nifty_market_structure",
+        "test_nifty_oi"
+      ],
+      "test_nifty_market_structure.py": [
+        "dhan_bot_engine",
+        "nifty_market_structure"
+      ],
+      "test_nifty_oi.py": [
+        "dhan_bot_engine",
+        "nifty_oi"
+      ],
+      "test_nifty_research.py": [
+        "dhan_bot_engine",
+        "nifty_research"
+      ],
+      "test_run_bot_session.py": [
+        "run_bot_session"
+      ],
+      "test_stock_data_quality.py": [
+        "dhan_dynamic_fno_stock_bot"
+      ],
+      "test_stock_option_integration.py": [
+        "dhan_dynamic_fno_stock_bot"
+      ],
+      "test_stock_option_policy.py": [
+        "stock_option_policy"
+      ],
+      "test_stock_option_signals.py": [
+        "stock_option_signals"
+      ]
+    },
+    "reason": "Preserved all regression checks while eliminating redundant standalone test modules and an unreferenced historical source copy. No production logic changes."
   }
 }

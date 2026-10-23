@@ -17,7 +17,7 @@ The 2026-10-23 clear-mover profile uses a Rs.900 minimum estimated net
 stock target, minimum planned net RR 1.3, a 3.5% base spread cap and a 600-second
 confirmation window after a five-minute candle closes. Set these with
 `STOCK_OPT_RUPEE_TARGET`, `STOCK_OPT_MIN_NET_RR`, `STOCK_OPT_MAX_SPREAD_PCT` and
-`STOCK_OPT_CONFIRM_WINDOW_SEC`. The window must be 300–900 seconds, is exclusive
+`STOCK_OPT_CONFIRM_WINDOW_SEC`. The window must be 300â€“900 seconds, is exclusive
 at its upper boundary, and is shared by signal detection and quote qualification.
 Future/forming candles and gaps between required confirmation bars remain invalid.
 
@@ -44,13 +44,13 @@ moves such as the observed Swiggy decline. A later rally in a put premium does
 not establish that an earlier entry would survive its stop. This profile requires
 replay and paper observation; it does not ensure capture of that move.
 
-Minimum DTE remains four calendar days; delta band is 0.38–0.78; premium floor is
+Minimum DTE remains four calendar days; delta band is 0.38â€“0.78; premium floor is
 Rs.3; maximum hold is 12 five-minute bars, with no-progress checking after five
 bars; daily theta limit is 6%. Quotes must have been received within 30 seconds
 and Greek snapshots within 120 seconds. The underlying follow-through band stays
 -0.15 to +1.0 five-minute ATR. Valid broker Greeks remain mandatory.
 
-Nifty confirmation now also defaults to 600 seconds (validated 300–900). The
+Nifty confirmation now also defaults to 600 seconds (validated 300â€“900). The
 range of already-closed current-session candles must reach 80 points before body
 and directional close-strength minima soften from 0.50/0.70 to 0.40/0.60. This
 range test alone does not establish a trend: marked-level reaction, matching
@@ -102,7 +102,7 @@ reconstruct a fixed contract's historical OHLC, so those trades are not scored.
 Regression checks:
 
 ```powershell
-python -m unittest test_stock_data_quality test_stock_option_policy test_stock_option_signals test_stock_option_integration test_nifty_partial_targets
+python -m unittest test_stock_data_quality test_stock_option_policy test_stock_option_signals test_stock_option_integration test_index_option_replay
 ```
 
 Official references:

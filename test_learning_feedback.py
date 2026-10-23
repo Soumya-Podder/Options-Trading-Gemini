@@ -18,6 +18,24 @@ def rule():
 
 
 class LearningFeedbackTests(unittest.TestCase):
+    def test_halving_preserves_win_and_consistency(self):
+        stats={'wins_count':1,'losses_count':3,'total_win_r':2,'total_loss_r':3}
+        bot.SelfLearningBrain.halve_rule_history(stats)
+        self.assertEqual((stats['wins_count'],stats['losses_count'],stats['trades_count']),(1,1,2))
+
+    def test_cooldown_and_retirement(self):
+        brain=bot.SelfLearningBrain.__new__(bot.SelfLearningBrain)
+        brain.rules_file='unused';brain.recent_losing_states=[]
+        brain.rules={
+            'a':{'status':'PRUNED','pruned_on_day':'2026-10-01','prune_count':1},
+            'b':{'status':'PRUNED','pruned_on_day':'2026-10-01','prune_count':3}}
+        with patch.object(bot,'atomic_write_json'):
+            brain.unmute_new_day('2026-10-05')
+            self.assertEqual(brain.rules['a']['status'],'PRUNED')
+            brain.unmute_new_day('2026-10-06')
+            self.assertEqual(brain.rules['a']['status'],'CANDIDATE')
+            self.assertEqual(brain.rules['b']['status'],'PRUNED')
+
     def test_gross_profit_net_loss_trains_as_loss(self):
         ledger=dict(initial_capital=30000,virtual_balance_gross=30000,
                     virtual_balance_net=30000,trades=[])

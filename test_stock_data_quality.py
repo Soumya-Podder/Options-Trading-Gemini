@@ -1,6 +1,7 @@
 import argparse
 import json
 import logging
+import math
 import tempfile
 import unittest
 from datetime import datetime, timedelta
@@ -157,6 +158,11 @@ class HistoricalDataTests(unittest.TestCase):
 
 
 class FreshnessTests(unittest.TestCase):
+    def test_stock_receipt_metadata_fails_closed(self):
+        self.assertTrue(math.isinf(quote_received_age({},100)))
+        self.assertTrue(math.isinf(quote_received_age({'received_epoch':'bad'},100)))
+        self.assertEqual(quote_received_age({'received_epoch':90},100),10)
+
     def test_receipt_age_is_independent_of_last_trade_age(self):
         now=datetime(2026,10,22,11,0,tzinfo=IST).timestamp()
         quote={"received_epoch":now,"last_trade_time":"21/10/2026 10:00:00"}
