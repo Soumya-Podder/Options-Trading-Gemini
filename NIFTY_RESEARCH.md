@@ -1,3 +1,215 @@
+# Gemini retrospective filter experiment (October 25, 2026)
+
+Used the actual configured Gemini 2.5 Flash API to review decision-time inputs
+for 15 unique deterministic-qualified candidates across Nifty/Sensex and 30/60
+calendar days. Candidate collection forced HOLD with fresh learning, producing
+a superset before subsequent loss/learning/cooldown gates. Three batches of five
+were reviewed at least 30 seconds apart. All 15 responses were valid and frozen
+before replay; all reached replay candidates had a stored review. No exit prices,
+subsequent bars, realized P&L or production learning were included in prompts.
+
+Approval required the same direction and strike, a self-rated score >=8/10 and
+expected premium move >=20 Nifty / >=45 Sensex points, matching the launcher.
+Expiry was explicitly unverified, not falsely asserted to be five days away;
+historical quotes, quantities, Greeks and full chain were labelled missing.
+The batch study is not the exact live single-candidate prompt/latency process.
+
+| Window | Index | Bot-only validated net | Bot-only closed trades | Gemini-filtered net | Gemini-filtered closed trades |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 30 days Sep 25–Oct 24 | NIFTY | +2,406.00 | 2 | 0.00 | 0 |
+| 30 days Sep 25–Oct 24 | SENSEX | 0.00, unresolved path | 0 | 0.00 | 0 |
+| 60 days Aug 26–Oct 24 | NIFTY | +3,138.25 | 4 | -581.25 | 1 |
+| 60 days Aug 26–Oct 24 | SENSEX | -537.00, incomplete | 4 | 0.00 | 0 |
+
+Amounts are rupees after modeled charges. Both baseline and filtered runs use
+entries before 14:30 IST and 14:45 exit, Rs.30,000 fresh capital/learning per
+index and window. This differs from prior 14:44-entry baseline figures. Only
+actually executed replay outcomes train; rejecting earlier trades can change
+later eligible entries, so this is not merely subtraction of old losing trades.
+
+Gemini gave only one approval: Nifty 24250 PE at 2026-08-26 12:05, score 8/10.
+Entry 92.00, modeled stop exit 84.05, gross -516.75, charges 64.50, net -581.25.
+The stop is inside the same five-minute candle, not a known exact intrabar
+instant. Nifty's other ratings were 6–7; Sensex ratings were 3 or 7. An 8/10
+model rating did not establish an 80% success probability. The Gemini samples
+have no winning trades, so average net win is unavailable. The monthly target
+is not met and this experiment does not demonstrate profitable Gemini gating.
+
+The bot-only Sensex results exclude one unresolved path in 30 days and two in
+60 days. Nifty has 39/45 unavailable structure comparisons with the earlier
+cutoff. No Gemini-approved outcome is unresolved, but full historical strategy
+inputs remain incomplete. Current-model retrospective review cannot reconstruct
+Gemini decisions as they would have occurred historically or rule out model
+hindsight. Batch review and historical fills omit live Gemini latency/quote
+freshness. These are conditional research results, not a validated live forecast.
+
+The existing combined ledger retains `gemini_retrospective_protocol`,
+`gemini_retrospective_candidates`, `gemini_retrospective_reviews`,
+`gemini_retrospective_review_batches` and `gemini_retrospective_evaluations`.
+All contexts, complete reviews, ratings, reasons, request hashes and outcomes
+are archived. Production state/credentials were verified unchanged. No live
+orders, session restart, new source file or new report directory was used.
+
+# Latest structural-only correction (October 25, 2026)
+
+Removed accumulation execution and the 15m premium-edge boost. Nifty now
+requires confirmed LEVEL_V1 structure, same-strike confirmation, verified OI
+reference and actual aligned imbalance of at least 50 lakh. Sensex behavior
+is preserved. Fresh isolated chronological learning at Rs.30,000 per run:
+
+| Window | Trades | Wins/losses | Gross | Charges | Net | Average net win | Average net loss | Net win/loss value | Closed-trade drawdown |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 30 days Sep 25–Oct 24 | 3 | 3/0 | 3,266.25 | 193.50 | 3,072.75 | 1,024.25 | N/A | N/A | 0.00 |
+| 60 days Aug 26–Oct 24 | 5 | 4/1 | 4,127.50 | 322.50 | 3,805.00 | 1,068.94 | 470.75 | 2.271 | 470.75 |
+
+Amounts are rupees. This improves on the loose accumulation nets of -8,111.50
+and -11,608.00, but does not reproduce the earlier observer's +3,499.50 30-day
+result. Complete September in the 60-day run nets +1,869.75. Rs.15,000 monthly
+net is not achieved. The 60-day net win/loss value ratio 2.271 remains below 2.3.
+Three and five trades are far too few to validate a stable 80–100% win rate.
+Zero closed-trade drawdown in the 30-day subset is not a claim of zero market
+risk or intratrade drawdown.
+
+No trade path is unresolved in these two evaluations, but the replay remains
+INCOMPLETE_MARKET_STRUCTURE (42/48 unavailable comparisons), with incomplete
+full historical chain/expiry/Greeks/depth and intrabar-order information.
+These are small in-sample results. Production learning/trade files and engine
+source were verified unchanged during replay. No new file/folder was created.
+
+All trades, rejection counts and configuration are retained in existing ledger
+fields `strict_structure_only_evaluations` and
+`strict_structure_only_configuration`. 122 focused tests pass; earlier full-
+repository stock/research/session-maintenance failures remain outside this
+change. Earlier experiment results below are historical comparisons only.
+
+# Latest daily trend accumulation replay (October 25, 2026)
+
+Applied the requested daily trend detector, ready-structure pass-through and
+15m/5m effective premium impulse. Actual timestamp references replace the
+attachment's three-poll approximation; missing wall room rejects instead of
+inventing 50 points. Fresh isolated learning and Rs.30,000 per replay:
+
+| Window | Closed trades | Days with closed trades / observed sessions | Wins/losses | Gross | Net | Average net win | Average net loss | Closed-trade drawdown |
+| --- | ---: | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 30 days Sep 25–Oct 24 | 27 | 17/19 | 6/21 | -6,370.00 | -8,111.50 | 921.33 | 649.50 | 9,043.00 |
+| 60 days Aug 26–Oct 24 | 41 | 30/40 | 11/30 | -8,963.50 | -11,608.00 | 793.20 | 677.77 | 12,539.50 |
+
+Amounts are rupees. Previous observer nets were +3,499.50 / +1,354.25. Frequency
+increased but net performance deteriorated sharply. Of the 30-day entries, 25
+were accumulation trades (5 wins, 20 losses, -7,368.25 net); two were level trades
+(1 win, 1 loss, -743.25). Of the 60-day entries, 37 were accumulation trades
+(9 wins, 28 losses, -11,597 net); four were level trades (2 wins, 2 losses, -11).
+The complete September month in the 60-day evaluation nets -2,073.00. Neither
+Rs.1,000 average net win nor Rs.15,000 monthly net is demonstrated.
+
+Observed sessions are dates actually present in cached ATM option history,
+not a claim of complete provider/exchange session coverage. Structural input
+comparisons remain unavailable for 42/48 checked snapshots. No attempted trade
+has an unresolved outcome in these two replays, but historical full chain,
+verified expiry/Greeks/depth and exact intrabar order remain limitations. These
+are in-sample tests. Existing OI-weighted-price and changing-basket cumulative
+OI proxies must not be described as actual volume VWAP or verified identical-
+contract accumulation from 09:15.
+
+121 focused tests passed; full-suite failures previously reported remain
+unresolved. All trades, accepted model counts, rejections, attribution, observed
+session counts and configuration are in existing ledger fields
+`daily_trend_accumulation_evaluations` and
+`daily_trend_accumulation_configuration`. Prior baselines are retained. Both
+production learning/trade files and engine source were verified unchanged
+during replay. The requested code changes remain applied; no live session was
+started or restarted.
+
+# Latest observer / twenty-point replay (October 25, 2026)
+
+Executed the supplied observer patch without creating a new script, then added
+live/replay hard-target parity and bounded fallback to warming/unavailable
+structure. Fresh isolated chronological learning, Rs.30,000 initial capital:
+
+| Window | Nifty trades | Wins/losses | Gross | Net | Average net win | Average net loss | Net win/loss value | Closed-trade drawdown |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 30 days Sep 25–Oct 24 | 5 | 4/1 | 3,822.00 | 3,499.50 | 1,068.94 | 776.25 | 1.377 | 776.25 |
+| 60 days Aug 26–Oct 24 | 11 | 5/6 | 2,063.75 | 1,354.25 | 1,095.75 | 687.42 | 1.594 | 2,254.75 |
+
+Amounts are rupees. Prior Nifty six-patch nets were +2,111.75 / +4,544.25.
+The observer improves the recent 30-day sample but worsens the 60-day result
+and drawdown. Complete September in the 60-day run nets +704.00. Average net
+wins exceed 1,000 in both samples, but Rs.15,000 monthly net and the earlier
+2.3x win/loss value target remain unmet. No new Sensex or stock backtest was
+requested or run in this observer evaluation.
+
+Nifty still has 42/48 unavailable structure comparisons. Full historical
+chain/expiry/Greek/depth limitations remain, along with first-observed session
+anchors, an OI-weighted price proxy rather than volume VWAP, and rolling-basket
+cumulative OI rather than matched morning-contract accumulation. These are
+small in-sample replays, not validated future-profit forecasts.
+
+All trades, rejections and configuration are in the existing combined ledger,
+under `observer_20pt_evaluations` and `observer_20pt_configuration`. Production
+learning and paper ledgers were verified unchanged during replay. Both
+requested Nifty windows were rerun; earlier comparisons remain retained.
+
+# Latest six-patch results (October 25, 2026)
+
+Applied all six requested patches. Structure/exit/daily-target patches were
+first tested on 30 days (Nifty net 2,111.75; Sensex unresolved), followed by
+learning, session context and Sensex parity changes. Final fresh-learning
+results at Rs.30,000 per index/period:
+
+| Window | Index | Closed trades | Wins/losses | Gross | Net | Average net win | Average net loss | Win/loss value ratio |
+| --- | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| 30 days Sep 25–Oct 24 | NIFTY | 5 | 3/2 | 2,434.25 | 2,111.75 | 1,191.08 | 730.75 | 1.630 |
+| 30 days Sep 25–Oct 24 | SENSEX | 0 validated | N/A | N/A | Unresolved | N/A | N/A | N/A |
+| 60 days Aug 26–Oct 24 | NIFTY | 8 | 5/3 | 5,060.25 | 4,544.25 | 1,295.30 | 644.08 | 2.011 |
+| 60 days Aug 26–Oct 24 | SENSEX | 4 | 2/2 | -642.00 | -900.00 | 72.50 | 522.50 | 0.139 |
+
+All amounts are rupees. Combined validated 60-day net: 3,644.25. Combined
+complete September net within that run: 3,287.50. Maximum closed-trade drawdown
+is 776.25 for Nifty and 900 for Sensex. The preceding revision had combined
+60-day net 3,939.75: these patches did not improve combined results. Nifty's
+30-day net also declined from 2,296.50 to 2,111.75. Neither 2.3x net win/loss
+value ratio nor Rs.15,000 monthly net was demonstrated. These are small,
+in-sample comparisons, not an independent holdout or profitability guarantee.
+
+Nifty retains 42/48 unavailable structure comparisons; Sensex has unresolved
+contract paths. Full historical chain, verified expiry, Greek and depth inputs
+remain incomplete. No unresolved outcomes are counted as realized profit.
+Production learning and paper ledgers were verified unchanged. Existing result
+ledger fields `patches_1_2_5_intermediate_evaluations`,
+`latest_six_patch_evaluations` and `latest_six_patch_configuration` retain trades,
+rejections, intermediate comparisons and the exact replay configuration.
+
+# Latest entry/exit experiment: October 25, 2026
+
+Applied v4.9.2 quality gates and replay/live exit alignment. Final attachment
+specification used RR 1.60 for breakout/rejection, 3.20 for retests, 3.50 after
+a loss, structure room 40, OI room 35, observed impulse 0.95R, ratchet arming at
+1.80R/2.50R, and stagnation exit at 15 minutes below 0.45R peak advance.
+
+| Window | Index | Closed trades | Wins/losses | Gross | Net | Average net win | Closed-trade drawdown |
+| --- | --- | ---: | --- | ---: | ---: | ---: | ---: |
+| 30 days, Sep 25–Oct 24 | NIFTY | 4 | 3/1 | 2,554.50 | 2,296.50 | 1,024.25 | 776.25 |
+| 30 days, Sep 25–Oct 24 | SENSEX | 0 validated | N/A | N/A | Unresolved | N/A | N/A |
+| 60 days, Aug 26–Oct 24 | NIFTY | 7 | 5/2 | 4,858.75 | 4,407.25 | 1,130.85 | 776.25 |
+| 60 days, Aug 26–Oct 24 | SENSEX | 1 | 0/1 | -403.00 | -467.50 | N/A | 467.50 |
+
+All amounts are rupees. Combined validated 60-day net is 3,939.75. Complete
+September within that window nets 2,780.75 combined. The Rs.15,000 monthly
+objective is not met. Compared with the preceding observed-impulse 0.80R
+baseline, Nifty 30-day net changed from -110.50 to +2,296.50 and 60-day net from
++1,777.00 to +4,407.25; Sensex 60-day net worsened from -184.00 to -467.50.
+
+These are fresh-learning runs at Rs.30,000 per index/period using the same data
+as prior evaluation; they are not an untouched holdout. Nifty still has 42/48
+unavailable structure comparisons, and Sensex still has unresolved contract
+paths. Historical full-chain/expiry/Greek/depth limitations remain. Small
+samples and in-sample parameter selection preclude a live-profit conclusion.
+
+All trades, rejection counts, configuration and engine hash are in the existing
+`dhan_hist_cache/index_backtest_20261025_184711_943953/paper_trade_ledger.json`,
+under `entry_exit_experiment_evaluations`. Baselines were retained. Production
+learning and paper ledgers were verified unchanged during the replay.
+
 # Nifty research: Rs.10,000 gross per 10 trading days
 
 Status on October 23, 2026: target not achieved. No research candidate has been promoted to the running trading configuration.
@@ -135,3 +347,35 @@ now retain spread/stop geometry, Greeks, quote/signal ages and 15m EMA context.
 Nifty entries retain LTP/bid/ask evidence. All 207 regression checks pass.
 
 Legacy comparison code is loaded from its Git commit in memory. Research plans retain source hashes; new evaluations do not write duplicate engine modules or a source-copy folder.
+# October 25 replay repair and current objectives
+
+The native replay now retries legacy empty caches, requests complete OHLC for
+ATM through the third required wing, aligns observations by timestamp, and
+follows the selected exact strike across relative series. The OI parser retains
+put-only strikes when a call is absent. Requests are paced at least 3.2 seconds
+apart within this historical client. No synthetic contract prices were used.
+
+Fresh research learning was used independently for each index and period, with
+Rs.30,000 starting capital per index. Production learning and paper ledgers were
+verified unchanged. Existing output was reused at
+`dhan_hist_cache/index_backtest_20261025_184711_943953/paper_trade_ledger.json`;
+the `independent_index_evaluations` field contains all four evaluations and trades.
+
+| Calendar-day window ending October 25 exclusive | Index | Closed trades | Net P&L | Average net win | Average net loss | Closed-trade drawdown |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| 60 days, August 26 onward | NIFTY | 26 | -328.25 | 983.95 | -635.48 | 4,519.00 |
+| 60 days, August 26 onward | SENSEX | 2 | -184.00 | 283.50 | -467.50 | 467.50 |
+| 30 days, September 25 onward | NIFTY | 14 | 2,441.25 | 1,122.68 | -773.93 | 2,228.50 |
+| 30 days, September 25 onward | SENSEX | 0 | Unresolved | N/A | N/A | N/A |
+
+All amounts are rupees after modeled charges. The recent Nifty sample clears
+the Rs.1,000 average-net-win objective, but the combined Rs.15,000 monthly net
+objective is not met. A fresh 30-day learning run differs from the last half of
+a 60-day learning run; these are not interchangeable samples.
+
+These are incomplete research replays: the historical chain is a rolling subset,
+previous-day OI is absent, Nifty has unavailable structure comparisons (48 in
+60 days; 42 in 30 days), and Sensex has unresolved contract paths. Missing
+Sensex outcomes are excluded rather than recorded as zero-profit trades.
+The observed P&L cannot establish full live-strategy profitability. The full
+calendar month of September in the 60-day run produced -1,783 combined net.

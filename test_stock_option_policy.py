@@ -3,9 +3,44 @@
 import multiprocessing
 import tempfile
 import unittest
+import time
 from pathlib import Path
 
 from stock_option_policy import DailyTradeGate, premium_plan, rank_candidates, signal_quality
+from stock_option_policy import option_chain_request_slot
+
+
+def _chain_slot_worker(path,start,results):
+    start.wait(10)
+    with option_chain_request_slot(0.12,path):
+        results.put(time.time())
+
+
+class SharedChainPacingTests(unittest.TestCase):
+    def test_processes_share_request_spacing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=str(Path(folder)/'slot.txt');start=multiprocessing.Event();results=multiprocessing.Queue()
+            workers=[multiprocessing.Process(target=_chain_slot_worker,args=(path,start,results)) for _ in range(3)]
+            try:
+                for process in workers:process.start()
+                start.set()
+                stamps=sorted(results.get(timeout=15) for _ in workers)
+                for process in workers:
+                    process.join(10);self.assertEqual(process.exitcode,0)
+                self.assertTrue(all(b-a>=0.11 for a,b in zip(stamps,stamps[1:])),stamps)
+            finally:
+                for process in workers:
+                    if process.is_alive():process.terminate();process.join(5)
+                results.close();results.join_thread()
+
+    def test_http_failure_releases_the_shared_lock(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=str(Path(folder)/'slot.txt')
+            with self.assertRaises(RuntimeError):
+                with option_chain_request_slot(0,path):raise RuntimeError('request failed')
+            with option_chain_request_slot(0,path):
+                pass
+            self.assertGreater(float(Path(path).read_text().strip()),0)
 
 
 def _reserve_worker(directory, start, results):
@@ -93,6 +128,15 @@ class RupeeTargetRatioTests(unittest.TestCase):
 
 
 class RankingTests(unittest.TestCase):
+    def test_execution_quality_can_choose_cleaner_entry_without_favouring_day_gain(self):
+        base={'signal_quality':80,'expected_net_rr':2,'confirmation_age_seconds':30}
+        stretched={**base,'symbol':'BIG_GAIN','day_change_pct':10,'spread_fraction_of_initial_risk':.39}
+        clean={**base,'symbol':'CLEAN','day_change_pct':3,'spread_fraction_of_initial_risk':.10}
+        ranked=rank_candidates([stretched,clean],[],1000)
+        self.assertEqual(ranked[0]['symbol'],'CLEAN')
+        self.assertGreater(ranked[0]['selection_analysis']['execution_bonus'],ranked[1]['selection_analysis']['execution_bonus'])
+        self.assertLessEqual(ranked[0]['selection_analysis']['execution_bonus'],8)
+
     def test_quality_precedes_net_ratio_after_qualification(self):
         low = {"symbol": "FAST", "day_change_pct": 10, "signal_quality": 99, "expected_net_rr": 3}
         high = {"symbol": "CALM", "day_change_pct": 2.2, "signal_quality": 1, "expected_net_rr": 4}
@@ -112,6 +156,18 @@ class RankingTests(unittest.TestCase):
 
 
 class DailyTradeGateTests(unittest.TestCase):
+    def test_four_entry_limit_preserves_consumed_slots_across_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            gate=DailyTradeGate(directory,4)
+            for slot in range(1,5):
+                self.assertTrue(gate.reserve('2026-10-26',{'symbol':'TEST'},slot))
+                gate.mark_closed('2026-10-26',{},slot)
+            restarted=DailyTradeGate(directory,4)
+            self.assertEqual(restarted.count_entries('2026-10-26'),4)
+            self.assertTrue(restarted.has_entry('2026-10-26'))
+            self.assertFalse(restarted.reserve('2026-10-26',{},1))
+            with self.assertRaises(ValueError):restarted.reserve('2026-10-26',{},5)
+
     def test_reservation_survives_restart_and_close(self):
         with tempfile.TemporaryDirectory() as directory:
             gate = DailyTradeGate(directory)

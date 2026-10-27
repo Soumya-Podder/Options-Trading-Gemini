@@ -1,6 +1,6 @@
 # Nifty OI checks
 
-The Nifty paper/live analyzer now compares the same six actual contracts against a saved snapshot received 300–390 seconds earlier. It selects the current three calls above spot and three puts below spot in both snapshots. An ATM shift therefore does not masquerade as new OI. Security IDs must agree when supplied, and expiry/day changes restart the reference window.
+The Nifty paper/live analyzer now compares the same six actual contracts against a saved snapshot received 270–450 seconds earlier. It selects the current three calls above spot and three puts below spot in both snapshots. An ATM shift therefore does not masquerade as new OI. Security IDs must agree when supplied, and expiry/day changes restart the reference window.
 
 `previous_oi` in Dhan's option-chain response is previous-day OI. The bot reports current minus previous-day OI separately from its five-minute snapshot change. A fresh API response does not establish the exchange update time of its OI fields; Dhan documents that OI updates more slowly than prices.
 

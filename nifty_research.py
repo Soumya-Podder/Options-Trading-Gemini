@@ -17,6 +17,7 @@ import subprocess
 import os
 
 import dhan_bot_engine as bot
+from index_option_replay import fixed_contract_bars
 from nifty_market_structure import assess_nifty_structure
 
 ROOT = Path(__file__).resolve().parent
@@ -181,21 +182,6 @@ def download(interval='5'):
     print('Download manifest saved',flush=True)
 
 
-def fixed_contract_bars(legs, timestamps, strike):
-    """Follow an exact strike across relative series within one session/expiry.
-
-    Every value is a returned Dhan bar. Missing bars remain NaN and stop replay
-    if reached. Conflicting duplicate observations are never silently preferred.
-    """
-    out={'timestamp':list(timestamps),**{k:[] for k in ('open','high','low','close','strike')}}
-    for t in timestamps:
-        found=[rows[t] for rows in legs.values() if t in rows and rows[t]['strike']==strike]
-        if found and any(any(abs(r[k]-found[0][k])>1e-7 for k in ('open','high','low','close')) for r in found[1:]):
-            raise ValueError(f'Conflicting fixed-strike observations at {t}')
-        row=found[0] if found else {}
-        for k in ('open','high','low','close','strike'):
-            out[k].append(row.get(k,float('nan')))
-    return out
 
 
 def load_market():
@@ -457,7 +443,7 @@ def run_candidate(config, sessions, legs, underlying, out, previous_analyzer, ex
             'full_strategy_validated':False,
             'session_rules_match_current':current,
             'current_policy_notes':(['Dynamic learning-based lots; no additional research risk cap',
-                'Nifty entry stop: 8.5% premium clamped to 6.15-12.50 points; frozen risk for R and learning',
+                'Nifty entry stop: 9.5% premium clamped to 7.50-12.50 points; frozen risk for R and learning',
                 'Shared daily net liquidation helper; conservative stop-first OHLC ambiguity',
                 '25-minute time exit at first eligible bar open using prior peak',
                 'Close-time cooldown; actual intrabar exit time is unknown'] if current else []),

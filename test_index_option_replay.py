@@ -9,17 +9,75 @@ import dhan_bot_engine as bot
 
 
 class ReplayTests(unittest.TestCase):
+    def test_runner_requires_fresh_supported_room_and_feasible_move(self):
+        import copy
+        now=datetime(2026,10,26,10).timestamp()
+        position={'entry_price':100,'qty':65,'lots':1,'index':'NIFTY',
+                  'strike':23000,'option_type':'CE','entry_epoch':now-600}
+        node={'top_bid_price':120,'top_ask_price':120.2,'top_bid_quantity':650,
+              'top_ask_quantity':650,'greeks':{'delta':0.6,'theta':-10}}
+        view={'spot':23000,'snapshot_received_epoch':now,'d_spot_5m':60,
+              'oi_analysis':{'ready':True,'nearby_strikes':[
+                  {'strike':23000,'side':'pe','change_over_5m':200000,'premium_change_over_5m':-2},
+                  {'strike':23200,'side':'ce','change_over_5m':200000,'premium_change_over_5m':-2}]}}
+        self.assertTrue(bot.assess_index_runner(view,position,node,now,0)['hold'])
+        for mutate in (lambda v,n:v.update(snapshot_received_epoch=now-9),
+                       lambda v,n:v.update(d_spot_5m=-10),
+                       lambda v,n:v['oi_analysis'].update(ready=False),
+                       lambda v,n:v['oi_analysis']['nearby_strikes'][0].update(premium_change_over_5m=2),
+                       lambda v,n:v['oi_analysis']['nearby_strikes'][1].update(strike=23010),
+                       lambda v,n:n.update(top_bid_quantity=64),
+                       lambda v,n:n['greeks'].update(theta=-3000)):
+            v=copy.deepcopy(view);n=copy.deepcopy(node);mutate(v,n)
+            self.assertFalse(bot.assess_index_runner(v,position,n,now,0)['hold'])
+        self.assertFalse(bot.assess_index_runner(view,{**position,'entry_epoch':now-1100},node,now,0)['hold'])
+
+    def test_profit_floor_covers_fees_slippage_prior_losses_and_partials(self):
+        import math
+        for realized,position in ((0,{'entry_price':100,'qty':65,'lots':1}),
+                (-500,{'entry_price':100,'qty':65,'lots':1}),
+                (500,{'entry_price':100,'qty':65,'lots':1}),
+                (0,{'entry_price':100,'qty':65,'lots':2,'exit_fills':[{'price':112,'qty':65}]})):
+            floor=bot.index_profit_lock_bid(realized,position)
+            fill=math.floor(floor*.999*20+1e-9)/20
+            done=position.get('exit_fills',[])
+            gross=sum((f['price']-100)*f['qty'] for f in done)+(fill-100)*position['qty']
+            fees=40+position['lots']*24.5+20*len(done)
+            self.assertGreaterEqual(realized+gross-fees,1000)
+
+    def test_profit_floor_is_armed_only_after_observed_gain(self):
+        floor=lambda e,q,f:bot.index_profit_lock_bid(0,{'entry_price':e,'qty':q,'lots':1,'exit_fills':f})
+        result,_=self.replay([(100,100,100,100),(100,118,99,117),(117,117,90,95)],
+                             profit_floor_check=floor)
+        self.assertEqual(result[3],'DAILY_PROFIT_PROTECTION')
+        self.assertGreaterEqual((result[1]-100)*65-64.5,1000)
+        ambiguous,_=self.replay([(100,100,100,100),(100,118,90,117)],profit_floor_check=floor)
+        self.assertEqual(ambiguous[3],'INITIAL_SL_HIT')
+
+    def test_profit_floor_does_not_invent_a_fill_across_a_gap(self):
+        floor=lambda e,q,f:bot.index_profit_lock_bid(0,{'entry_price':e,'qty':q,'lots':1,'exit_fills':f})
+        result,_=self.replay([(100,100,100,100),(100,118,99,117),(90,95,85,92)],profit_floor_check=floor)
+        self.assertEqual(result[1],90)
+        self.assertEqual(result[3],'DAILY_PROFIT_PROTECTION')
+
     def test_premium_scaled_nifty_stop_is_clamped_and_index_specific(self):
         for premium,expected in ((45,6.15),(100,8.5),(150,12.5),(300,12.5)):
             self.assertEqual(bot.option_stop_points('NIFTY',premium),expected)
-        self.assertEqual(bot.option_stop_points('SENSEX',150),20)
+        self.assertEqual(bot.option_stop_points('SENSEX',150),18)
+        self.assertEqual(bot.option_stop_points('SENSEX',300),27)
+        self.assertEqual(bot.option_stop_points('SENSEX',400),32)
+        self.assertEqual(bot.option_stop_points('SENSEX',550),32)
 
     def test_nifty_ratchet_waits_then_locks_and_never_lowers_stop(self):
-        self.assertEqual(bot.update_ratchet_sl(100,90,111.5,10),(90,False))
-        self.assertEqual(bot.update_ratchet_sl(100,90,115,10),(102.5,True))
-        self.assertEqual(bot.update_ratchet_sl(100,90,122,10),(116,True))
-        self.assertEqual(bot.update_ratchet_sl(100,90,130,10),(123.5,True))
-        self.assertEqual(bot.update_ratchet_sl(100,124,130,10),(124,True))
+        for peak,expected in ((108.49,(90,False)),(108.5,(103.5,True)),(112.5,(108,True)),(118,(114,True)),(130,(126,True))):
+            self.assertEqual(bot.update_ratchet_sl(100,90,peak,10),expected)
+        self.assertEqual(bot.update_ratchet_sl(100,128,130,10),(128,True))
+        self.assertEqual(bot.update_ratchet_sl(100,90,130,0),(90,False))
+
+    def test_current_stagnation_exit_at_eighteen_minutes_uses_only_prior_peak(self):
+        result,_=self.replay([(100,100,100,100)]+[(100,101,99,100)]*3+[(101,150,99,140)],
+                             entry_at_open=True,current_session_policy=True)
+        self.assertEqual((result[0],result[1],result[3]),(4,101,'THETA_TIME_STOP'))
 
     def test_current_replay_uses_entry_premium_for_initial_risk(self):
         start=datetime(2026,10,22,10)
@@ -34,11 +92,12 @@ class ReplayTests(unittest.TestCase):
 
     def test_daily_target_includes_prior_losses_and_partial_profit_once(self):
         position={'entry_price':100,'qty':65,'lots':1}
-        self.assertTrue(bot.daily_target_reached(0,position,120))
-        self.assertFalse(bot.daily_target_reached(-500,position,120))
+        self.assertFalse(bot.daily_target_reached(0,position,139.45))
+        self.assertTrue(bot.daily_target_reached(0,position,139.50))
+        self.assertFalse(bot.daily_target_reached(-500,position,139.50))
         position={'entry_price':100,'qty':65,'lots':2,'exit_fills':[{'price':110,'qty':65}]}
-        self.assertTrue(bot.daily_target_reached(0,position,111))
-        self.assertFalse(bot.daily_target_reached(0,position,110))
+        self.assertTrue(bot.daily_target_reached(0,position,131))
+        self.assertFalse(bot.daily_target_reached(0,position,125))
 
     def replay(self,bars,**kwargs):
         start=datetime(2026,10,22,10)
@@ -53,14 +112,14 @@ class ReplayTests(unittest.TestCase):
 
     def test_current_daily_target_uses_shared_net_helper(self):
         def check(entry,remaining,fills,bid):
-            return bot.daily_target_reached(-400,{'entry_price':entry,'qty':remaining,'lots':2,'exit_fills':fills},bid)
+            return bot.daily_target_reached(700,{'entry_price':entry,'qty':remaining,'lots':2,'exit_fills':fills},bid)
         result,fills=self.replay([(100,100,100,100),(100,120,99,119)],lots=2,
             session_profit_check=check,current_session_policy=True)
         self.assertEqual(result[3],'DAILY_NET_PROFIT_TARGET')
         self.assertEqual(len(fills),2)
         gross=sum((f['price']-100)*f['qty'] for f in fills)
-        self.assertGreaterEqual(-400+gross-(40+2*24.5+20),1200)
-        self.assertEqual(fills[0]['price'],110)
+        self.assertGreaterEqual(700+gross-(40+2*24.5+20),2500)
+        self.assertEqual(fills[0]['price'],112)
 
     def test_current_daily_target_cannot_override_same_bar_stop(self):
         check=lambda e,q,f,b:bot.daily_target_reached(0,{'entry_price':e,'qty':q,'lots':1,'exit_fills':f},b)
@@ -68,10 +127,27 @@ class ReplayTests(unittest.TestCase):
             session_profit_check=check,current_session_policy=True)
         self.assertEqual(result[3],'INITIAL_SL_HIT')
 
+    def test_single_lot_twenty_point_target_after_prior_daily_loss(self):
+        check=lambda e,q,f,b:bot.daily_target_reached(-500,{'entry_price':e,'qty':q,'lots':1,'exit_fills':f},b)
+        result,_=self.replay([(100,100,100,100),(100,121,99,120)],entry_at_open=True,
+                             current_session_policy=True,session_profit_check=check)
+        self.assertEqual((result[1],result[3]),(120,'TARGET_2_20_POINTS'))
+
+    def test_single_lot_twenty_point_target_still_uses_stop_first(self):
+        result,_=self.replay([(100,100,100,100),(100,125,90,120)],entry_at_open=True,
+                             current_session_policy=True)
+        self.assertEqual(result[3],'INITIAL_SL_HIT')
+
+    def test_current_two_lot_target_finishes_at_twenty_after_partial(self):
+        result,fills=self.replay([(100,100,100,100),(100,121,99,120)],lots=2,
+                                 entry_at_open=True,current_session_policy=True)
+        self.assertEqual([f['price'] for f in fills],[112,120])
+        self.assertEqual(result[1],116)
+
     def test_current_time_exit_uses_peak_known_before_bar(self):
-        bars=[(100,100.5,99.5,100)]*5+[(101,150,100,140)]
+        bars=[(100,100.5,99.5,100)]*4+[(101,150,100,140)]
         result,_=self.replay(bars,entry_at_open=True,current_session_policy=True)
-        self.assertEqual(result[0],5)
+        self.assertEqual(result[0],4)
         self.assertEqual(result[1],101)
         self.assertEqual(result[3],'THETA_TIME_STOP')
 
@@ -112,9 +188,9 @@ class ReplayTests(unittest.TestCase):
             self.replay([(100,100,100,100),(100,101,99,100)],timestamps=[start,start+600])
 
     def test_open_above_first_target_precedes_later_stop(self):
-        result,fills=self.replay([(100,100,100,100),(111,115,90,100)],lots=2)
-        self.assertEqual([f["price"] for f in fills],[110,94])
-        self.assertEqual(result[1],102)
+        result,fills=self.replay([(100,100,100,100),(113,115,90,100)],lots=2)
+        self.assertEqual([f["price"] for f in fills],[112,94])
+        self.assertEqual(result[1],103)
 
     def test_truncated_session_cannot_be_scored(self):
         with self.assertRaisesRegex(bot.ReplayDataError,"History ends before session close"):
@@ -143,18 +219,56 @@ class ReplayTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,"five-minute option candles"):
             bot.run_real_historical_backtest(30,["NIFTY"],"15",logging.getLogger("test"))
 
+    def test_reusing_output_directory_never_loads_future_learning(self):
+        with patch.object(bot.SelfLearningBrain,'_load_json',side_effect=AssertionError('Future state loaded')):
+            brain=bot.SelfLearningBrain(logging.getLogger('test'),fresh=True)
+        self.assertEqual(brain.rules,{})
+        self.assertEqual(brain.brain['replay_buffer'],[])
+
+    def test_incomplete_index_cli_exits_with_code_two(self):
+        from pathlib import Path
+        source=Path(bot.__file__).read_text(encoding='utf-8')
+        main=source[source.rfind('if __name__ == "__main__":'):]
+        run=MagicMock(return_value={'backtest_status':'INCOMPLETE_DECISION_INPUTS'})
+        namespace={**vars(bot),'__name__':'__main__','run_real_historical_backtest':run,'setup_logger':MagicMock()}
+        with patch.object(bot.sys,'argv',['dhan_bot_engine.py','--backtest-days','30','--indices','NIFTY,SENSEX','--backtest-output-dir','existing-folder']):
+            with self.assertRaises(SystemExit) as error:exec(compile(main,bot.__file__,'exec'),namespace)
+        self.assertEqual(error.exception.code,2)
+        self.assertEqual(run.call_args.kwargs['indices_to_test'],['NIFTY','SENSEX'])
+        self.assertEqual(run.call_args.kwargs['output_dir'],'existing-folder')
+
+    def test_missing_quote_history_is_not_reported_as_clean_zero_trades(self):
+        class Clock(datetime):
+            @classmethod
+            def now(cls,tz=None):return cls(2026,10,22,12,tzinfo=tz)
+        start=datetime(2026,10,20,10)
+        data={'timestamp':[int((start+timedelta(minutes=5*i)).timestamp()) for i in range(3)],
+              'open':[100]*3,'high':[101]*3,'low':[99]*3,'close':[100]*3,
+              'oi':[10000000]*3,'iv':[20]*3,'strike':[22000]*3,'spot':[22000]*3}
+        client=MagicMock();client.fetch_rolling_option_window.return_value=data;client.history_events=[]
+        analyzer=MagicMock();analyzer.evaluate_chain.return_value={'index':'SENSEX','atm_ce_ltp':100}
+        brain=MagicMock();brain.select_action.return_value=('HOLD',None)
+        with patch.object(bot,'datetime',Clock),patch.object(bot,'DhanV2RestClient',return_value=client),patch.object(bot,'MarketMicrostructureAnalyzer',return_value=analyzer),patch.object(bot,'SelfLearningBrain',return_value=brain),patch.object(bot,'load_dotenv_file',return_value={'DHAN_CLIENT_ID':'test','DHAN_ACCESS_TOKEN':'test'}),patch.object(bot,'atomic_write_json'),tempfile.TemporaryDirectory() as folder:
+            ledger=bot.run_real_historical_backtest(2,['SENSEX'],'5',logging.getLogger('test'),output_dir=folder)
+        self.assertEqual(ledger['backtest_status'],'INCOMPLETE_DECISION_INPUTS')
+        self.assertEqual(ledger['missing_decision_input_snapshots'],{'SENSEX':3})
+        self.assertEqual(ledger['total_trades'],0)
+        self.assertFalse(ledger['full_strategy_validated'])
+        self.assertEqual(ledger['entry_rejection_counts'],{'HOLD before quote qualification':3})
+
     def test_unvalidated_backtest_trade_does_not_train_or_create_fake_pnl(self):
         class Clock(datetime):
             @classmethod
             def now(cls,tz=None):return cls(2026,10,22,12,tzinfo=tz)
-        start=datetime(2026,10,16,10)
+        start=datetime(2026,10,20,10)
         data={"timestamp":[int((start+timedelta(minutes=5*i)).timestamp()) for i in range(3)],
               "open":[100]*3,"high":[101]*3,"low":[99]*3,"close":[100]*3,
               "oi":[10000000]*3,"iv":[20]*3,"strike":[22000,22000,22050],"spot":[22000]*3}
         client=MagicMock()
         client.fetch_rolling_option_window.return_value=data
         analyzer=MagicMock()
-        analyzer.evaluate_snapshot.return_value={"recommended_dir":"BUY_CE","state_vec":[0]*10,
+        client.history_events=[]
+        analyzer.evaluate_chain.return_value={"index":"NIFTY","atm_ce_strike":22000,"atm_pe_strike":22000,"recommended_dir":"BUY_CE","state_vec":[0]*10,
             "d_spot_5m":10,"diff_ce_minus_pe_lakhs":100,"spot":22000}
         brain=MagicMock()
         brain.select_action.return_value=("BUY_CE","rule")
@@ -163,14 +277,19 @@ class ReplayTests(unittest.TestCase):
              patch.object(bot,"MarketMicrostructureAnalyzer",return_value=analyzer), \
              patch.object(bot,"SelfLearningBrain",return_value=brain), \
              patch.object(bot,"load_dotenv_file",return_value={"DHAN_CLIENT_ID":"test","DHAN_ACCESS_TOKEN":"test"}), \
-             patch.object(bot,"atomic_write_json") as save:
-            bot.run_real_historical_backtest(2,["NIFTY"],"5",logging.getLogger("test"))
+             patch.object(bot,"apply_nifty_level_entry",return_value={"ready":True,"allowed":True}), \
+             patch.object(bot,"atomic_write_json") as save, tempfile.TemporaryDirectory() as folder:
+            bot.run_real_historical_backtest(2,["NIFTY"],"5",logging.getLogger("test"),output_dir=folder)
         ledger=next(c.args[1] for c in save.call_args_list if str(c.args[0]).endswith("paper_trade_ledger.json"))
         self.assertTrue(all(c.args[0] not in ("paper_trade_ledger.json","live_telemetry.json","bot_brain_state.json","learned_rules.json") for c in save.call_args_list))
         self.assertEqual(ledger["total_trades"],0)
         self.assertEqual(ledger["net_profit_after_charges"],0)
         self.assertEqual(len(ledger["unvalidated_trades"]),1)
         self.assertEqual(ledger["backtest_status"],"INCOMPLETE_OPTION_REPLAY")
+        self.assertGreater(ledger["missing_decision_input_snapshots"]["NIFTY"],0)
+        self.assertEqual(ledger["initial_capital"],40000)
+        self.assertIn('22000.000000',analyzer.evaluate_chain.call_args_list[0].args[1]['oc'])
+        self.assertEqual(client.fetch_rolling_option_window.call_count,8)
         brain.learn_from_trade.assert_not_called()
 
 
@@ -192,16 +311,16 @@ class NiftyTargetTests(unittest.TestCase):
         self.assertIsNone(bot.nifty_target_quantities("NIFTY",1,65))
         self.assertIsNone(bot.nifty_target_quantities("SENSEX",2,20))
 
-    def test_two_targets_average_to_fifteen_points(self):
-        result,fills=self.replay([(100,100,100,100),(100,110,99,109),(111,120,108,119)])
+    def test_two_targets_average_to_seventeen_points(self):
+        result,fills=self.replay([(100,100,100,100),(100,112,99,111),(113,122,110,121)])
         self.assertEqual(result[3],"TARGET_2_20_POINTS")
-        self.assertEqual(result[1],115)
-        self.assertEqual([(f["qty"],f["price"]) for f in fills],[(65,110),(65,120)])
+        self.assertEqual(result[1],117)
+        self.assertEqual([(f["qty"],f["price"]) for f in fills],[(65,112),(65,122)])
 
     def test_both_targets_in_one_bar_and_odd_lots(self):
         result,fills=self.replay([(100,100,100,100),(100,125,99,123)],lots=3)
         self.assertEqual([f["qty"] for f in fills],[65,130])
-        self.assertAlmostEqual(result[1],116.6666666667)
+        self.assertAlmostEqual(result[1],118.6666666667)
 
     def test_stop_before_any_target_on_ambiguous_bar(self):
         result,fills=self.replay([(100,100,100,100),(100,125,90,120)])
@@ -210,15 +329,15 @@ class NiftyTargetTests(unittest.TestCase):
         self.assertEqual(fills[0]["qty"],130)
 
     def test_remaining_quantity_can_stop_after_target_one(self):
-        result,fills=self.replay([(100,100,100,100),(100,111,99,110),(110,112,90,95)])
-        self.assertEqual([f["price"] for f in fills],[110,94])
-        self.assertEqual(result[1],102)
+        result,fills=self.replay([(100,100,100,100),(100,113,99,112),(112,114,90,95)])
+        self.assertEqual([f["price"] for f in fills],[112,94])
+        self.assertEqual(result[1],103)
 
     def test_end_window_closes_only_remaining_quantity(self):
-        result,fills=self.replay([(100,100,100,100),(100,111,99,108),(108,112,102,105)])
+        result,fills=self.replay([(100,100,100,100),(100,113,99,110),(110,114,102,105)])
         self.assertEqual(result[3],"END_OF_WINDOW")
         self.assertEqual(sum(f["qty"] for f in fills),130)
-        self.assertEqual(result[1],107.5)
+        self.assertEqual(result[1],108.5)
 
     def test_single_lot_and_sensex_keep_existing_behavior(self):
         bars=[(100,100,100,100),(100,120,99,119),(119,120,110,111)]

@@ -97,16 +97,77 @@ class LearningFeedbackTests(unittest.TestCase):
             brain.unmute_new_day('2026-10-23')
             self.assertEqual(len(brain.recent_losing_states),1)
 
-    def test_proven_wins_enable_existing_sizing_and_a_loss_reduces_it(self):
+    def test_size_up_requires_ten_trades_six_days_and_loss_reduces_it(self):
         with patch.object(bot.SelfLearningBrain,'_load_json',side_effect=lambda p,d:d),patch.object(bot,'atomic_write_json'):
             brain=bot.SelfLearningBrain(logging.getLogger('test'));brain.rules['pattern']=rule()
             for day in ('2026-10-20','2026-10-21','2026-10-22'):
                 brain.unmute_new_day(day)
-                brain.learn_from_trade(day,'pattern',[1]*10,1,1)
+                brain.learn_from_trade(day,'pattern',[1]*10,1,1.5)
+            self.assertEqual(brain.rules['pattern']['status'],'CANDIDATE')
+            self.assertEqual(brain.compute_lots('NIFTY','pattern',150,40000,0),1)
+            for offset in range(7):
+                day=(datetime(2026,10,23)+timedelta(days=offset)).strftime('%Y-%m-%d')
+                brain.unmute_new_day(day)
+                brain.learn_from_trade(day,'pattern',[1]*10,1,1.5)
+                if offset<6:self.assertEqual(brain.compute_lots('NIFTY','pattern',150,40000,0),1)
             self.assertEqual(brain.rules['pattern']['status'],'ACTIVE')
             self.assertEqual(brain.compute_lots('NIFTY','pattern',150,40000,0),2)
-            brain.learn_from_trade('2026-10-23','pattern',[1]*10,1,-1)
+            self.assertEqual(brain.compute_lots('NIFTY','pattern',150,39999,0),1)
+            self.assertEqual(brain.compute_lots('NIFTY','pattern',150,100000,0),2)
+            brain.learn_from_trade('2026-10-30','pattern',[1]*10,1,-1)
             self.assertEqual(brain.compute_lots('NIFTY','pattern',150,40000,0),1)
+
+    def test_zero_win_pruning_waits_for_seven_trades_and_four_days(self):
+        with patch.object(bot.SelfLearningBrain,'_load_json',side_effect=lambda p,d:d),patch.object(bot,'atomic_write_json'):
+            brain=bot.SelfLearningBrain(logging.getLogger('test'));brain.rules['pattern']=rule()
+            for number,day in enumerate([(datetime(2026,10,20)+timedelta(days=i)).strftime('%Y-%m-%d') for i in range(7)],1):
+                brain.unmute_new_day(day)
+                brain.learn_from_trade(day,'pattern',[0]*10,1,-1)
+                self.assertEqual(brain.rules['pattern']['status'],'PRUNED' if number==7 else 'CANDIDATE')
+
+    def test_four_day_strong_wins_promote_but_do_not_size_up(self):
+        with patch.object(bot.SelfLearningBrain,'_load_json',side_effect=lambda p,d:d),patch.object(bot,'atomic_write_json'):
+            brain=bot.SelfLearningBrain(logging.getLogger('test'));brain.rules['pattern']=rule()
+            for day in ('2026-10-20','2026-10-21','2026-10-22','2026-10-23'):
+                brain.unmute_new_day(day)
+                brain.learn_from_trade(day,'pattern',[0]*10,1,1)
+            self.assertEqual(brain.rules['pattern']['status'],'ACTIVE')
+            self.assertEqual(brain.compute_lots('NIFTY','pattern',150,50000,0),1)
+
+    def test_weight_update_uses_requested_learning_rate_without_decay(self):
+        with patch.object(bot.SelfLearningBrain,'_load_json',side_effect=lambda p,d:d),patch.object(bot,'atomic_write_json'):
+            brain=bot.SelfLearningBrain(logging.getLogger('test'))
+            brain.brain['weights'][1]=[0.2]*10;brain.brain['bias'][1]=0.1
+            brain.learn_from_trade('2026-10-23','unknown',[0]*10,1,1)
+            self.assertEqual(brain.brain['weights'][1],[0.2]*10)
+            self.assertEqual(brain.brain['bias'][1],0.1405)
+            self.assertEqual(brain.brain['replay_buffer'][-1]['reward_basis'],'NET_AFTER_MODELED_CHARGES')
+
+    def test_large_reward_uses_normalized_bounded_rate_and_buffer_is_bounded_once(self):
+        with patch.object(bot.SelfLearningBrain,'_load_json',side_effect=lambda p,d:d),patch.object(bot,'atomic_write_json'):
+            brain=bot.SelfLearningBrain(logging.getLogger('test'))
+            brain.brain['weights'][1]=[0]*10;brain.brain['bias'][1]=0
+            brain.brain['replay_buffer']=[{'day':'old'} for _ in range(120)]
+            brain.learn_from_trade('2026-10-23','unknown',[1]*10,1,2)
+            self.assertEqual(brain.brain['weights'][1],[round(0.045*2/11,6)]*10)
+            self.assertEqual(brain.brain['bias'][1],round(0.045*2/11,6))
+            self.assertEqual(brain.brain['model_role'],'DIAGNOSTIC_ONLY_RULES_CONTROL_TRADING')
+            self.assertEqual(len(brain.brain['replay_buffer']),120)
+            self.assertEqual(sum(t.get('day')=='2026-10-23' for t in brain.brain['replay_buffer']),1)
+
+    def test_size_up_needs_independent_days_and_sixty_percent_affordability(self):
+        with patch.object(bot.SelfLearningBrain,'_load_json',side_effect=lambda p,d:d),patch.object(bot,'atomic_write_json'):
+            brain=bot.SelfLearningBrain(logging.getLogger('test'))
+            brain.rules['pattern']={**rule(),'status':'ACTIVE','trades_count':10,'wins_count':8,
+                                    'expectancy_r':1.5,'avg_win_r':2.5,'avg_loss_r':1.0,'unique_days_traded':['2026-10-20']}
+            self.assertEqual(brain.compute_lots('NIFTY','pattern',150,40000,0),1)
+            brain.rules['pattern']['unique_days_traded']=[str(i) for i in range(6)]
+            self.assertEqual(brain.compute_lots('NIFTY','pattern',150,40000,0),2)
+            brain.rules['pattern']['avg_win_r']=2.19
+            self.assertEqual(brain.compute_lots('NIFTY','pattern',150,40000,0),1)
+            brain.rules['pattern']['avg_win_r']=2.5
+            self.assertEqual(brain.compute_lots('NIFTY','pattern',200,40000,0),1)
+            self.assertEqual(brain.compute_lots('NIFTY','pattern',150,40000,1),1)
 
     def stock_history(self,net=-100,days=5):
         now=datetime(2026,10,23,10,tzinfo=timezone.utc)
@@ -138,5 +199,130 @@ class LearningFeedbackTests(unittest.TestCase):
             t['symbol']='OTHER';t['exit_timestamp']=(now-timedelta(days=1)).isoformat()
         self.assertEqual(rank_candidates([c],trades,now.timestamp())[0]['learning_feedback']['closed_trades'],0)
 
+
+class GeminiReviewTests(unittest.TestCase):
+    def evaluator(self, decision=None):
+        import dhan_gemini_options_bot as gemini
+        session=MagicMock()
+        session.post.return_value.status_code=200
+        result=decision or {'decision':'BUY_CE','strike':22050,'confidence_score':8,
+                           'expected_target_points':20,'reasoning':'Structure and OI align'}
+        session.post.return_value.json.return_value={'candidates':[{'finishReason':'STOP',
+            'content':{'parts':[{'text':json.dumps(result)}]}}]}
+        evaluator=gemini.GeminiMarketEvaluator('unit-test-only',logging.getLogger('test'),session=session)
+        return gemini,evaluator,session
+
+    def context(self):
+        return {'decision':'BUY_CE','strike':22050,'target_points':20}
+
+    def test_matching_approval_and_header_only_credentials(self):
+        gemini,evaluator,session=self.evaluator()
+        with patch.object(gemini.time,'monotonic',return_value=100):
+            result=evaluator.analyze_setup(self.context())
+        self.assertTrue(result['approved'])
+        url=session.post.call_args.args[0]
+        payload=session.post.call_args.kwargs['json']
+        self.assertNotIn('unit-test-only',url)
+        self.assertNotIn('unit-test-only',json.dumps(payload))
+        self.assertFalse(session.post.call_args.kwargs['allow_redirects'])
+        self.assertEqual(payload['generationConfig']['thinkingConfig']['thinkingBudget'],0)
+
+    def test_wrong_contract_direction_score_target_and_nonfinite_are_rejected(self):
+        base={'decision':'BUY_CE','strike':22050,'confidence_score':8,
+              'expected_target_points':20,'reasoning':'Review'}
+        for edit in ({'strike':22100},{'decision':'BUY_PE'},{'decision':'HOLD'},
+                     {'confidence_score':7},{'confidence_score':True},
+                     {'expected_target_points':19.9},{'expected_target_points':float('nan')}):
+            with self.subTest(edit=edit):
+                gemini,evaluator,_=self.evaluator({**base,**edit})
+                with patch.object(gemini.time,'monotonic',return_value=100):
+                    self.assertFalse(evaluator.analyze_setup(self.context())['approved'])
+
+    def test_api_error_and_malformed_output_hold_without_raw_exception(self):
+        import requests
+        gemini,evaluator,session=self.evaluator()
+        session.post.side_effect=requests.Timeout('unit-test-only must not be exposed')
+        with patch.object(gemini.time,'monotonic',return_value=100):
+            result=evaluator.analyze_setup(self.context())
+        self.assertEqual(result['decision'],'HOLD')
+        self.assertNotIn('unit-test-only',str(result))
+        session.post.side_effect=None
+        session.post.return_value.json.return_value={'candidates':[]}
+        with patch.object(gemini.time,'monotonic',return_value=140):
+            self.assertFalse(evaluator.analyze_setup(self.context())['approved'])
+
+    def test_review_interval_and_late_response_never_reuse_approval(self):
+        gemini,evaluator,session=self.evaluator()
+        with patch.object(gemini.time,'monotonic',return_value=100):
+            self.assertTrue(evaluator.analyze_setup(self.context())['approved'])
+            self.assertFalse(evaluator.analyze_setup(self.context())['approved'])
+        self.assertEqual(session.post.call_count,1)
+        with patch.object(gemini.time,'monotonic',side_effect=[140,149]):
+            self.assertFalse(evaluator.analyze_setup(self.context())['approved'])
+
+    def test_base_hold_does_not_call_gemini(self):
+        import dhan_gemini_options_bot as gemini
+        evaluator=MagicMock()
+        result=gemini.select_with_gemini(MagicMock(),{},0,None,evaluator,MagicMock(return_value=('HOLD',None)))
+        self.assertEqual(result,('HOLD',None))
+        evaluator.analyze_setup.assert_not_called()
+
+    def test_cutoff_crossed_during_review_blocks_entry(self):
+        import dhan_gemini_options_bot as gemini
+        before=datetime(2026,10,23,14,29,59,tzinfo=bot.IST)
+        after=datetime(2026,10,23,14,30,1,tzinfo=bot.IST)
+        analysis={'snapshot_received_epoch':before.timestamp()}
+        evaluator=MagicMock()
+        evaluator.analyze_setup.return_value={'approved':True}
+        with patch.object(gemini.engine,'datetime') as clock,patch.object(gemini,'candidate_context',return_value=self.context()):
+            clock.now.side_effect=[before,after]
+            result=gemini.select_with_gemini(MagicMock(),analysis,0,None,evaluator,MagicMock(return_value=('BUY_CE','rule')))
+        self.assertEqual(result[0],'HOLD')
+        self.assertIn('cutoff',analysis['entry_decision']['reason'])
+
+    def test_fresh_approved_candidate_keeps_original_action_and_rule(self):
+        import dhan_gemini_options_bot as gemini
+        now=datetime(2026,10,23,10,tzinfo=bot.IST)
+        analysis={'index':'NIFTY','atm_ce_ltp':100,'atm_ce_strike':22050,
+                  'snapshot_received_epoch':now.timestamp(),'market_structure':{'allowed':True}}
+        review={'approved':True,'decision':'BUY_CE','strike':22050,'confidence_score':8}
+        evaluator=MagicMock();evaluator.analyze_setup.return_value=review
+        with patch.object(bot,'datetime') as clock:
+            clock.now.return_value=now
+            result=gemini.select_with_gemini(MagicMock(),analysis,0,None,evaluator,MagicMock(return_value=('BUY_CE','original-rule')))
+        self.assertEqual(result,('BUY_CE','original-rule'))
+        self.assertEqual(analysis['market_structure']['gemini_review'],review)
+
+    def test_stale_snapshot_cannot_request_gemini_approval(self):
+        import dhan_gemini_options_bot as gemini
+        now=datetime(2026,10,23,10,tzinfo=bot.IST)
+        analysis={'snapshot_received_epoch':now.timestamp()-9}
+        evaluator=MagicMock()
+        with patch.object(bot,'datetime') as clock:
+            clock.now.return_value=now
+            result=gemini.select_with_gemini(MagicMock(),analysis,0,None,evaluator,MagicMock(return_value=('BUY_CE','rule')))
+        self.assertEqual(result[0],'HOLD')
+        evaluator.analyze_setup.assert_not_called()
+
+    def test_launcher_defaults_to_paper_and_restores_engine_after_error(self):
+        import dhan_gemini_options_bot as gemini
+        original,cutoff=bot.SelfLearningBrain.select_action,bot.LAST_ENTRY_TIME
+        env={'DHAN_CLIENT_ID':'test','DHAN_ACCESS_TOKEN':'test','GEMINI_API_KEY':'unit-test-only'}
+        with patch.object(bot,'load_dotenv_file',return_value=env),patch.object(bot,'setup_logger'),\
+             patch.object(gemini,'GeminiMarketEvaluator') as factory,\
+             patch.object(bot,'run_intraday_market_session',side_effect=RuntimeError('stop')) as run:
+            with self.assertRaises(RuntimeError):gemini.main([])
+        self.assertFalse(run.call_args.args[0])
+        self.assertIs(bot.SelfLearningBrain.select_action,original)
+        self.assertEqual(bot.LAST_ENTRY_TIME,cutoff)
+        factory.return_value.close.assert_called_once()
+
+    def test_missing_key_exits_before_any_broker_session(self):
+        import dhan_gemini_options_bot as gemini
+        with patch.dict('os.environ',{},clear=True),patch.object(bot,'load_dotenv_file',return_value={}),\
+             patch.object(bot,'run_intraday_market_session') as run,patch('sys.stderr'):
+            with self.assertRaises(SystemExit) as error:gemini.main([])
+        self.assertEqual(error.exception.code,2)
+        run.assert_not_called()
 
 if __name__=='__main__':unittest.main()

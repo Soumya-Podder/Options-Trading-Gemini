@@ -8,6 +8,7 @@ only five minutes later. A signal is evidence of alignment, not a price guarante
 """
 
 from datetime import datetime, time, timezone, timedelta
+from statistics import median
 from math import isfinite
 from typing import Dict, List, Optional
 from market_regime import opening_trend
@@ -74,6 +75,44 @@ def _closed_bars(candles: dict, as_of_epoch: float) -> Optional[List[dict]]:
         return None
 
 
+def recent_entry_momentum(candles, signal, spot, now_epoch):
+    """Reject a substantial post-confirmation retreat, using closed minutes only."""
+    def reject(reason):
+        return {'allowed':False,'reason':reason}
+    try:
+        direction=1 if signal['opt_type']=='CE' else -1
+        atr=float(signal['atr_5m'])
+        confirmation=float(signal['signal_timestamp'])+300
+        rows=[]
+        fields=('timestamp','open','high','low','close','volume')
+        if not atr>0 or not isfinite(atr) or not isfinite(float(spot)) or spot<=0:
+            return reject('Invalid fresh-momentum inputs')
+        if any(len(candles[k])!=len(candles['timestamp']) for k in fields):
+            return reject('Incomplete one-minute momentum data')
+        for i,stamp in enumerate(candles['timestamp']):
+            stamp=float(stamp)
+            if stamp<confirmation or stamp+60>now_epoch:continue
+            row={k:float(candles[k][i]) for k in fields}
+            if (not all(isfinite(v) for v in row.values()) or stamp%60
+                    or not 0<row['low']<=min(row['open'],row['close'])<=max(row['open'],row['close'])<=row['high']
+                    or row['volume']<0):return reject('Invalid one-minute momentum data')
+            rows.append(row)
+        rows.sort(key=lambda r:r['timestamp'])
+        recent=rows[-3:]
+        if (len(recent)<2 or now_epoch-(recent[-1]['timestamp']+60)>90
+                or any(b['timestamp']-a['timestamp']!=60 for a,b in zip(recent,recent[1:]))):
+            return reject('Need fresh consecutive closed one-minute candles')
+        extreme=max(r['high'] for r in recent) if direction==1 else min(r['low'] for r in recent)
+        retreat=direction*(extreme-spot)
+        weakening=direction*(recent[-1]['close']-recent[-2]['close'])<0
+        allowed=not (weakening and retreat>0.5*atr)
+        return {'allowed':allowed,'reason':'Fresh momentum held' if allowed else 'Recent breakout fading after confirmation',
+                'retreat_atr':retreat/atr,'last_closed_minute':recent[-1]['timestamp'],
+                'weakening_close':weakening}
+    except (KeyError,TypeError,ValueError,OverflowError):
+        return reject('One-minute momentum data unavailable')
+
+
 def _completed_15m_bars(bars: List[dict]) -> List[dict]:
     groups: Dict[int, List[dict]] = {}
     for bar in bars:
@@ -85,13 +124,61 @@ def _completed_15m_bars(bars: List[dict]) -> List[dict]:
     for timestamp, group in sorted(groups.items()):
         # Aggregate observed bars only after the entire bucket has closed.
         # Missing observations are not synthesized or treated as zero-volume bars.
-        if not group or timestamp + 900 > bars[-1]["timestamp"] + BAR_SECONDS:
+        if (len(group)!=3 or [b['timestamp'] for b in group]!=[timestamp,timestamp+300,timestamp+600]
+                or timestamp + 900 > bars[-1]["timestamp"] + BAR_SECONDS):
             continue
         result.append({"timestamp": timestamp, "open": group[0]["open"],
                        "high": max(bar["high"] for bar in group),
                        "low": min(bar["low"] for bar in group),
                        "close": group[-1]["close"]})
     return result
+
+
+def scanx_stock_membership(candles, quote, as_of_epoch, min_day_change_pct=2.0, ema_period=10,
+                          require_daily_volume=True):
+    """ScanX-style membership, separate from trade qualification.
+
+    Unqualified Volume/Previous Volume are interpreted as current cumulative
+    session volume versus previous full-session volume. No partial prior day
+    or incomplete 15-minute bucket can silently become a reference.
+    """
+    result={'allowed':False,'reason':'Scanner reference unavailable','profile':'SCANX_STYLE_DAILY_VOLUME_PREVIOUS_15M_EMA'}
+    if not require_daily_volume:result['profile']='SCREENSHOT_REFERENCE_CLOSED_BREAKOUT'
+    try:
+        bars=_closed_bars(candles,as_of_epoch)
+        if not bars:return result
+        today=datetime.fromtimestamp(as_of_epoch,IST).date()
+        previous=[b for b in bars if b['date']<today]
+        if not previous:return result
+        prior=[b for b in previous if b['date']==previous[-1]['date']]
+        first=datetime.combine(prior[0]['date'],SESSION_OPEN,IST).timestamp()
+        daily=quote.get('previous_session_reference')
+        if daily:
+            if daily['date']!=prior[0]['date'].isoformat():return result
+            prior_volume=float(daily['volume'])
+        elif len(prior)!=75 or any(b['timestamp']!=first+i*300 for i,b in enumerate(prior)):
+            result['reason']='Previous session volume coverage incomplete';return result
+        else:prior_volume=sum(b['volume'] for b in prior)
+        completed=_completed_15m_bars(bars)
+        if len(completed)<ema_period+2:return result
+        stamp=float(quote['received_epoch']);age=as_of_epoch-stamp
+        if not 0<=age<=30:
+            result['reason']='Scanner quote stale';return result
+        price=float(quote['last_price']);close=float(quote['ohlc']['close'])
+        volume=float(quote['volume'])
+        if not all(isfinite(v) and v>0 for v in (price,close,volume,prior_volume)):return result
+        ema=_ema([b['close'] for b in completed],ema_period)[-1]
+        change=(price/close-1)*100
+        direction='CE' if change>=min_day_change_pct and price>ema else 'PE' if change<=-min_day_change_pct and price<ema else None
+        result.update(price=price,previous_close=close,day_change_pct=change,
+                      session_volume=volume,previous_session_volume=prior_volume,
+                      previous_ema_15m=ema,ema_reference_epoch=completed[-1]['timestamp'],
+                      previous_session_date=prior[0]['date'].isoformat(),quote_age_seconds=age)
+        if require_daily_volume and volume<=prior_volume:result['reason']='Session volume not above previous full-session volume'
+        elif direction is None:result['reason']='Day change and previous 15-minute EMA do not match a scanner side'
+        else:result.update(allowed=True,opt_type=direction,reason='Scanner filters passed')
+        return result
+    except (KeyError,TypeError,ValueError,OverflowError,IndexError):return result
 
 
 def evaluate_stock_setup(
@@ -102,6 +189,9 @@ def evaluate_stock_setup(
     enable_opening_trend: bool = False,
     reasons=None,
     confirm_window_sec: int = 600,
+    previous_close=None,
+    require_breakout=False,
+    previous_session=None,
 ) -> Optional[dict]:
     """Return a selective CE/PE setup, or None when any confirmation is absent.
 
@@ -143,7 +233,9 @@ def evaluate_stock_setup(
     if latest["timestamp"] != previous["timestamp"] + BAR_SECONDS:
         return reject('Gap in the latest confirmation candles')
 
-    day_change_pct = (latest["close"] / previous_bars[-1]["close"] - 1.0) * 100.0
+    reference_close=previous_bars[-1]['close'] if previous_close is None else float(previous_close)
+    if not isfinite(reference_close) or reference_close<=0:return reject('Invalid previous close')
+    day_change_pct = (latest["close"] / reference_close - 1.0) * 100.0
     if abs(day_change_pct) < min_day_change_pct:
         return reject('Closed day move below scanner threshold')
     bars_15m = _completed_15m_bars(bars)
@@ -158,27 +250,67 @@ def evaluate_stock_setup(
     regime=opening_trend([{**b,'ts':b['timestamp']} for b in bars]) if enable_opening_trend else None
     if atr_5m <= 0 or atr_15m <= 0:
         return reject('Unavailable ATR')
-    if abs(latest["close"] - ema_value) > 1.25 * atr_15m and not regime:
-        return reject('EMA distance exceeds 1.25 ATR without a confirmed opening-trend break')
     total_volume = sum(bar["volume"] for bar in today_bars)
     if total_volume <= 0:
         return reject('No current-session volume for VWAP')
     vwap = sum(((bar["high"] + bar["low"] + bar["close"]) / 3.0) * bar["volume"]
                for bar in today_bars) / total_volume
     average_volume = sum(bar["volume"] for bar in bars[-11:-1]) / 10.0
-    if average_volume <= 0 or latest["volume"] <= 0 or latest["volume"] < 1.2 * average_volume:
+    if average_volume <= 0 or latest["volume"] <= 0:
         return reject('Confirmation volume below 1.2 times recent average')
     candle_range = latest["high"] - latest["low"]
     if candle_range <= 0 or abs(latest["close"] - latest["open"]) < 0.45 * candle_range:
         return reject('Weak confirmation candle body')
 
+    body_fraction=abs(latest['close']-latest['open'])/candle_range
+    buy_close=(latest['close']-latest['low'])/candle_range
+    sell_close=(latest['high']-latest['close'])/candle_range
+    volume_rising=latest['volume']>previous['volume']
+    # A previous spike is not an ever-increasing volume hurdle. A lower-volume
+    # continuation needs a fresh price break, strong close and EMA slope instead.
+    buy_continuation=(latest['close']>previous['high'] and body_fraction>=0.60
+                      and buy_close>=0.75 and ema_value>previous_ema)
+    sell_continuation=(latest['close']<previous['low'] and body_fraction>=0.60
+                       and sell_close>=0.75 and ema_value<previous_ema)
+    regular_volume=latest['volume']>=1.2*average_volume
+    adjusted_volume=False
+    recent=today_bars[-4:-1]
+    baseline=median([b['volume'] for b in recent]) if len(recent)==3 else 0.0
+    opening_peak=max((b['volume'] for b in opening_range),default=0.0)
+    adjusted_required=0.75*baseline
+    # An opening burst can dominate the ten-bar mean long after its price
+    # discovery. Only a fresh strong continuation with rising participation
+    # may use a robust post-opening reference; ordinary entries keep 1.2x.
+    if not regular_volume:
+        contiguous=(len(recent)==3 and recent[0]['timestamp']>=session_open+900
+                    and all(b['timestamp']==latest['timestamp']-(3-i)*BAR_SECONDS
+                            for i,b in enumerate(recent)))
+        adjusted_volume=(len(opening_range)==3 and contiguous and baseline>0
+                         and opening_peak>=2.0*baseline and average_volume>1.25*baseline
+                         and latest['volume']>=0.75*baseline and volume_rising
+                         and ((day_change_pct>=min_day_change_pct and buy_continuation)
+                              or (day_change_pct<=-min_day_change_pct and sell_continuation)))
+        if not adjusted_volume and require_breakout:
+            # The first post-opening breakout can follow two baseline bars.
+            # Require an actual volume expansion, not the later 0.75x allowance.
+            post=[b for b in today_bars[:-1] if b['timestamp']>=session_open+900][-3:]
+            if len(post)>=2 and all(b['timestamp']==latest['timestamp']-(len(post)-i)*BAR_SECONDS
+                                    for i,b in enumerate(post)):
+                early_baseline=median([b['volume'] for b in post])
+                if (early_baseline>0 and opening_peak>=2*early_baseline
+                        and average_volume>1.25*early_baseline
+                        and latest['volume']>=1.2*early_baseline and volume_rising
+                        and (buy_continuation if day_change_pct>0 else sell_continuation)):
+                    adjusted_volume=True;baseline=early_baseline;adjusted_required=1.2*baseline
+        if not adjusted_volume:
+            return reject('Confirmation volume below 1.2 times recent average')
     bullish = (day_change_pct >= min_day_change_pct
-               and latest["volume"] > previous["volume"]
+               and (volume_rising or buy_continuation)
                and latest["close"] > previous_ema
                and latest["close"] > vwap
                and latest["close"] > max(previous["close"], latest["open"]))
     bearish = (day_change_pct <= -min_day_change_pct
-               and latest["volume"] > previous["volume"]
+               and (volume_rising or sell_continuation)
                and latest["close"] < previous_ema
                and latest["close"] < vwap
                and latest["close"] < min(previous["close"], latest["open"]))
@@ -193,13 +325,85 @@ def evaluate_stock_setup(
     body_ratio = abs(latest["close"] - latest["open"]) / candle_range
     close_strength = ((latest["close"] - latest["low"]) if bullish
                       else (latest["high"] - latest["close"])) / candle_range
+    breakout_confirmation=None
+    if require_breakout:
+        if (bullish and ema_value<=previous_ema) or (bearish and ema_value>=previous_ema):
+            return reject('Breakout disagrees with the completed EMA slope')
+        if (len(opening_range)!=3 or latest['timestamp']<session_open+900
+                or any(b['timestamp']!=session_open+i*300 for i,b in enumerate(today_bars))):
+            return reject('Need complete opening range and session levels for breakout')
+        prior=[b for b in previous_bars if b['date']==previous_bars[-1]['date']]
+        prior_open=int(datetime.combine(prior[0]['date'],SESSION_OPEN,IST).timestamp())
+        daily=previous_session or {}
+        if daily.get('date')==prior[0]['date'].isoformat() and daily.get('high') and daily.get('low'):
+            try:prior_high,prior_low=float(daily['high']),float(daily['low'])
+            except (TypeError,ValueError,OverflowError):return reject('Invalid previous-day breakout levels')
+        elif len(prior)==75 and all(b['timestamp']==prior_open+i*300 for i,b in enumerate(prior)):
+            prior_high=max(b['high'] for b in prior);prior_low=min(b['low'] for b in prior)
+        else:return reject('Previous-day high/low coverage unavailable for breakout')
+        if not all(isfinite(v) and v>0 for v in (prior_high,prior_low)) or prior_low>prior_high:
+            return reject('Invalid previous-day breakout levels')
+        trigger=(max(prior_high,orb_high,max(b['high'] for b in today_bars[:-1])) if bullish else
+                 min(prior_low,orb_low,min(b['low'] for b in today_bars[:-1])))
+        sign=1 if bullish else -1
+        buffer=max(0.05,0.05*atr_5m)
+        if sign*(latest['close']-trigger)<=buffer:
+            return reject('No fresh closed breakout beyond previous-day and session levels')
+        if body_ratio<0.60 or close_strength<0.75:
+            return reject('Breakout confirmation body or closing strength insufficient')
+        if abs(latest['close']-ema_value)>3*atr_15m or candle_range>2*atr_5m:
+            return reject('Breakout candle is overextended')
+        breakout_confirmation={'trigger_level':trigger,'previous_day_high':prior_high,'previous_day_low':prior_low,
+            'opening_high':orb_high,'opening_low':orb_low,'buffer':buffer,
+            'body_fraction':body_ratio,'close_strength':close_strength,'closed_candle':True,
+            'relative_volume':relative_volume,'profile':'SCREENSHOT_REFERENCE_CLOSED_BREAKOUT'}
+    # A scanner threshold can be crossed one candle after the opening-range
+    # break. Admit that first confirmation, without exempting a whole trend
+    # from the EMA-distance guard. All option quote/risk checks still follow.
+    sign = 1 if bullish else -1
+    level = orb_high if bullish else orb_low
+    local_break=False
+    if len(today_bars)>=7:
+        base=today_bars[-4:-1]
+        local_level=max(b['high'] for b in base) if bullish else min(b['low'] for b in base)
+        if (max(b['high'] for b in base)-min(b['low'] for b in base)<=1.5*atr_5m
+                and sign*(latest['close']-local_level)>0):
+            local_break=True;level=local_level
+    previous_day_change = (previous['close']/reference_close-1)*100
+    threshold_cross = sign*previous_day_change < min_day_change_pct
+    fresh_break = sign*(previous['close']-level) <= 0
+    continuation = (
+        len(opening_range) == 3 and latest['timestamp'] >= session_open+900
+        and all(b['timestamp'] == session_open+300*i for i,b in enumerate(today_bars))
+        and (threshold_cross or fresh_break)
+        and sign*(ema_value-previous_ema) > 0
+        and 0 < sign*(latest['close']-level) <= 2.25*atr_5m
+        and abs(latest['close']-ema_value) <= 3.0*atr_15m
+        and candle_range <= 2.0*atr_5m
+        and relative_volume >= (1.2 if not volume_rising else 1.5)
+        and body_ratio >= 0.60 and close_strength >= 0.75)
+    if abs(latest['close']-ema_value) > 1.25*atr_15m and not regime and not continuation and not breakout_confirmation:
+        return reject('EMA distance exceeds 1.25 ATR without a confirmed opening-trend break or bounded breakout continuation')
     # This is a ranking heuristic among already-qualified setups, not a win
     # probability. Capping the volume term prevents one spike dominating rank.
-    signal_quality = (40.0 * min(relative_volume / 3.0, 1.0)
+    quality_volume_ratio=latest['volume']/baseline if require_breakout and adjusted_volume and baseline>0 else relative_volume
+    signal_quality = (40.0 * min(quality_volume_ratio / 3.0, 1.0)
                       + 30.0 * body_ratio + 20.0 * close_strength + 10.0 * orb_bonus)
     return {
+        'breakout_confirmation':breakout_confirmation,
         "opt_type": "CE" if bullish else "PE",
-        "scanner": (regime['setup']+('_CE' if bullish else '_PE')) if regime else ("BULLISH_MOMENTUM_CONFIRMATION" if bullish else "BEARISH_MOMENTUM_CONFIRMATION"),
+        "scanner": ('CONFIRMED_BREAKOUT_CE' if bullish else 'CONFIRMED_BREAKOUT_PE') if breakout_confirmation else (("BREAKOUT_CONTINUATION_CE" if bullish else "BREAKOUT_CONTINUATION_PE") if continuation else ((regime['setup']+('_CE' if bullish else '_PE')) if regime else ("BULLISH_MOMENTUM_CONFIRMATION" if bullish else "BEARISH_MOMENTUM_CONFIRMATION"))),
+        "breakout_continuation": {"trigger_level":level,"threshold_cross":threshold_cross,
+                                  "local_consolidation_break":local_break,
+                                  "distance_atr":sign*(latest['close']-level)/atr_5m} if continuation else None,
+        "cash_price_pressure":"BULLISH_CONFIRMED" if bullish else "BEARISH_CONFIRMED",
+        "volume_confirmation":("OPENING_SPIKE_ADJUSTED_STRONG_CONTINUATION" if adjusted_volume else
+                               "RISING_CANDLE_VOLUME" if volume_rising else "ABOVE_AVERAGE_STRONG_PRICE_CONTINUATION"),
+        "volume_context":{"confirmation_volume":latest['volume'],"regular_average":average_volume,
+                          "regular_ratio":latest['volume']/average_volume,
+                          "post_opening_median":baseline if adjusted_volume else None,
+                          "required_volume":adjusted_required if adjusted_volume else 1.2*average_volume,
+                          "opening_peak":opening_peak,"opening_adjustment_used":adjusted_volume},
         "market_regime":regime,
         "spot_ltp": latest["close"],
         "day_change_pct": day_change_pct,
@@ -218,4 +422,5 @@ def evaluate_stock_setup(
         "relative_volume": relative_volume,
         "body_ratio": body_ratio,
         "signal_quality": round(signal_quality, 4),
+        'quality_volume_ratio':quality_volume_ratio,
     }

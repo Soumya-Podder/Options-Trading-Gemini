@@ -11,6 +11,8 @@ import json
 import math
 import os
 import tempfile
+from contextlib import contextmanager
+from time import time as request_clock, sleep as request_sleep
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 from pathlib import Path
@@ -18,6 +20,77 @@ from typing import Any, Callable, Dict, Iterable, Optional
 
 
 TICK = Decimal("0.05")
+
+
+def single_bot_session(role):
+    """Windows process-lifetime mutex; duplicates cannot own the same ledger."""
+    from functools import wraps
+    def decorate(function):
+        @wraps(function)
+        def guarded(*args,**kwargs):
+            if os.name != "nt":
+                return function(*args,**kwargs)
+            import ctypes
+            import hashlib
+            identity=hashlib.sha256(str(Path(__file__).resolve().parent).lower().encode()).hexdigest()[:20]
+            kernel=ctypes.WinDLL("kernel32",use_last_error=True)
+            kernel.CreateMutexW.argtypes=[ctypes.c_void_p,ctypes.c_int,ctypes.c_wchar_p]
+            kernel.CreateMutexW.restype=ctypes.c_void_p
+            kernel.CloseHandle.argtypes=[ctypes.c_void_p]
+            kernel.ReleaseMutex.argtypes=[ctypes.c_void_p]
+            handle=kernel.CreateMutexW(None,True,"Local\\DhanBot_"+identity+"_"+role)
+            error=ctypes.get_last_error()
+            if not handle:raise OSError(error,"Cannot acquire bot session mutex")
+            if error==183:
+                kernel.CloseHandle(handle)
+                raise RuntimeError("An existing "+role+" session owns this project; duplicate startup refused")
+            try:return function(*args,**kwargs)
+            finally:
+                kernel.ReleaseMutex(handle)
+                kernel.CloseHandle(handle)
+        return guarded
+    return decorate
+
+
+@contextmanager
+def option_chain_request_slot(minimum_gap=3.2, lock_path=None):
+    """Serialize both bots' option-chain requests, including their HTTP wait."""
+    path=Path(lock_path) if lock_path else Path(__file__).resolve().parent/'dhan_hist_cache'/'oc_global_lock.txt'
+    path.parent.mkdir(parents=True,exist_ok=True)
+    descriptor=os.open(str(path),os.O_CREAT|os.O_RDWR,0o600)
+    with os.fdopen(descriptor,'r+b',buffering=0) as stream:
+        if os.name=='nt':
+            import msvcrt
+            while True:
+                try:
+                    stream.seek(0);msvcrt.locking(stream.fileno(),msvcrt.LK_NBLCK,1)
+                    break
+                except OSError as error:
+                    if error.errno not in (11,13,36):raise
+                    request_sleep(0.05)
+        else:
+            import fcntl
+            fcntl.flock(stream.fileno(),fcntl.LOCK_EX)
+        try:
+            stream.seek(0)
+            try:last=float(stream.read(64).decode('ascii').strip() or '0')
+            except (ValueError,UnicodeError):last=request_clock()
+            now=request_clock()
+            if not math.isfinite(last):last=now
+            wait=max(0.0,minimum_gap-(now-min(last,now)))
+            if wait:request_sleep(wait)
+            def stamp():
+                stream.seek(0)
+                stream.write(f'{request_clock():.6f}'.ljust(64).encode('ascii'))
+                stream.truncate(64)
+            stamp()
+            try:yield
+            finally:stamp()
+        finally:
+            if os.name=='nt':
+                stream.seek(0);msvcrt.locking(stream.fileno(),msvcrt.LK_UNLCK,1)
+            else:
+                fcntl.flock(stream.fileno(),fcntl.LOCK_UN)
 
 
 def _decimal(value: Any) -> Decimal:
@@ -35,6 +108,7 @@ def _percentage_plan(
     stop_pct: float = 0.5,
     min_net_rr: float = 3.0,
     slippage_pct: float = 0.1,
+    cash_loss_limit=None,
 ) -> Optional[Dict[str, float]]:
     """Return a tick-rounded plan only if estimated net reward/risk qualifies.
 
@@ -81,6 +155,8 @@ def _percentage_plan(
         stop_costs = stop_fees + stop * slippage_percent / 100 * quantity
         net_reward = reward_distance * quantity - target_costs
         net_risk = risk_distance * quantity + stop_costs
+        if cash_loss_limit is not None:
+            net_risk = min(net_risk, _decimal(cash_loss_limit))
         if net_reward <= 0 or net_risk <= 0 or net_reward / net_risk < required_rr:
             return None
 
@@ -106,7 +182,8 @@ def _percentage_plan(
 def premium_plan(entry, qty, charge_fn, target_pct=3.0, stop_pct=0.5,
                  min_net_rr=3.0, slippage_pct=0.1, rupee_target=0,
                  max_lots=1, rupee_max_risk=float("inf"), extend_rupee_target=False,
-                 max_target_price=None):
+                 max_target_price=None, risk_per_lot=False, min_lots=1,
+                 cash_loss_limit=None):
     """Choose the smallest lot count reaching the net rupee target within limits.
 
     qty is the exchange lot size. Rupee target prices include estimated fees
@@ -116,7 +193,12 @@ def premium_plan(entry, qty, charge_fn, target_pct=3.0, stop_pct=0.5,
             or not math.isfinite(rupee_target) or rupee_target < 0
             or math.isnan(rupee_max_risk) or rupee_max_risk <= 0):
         return None
-    if not isinstance(extend_rupee_target,bool):return None
+    if cash_loss_limit is not None:
+        try:
+            if isinstance(cash_loss_limit,bool) or not math.isfinite(float(cash_loss_limit)) or float(cash_loss_limit)<=0:return None
+        except (TypeError,ValueError,OverflowError):return None
+    if not isinstance(extend_rupee_target,bool) or not isinstance(risk_per_lot,bool):return None
+    if isinstance(min_lots,bool) or not isinstance(min_lots,int) or not 1<=min_lots<=max_lots:return None
     if max_target_price is not None:
         try:
             if not math.isfinite(float(max_target_price)) or float(max_target_price)<=float(entry):return None
@@ -127,7 +209,8 @@ def premium_plan(entry, qty, charge_fn, target_pct=3.0, stop_pct=0.5,
             if isinstance(target_pct,bool) or not math.isfinite(float(target_pct)) or not 0<float(target_pct)<=100:return None
             target_pct=float(target_pct)
         except (ValueError,TypeError,OverflowError):return None
-    for lots in range(1, max_lots + 1):
+    for lots in range(min_lots, max_lots + 1):
+        risk_budget = rupee_max_risk * lots if risk_per_lot else rupee_max_risk
         if isinstance(qty, bool):
             return None
         units = qty * lots
@@ -137,8 +220,8 @@ def premium_plan(entry, qty, charge_fn, target_pct=3.0, stop_pct=0.5,
         # underlying move feasibility are checked during qualification.
         ceiling_pct=max(target_pct,100.) if extend_rupee_target and rupee_target else target_pct
         plan = _percentage_plan(entry, units, charge_fn, ceiling_pct, stop_pct,
-                                min_net_rr, slippage_pct)
-        if not plan or plan["expected_net_reward"] < rupee_target or plan["expected_net_risk"] > rupee_max_risk:
+                                min_net_rr, slippage_pct, cash_loss_limit)
+        if not plan or plan["expected_net_reward"] < rupee_target or plan["expected_net_risk"] > risk_budget:
             continue
         target_price = plan["hard_target_price"]
         if extend_rupee_target and max_target_price is not None:
@@ -146,7 +229,9 @@ def premium_plan(entry, qty, charge_fn, target_pct=3.0, stop_pct=0.5,
         if rupee_target:
             stop_fill = math.floor(plan["initial_sl"]*(1-slippage_pct/100)*20 + 1e-9)/20
             risk = (entry-stop_fill)*units + charge_fn(entry,stop_fill,units)
-            if risk <= 0 or risk > rupee_max_risk:
+            plan['planned_premium_stop_risk'] = risk
+            if cash_loss_limit is not None:risk=min(risk,float(cash_loss_limit))
+            if risk <= 0 or risk > risk_budget:
                 continue
             plan["expected_net_risk"] = risk
             required_reward = max(rupee_target, min_net_rr * risk)
@@ -178,6 +263,10 @@ def premium_plan(entry, qty, charge_fn, target_pct=3.0, stop_pct=0.5,
                             target_estimated_costs=charge_fn(entry,fill,units)+(target_price-fill)*units)
                 plan['estimated_costs']=max(plan['target_estimated_costs'],plan['stop_estimated_costs'])
         plan.update(lots=lots, qty=units, rupee_target_price=target_price)
+        if risk_per_lot:
+            plan.update(risk_limit_per_lot=rupee_max_risk,
+                        total_risk_limit=risk_budget,
+                        expected_net_risk_per_lot=plan['expected_net_risk']/lots)
         return plan
     return None
 
@@ -225,6 +314,25 @@ def stock_reentry_reason(symbol, trades, as_of, signal_timestamp=None):
     return None
 
 
+def selection_analysis(candidate):
+    """Auditable bounded priority heuristic, never a win probability."""
+    quality=signal_quality(candidate)
+    learned=_finite_score(candidate.get('learning_feedback',{}).get('quality_adjustment',0))
+    execution=0.0
+    fraction=candidate.get('spread_fraction_of_initial_risk')
+    age=candidate.get('confirmation_age_seconds')
+    try:
+        if fraction is not None and math.isfinite(float(fraction)) and 0<=float(fraction)<=.4:
+            execution+=5*(1-float(fraction)/.4)
+        if age is not None and math.isfinite(float(age)) and 0<=float(age)<=600:
+            execution+=3*(1-float(age)/600)
+    except (TypeError,ValueError,OverflowError):pass
+    return {'score':round(quality+learned+execution,4),'breakout_quality':quality,
+            'learning_adjustment':learned,'execution_bonus':round(execution,4),
+            'planned_net_rr':_finite_score(candidate.get('expected_net_rr',0)),
+            'basis':'CONFIRMED_SETUP_VOLUME_CLOSE_EXECUTION_AND_CLOSED_NET_FEEDBACK'}
+
+
 def rank_candidates(candidates: Iterable[Dict[str, Any]], closed_trades=(), as_of=None) -> list[Dict[str, Any]]:
     """Rank quality with bounded feedback from this symbol/setup's closed net outcomes.
 
@@ -256,10 +364,11 @@ def rank_candidates(candidates: Iterable[Dict[str, Any]], closed_trades=(), as_o
             candidate['learning_feedback']={'closed_trades':count,'net_expectancy_r':round(expectancy,4),
                 'quality_adjustment':round(adjustment,4),'paused':paused,'basis':'CLOSED_NET_PNL_SAME_SYMBOL_SCANNER_SIDE'}
         candidates=[c for c in candidates if not c['learning_feedback']['paused']]
+        for candidate in candidates:candidate['selection_analysis']=selection_analysis(candidate)
     return sorted(
         candidates,
         key=lambda candidate: (
-            -(signal_quality(candidate)+candidate.get('learning_feedback',{}).get('quality_adjustment',0)),
+            -selection_analysis(candidate)['score'],
             -_finite_score(candidate.get("expected_net_rr", 0.0)),
             str(candidate.get("symbol", "")).upper(),
         ),
@@ -276,8 +385,8 @@ class DailyTradeGate:
     """
 
     def __init__(self, path: os.PathLike[str] | str, max_entries: int = 1):
-        if not 1 <= max_entries <= 2:
-            raise ValueError("Daily entries must be 1 or 2")
+        if not 1 <= max_entries <= 4:
+            raise ValueError("Daily entries must be between 1 and 4")
         self.path = Path(path)
         self.max_entries = max_entries
 

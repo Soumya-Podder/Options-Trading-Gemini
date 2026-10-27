@@ -75,3 +75,223 @@ Official API references:
 - https://dhanhq.co/docs/v2/historical-data/
 - https://dhanhq.co/docs/v2/option-chain/
 - https://dhanhq.co/docs/v2/annexure/
+# Premium and theta gates applied October 25, 2026
+
+Nifty and Sensex now apply the requested buyer gates before learned-rule lookup.
+Premium floors use the configured base (45/125 rupees), multiplied by 1.45 for
+DTE below 0.6, 1.20 below 1.5, and 1.08 below 3. Fractional DTE is measured to
+15:30 IST using the snapshot's decision time. Missing or invalid expiry retains
+the attachment's 5-day fallback; this does not establish actual expiry safety.
+
+The expected-move proxy is configured minimum spot impulse times absolute delta,
+divided by the initial option stop, with a minimum of 1.30. Delta defaults to
+0.50 and is clamped to 0.25â€“0.70. This proxy is before charges, not net RR.
+**With the current configuration this gate rejects every entry:** Nifty's best
+case is 8.5 Ã— 0.70 / 6.15 = 0.967; Sensex's is 25 Ã— 0.70 / 20 = 0.875.
+Larger actual impulses do not change this formula. Thresholds were not silently
+relaxed to restore trading.
+
+Below 0.6 DTE, entry requires time before 10:30 and impulse at least 1.4 times
+the configured minimum. Below 1.5 DTE, entries from 13:00 require that strong
+impulse. Available absolute daily theta above 12% of premium blocks entries
+below 3 DTE, including early expiry-day entries. CE and PE Greeks remain
+separate so a later direction change cannot reuse the other side's theta.
+
+Available two-sided books require spread at most 2.5%, or 1.5% for premiums
+below 80 rupees, and at least one lot on both sides. The live submission path
+rechecks available quantity against the actual selected lots. As requested in
+the attachment, absent bid/ask fields skip the optional book check; missing
+theta skips explicit theta percentage checking. Nonfinite supplied fields are
+rejected. Historical rolling bars lack these books/Greeks and verified expiry,
+so past backtests do not validate these gates. Optional IV-rank filtering was
+not added without a reliable historical IV series. Rejections are recorded in
+`entry_decision` and DEBUG logging; learned rules cannot override them.
+
+## Learning revision applied October 25, 2026
+
+Closed-trade rewards still use net results after modeled charges. The learning
+rate is now 0.006 with 0.997 weight/bias retention per update. Rule promotion
+requires either eight trades across five days, expectancy at least 0.35R and
+win rate at least 42%, or four wins across four days, at most one loss and
+expectancy at least 1.0R. Two same-day losses still mute a rule. Pruning checks
+now use three trades with no wins, six trades with expectancy below -0.10R,
+or eight trades with win rate below 35%. Daily reset uses the same thresholds.
+
+Position sizing stays at one lot until an ACTIVE rule has at least ten trades
+across six days. Two lots require at least 55% wins, 1.20R expectancy, a wallet
+of at least Rs.40,000 and affordability within 60% of the wallet. The earlier
+three-lot scale-up path is removed. A loss or a current loss streak restores
+one-lot sizing. Existing learning files are retained; this update does not
+reset their history or retrain on invented outcomes.
+
+The premium/expiry/quote gates above remain in force. In particular the
+unchanged 1.30R minimum-impulse formula still blocks all currently configured
+Nifty and Sensex entries. This revision is not a profitability validation.
+
+## Current entry/exit experiment (v4.9.2, October 25)
+
+This revision supersedes the earlier expected-move and exit settings above.
+The expected-move proxy uses the observed five-minute spot impulse with a
+0.95R floor. OI wall room is 35 points. LEVEL_V1 entries require 40 points of
+structure room, RR at least 1.60 for breakout/rejection, 3.20 for retests, and
+3.50 after a loss. The attachment's final table used base RR 1.60; its earlier
+script used 2.80. The final table was selected and documented explicitly.
+
+Single-lot ratchets arm at 1.80R, locking 0.55R; at 2.50R they lock at least
+1.80R and trail 0.55R behind the peak. Stops never move backward. Multi-lot
+Nifty split targets remain unchanged. Current-policy replay and live stagnation
+exits now use 15 minutes with peak advance below 0.45R. Historical/legacy replay
+mode retains its older timing for prior research. Replay does not use the
+current candle's later high to avoid a stagnation exit at its opening time.
+
+Initial stops remain the current engine's 8.5% premium stop for Nifty, bounded
+by 6.15 and 12.50 points, and the configured 20-point Sensex stop. No production
+learning history was reset. These changes are an in-sample experiment based
+on a previously inspected ledger, not an independent proof of profitability.
+
+## Current six-patch revision (October 25, 2026)
+
+This revision supersedes the earlier settings described above. Structure room
+is 32 points; base RR 1.45, retest RR 2.60 and post-loss RR 2.80. After a loss,
+room at least 55 with RR at least 2.20 bypasses the usual RR floor, after the
+room check. The bypass is evaluated before rejection so it can actually apply.
+OI room remains 35. Observed impulse remains 0.95R. Daily net target is 1,450.
+
+Ratchet arms at 1.35R and locks 0.45R; from 2.20R it locks at least 1.40R and
+trails 0.45R behind peak. Stagnation uses 18 minutes / peak below 0.55R in live
+and current-policy replay. On five-minute bars the first observable opening
+after 18 minutes is 20 minutes. Multi-lot Nifty targets are +12/+22 points.
+The requested TARGET_2_20_POINTS reason is retained as a legacy label even
+though the second split target is +22. The daily-target branch uses that label
+when premium gain is at least 18; it still exits immediately when the daily
+net target is reached. Merely changing an exit reason does not delay the exit.
+
+Learning uses rate 0.08 for absolute net R above 1.5, otherwise 0.045, without
+weight decay or clipping the prediction error. One transition per closed trade
+is appended and the replay buffer is capped at 120. Pruning requires win rate
+below 32%, at least seven trades and at least four distinct days in both daily
+reset and closed-trade learning. Two intraday losses still mute the rule.
+Existing ACTIVE sizing additionally requires 48% wins, 0.85R expectancy and
+average win at least 2.2 times max(0.1, average loss); the existing inner two-lot
+requirements (55%, 1.20R, wallet 40k, ten trades, six days) still apply.
+
+State vectors remain ten-dimensional. Index 7 now stores clipped movement
+from the first observed spot of the session in strike steps; index 9 stores
+normalized time since 09:15 IST. This replaces IV difference and strike parity.
+The first observation is not asserted to be the actual open if startup is late.
+Session anchors/history reset each IST day and use decision timestamps in
+replay. Existing persisted weights are retained, so the changed feature meaning
+requires fresh validation. Sensex stop is 9% of premium bounded to 18–32 points;
+its wall threshold is 40 lakh. Nifty stays 50 lakh and its initial stop is unchanged.
+
+Backtests use isolated chronological learning rather than seeding historical
+runs with current production learning that may include future outcomes. Live
+wallets, learning files, trading windows and rate-limit implementation remain
+untouched by the research run. Cached replay makes no claim about future live
+HTTP-429 frequency. The 2.3x win/loss value and monthly profit objectives were
+not met; see the latest research notes.
+
+## Current observer / twenty-point revision (October 25, 2026)
+
+The user-supplied observer patch was executed in memory against the existing
+engine; no patcher file was created. This supersedes the earlier six-patch
+entry/exit settings. Daily net target is 1,200; Nifty hard premium target is
+20 points, including a single lot and remaining quantity after a partial.
+Current-policy replay uses the same hard target, with stop-first ambiguous-bar
+handling and adverse modeled slippage. A daily-profit trigger can still exit
+before 20 points; a prior daily loss cannot remove the explicit 20-point target.
+
+Structure room is 25; base RR 1.35, retest RR 2.20, post-loss RR 2.10. Wide-room
+post-loss override is room >=55 and RR >=2.0. Retests additionally require at
+least 40 lakh OI imbalance aligned with the trade. Both directions are vetoed
+against an opposing imbalance above 20 lakh or opposite five-minute price move
+beyond four points. These are the executable patch thresholds; the prose used
+25 lakh elsewhere. A permitted level does not bypass this confluence veto.
+
+When Nifty structure is warming up/unavailable, fallback requires the 50-lakh
+wall, dominance, verified five-minute OI reference, matching option/writer
+quadrants, directional impulse within configured bounds, alignment with the
+session weighted-price proxy, and a known opposing-wall distance >=35 points.
+It never bypasses a ready-but-rejected structure assessment. Missing inputs
+reject fallback rather than fabricating confluence. Other learning, premium,
+theta, spread, cooldown, daily-entry and loss-breaker gates still apply.
+
+The session anchor now stores initial call/put OI and premiums, initial OI
+difference, observed high/low, cumulative spot delta and cumulative OI-total
+changes. It is the first observation of the session, not a reconstructed 09:15
+open if startup/data begins later. The supplied session_vwap is explicitly an
+OI-weighted snapshot average, not a volume VWAP. Cumulative OI is a comparison
+of basket totals, not verified identical morning contracts; strike rolls can
+change those totals. Both limitations are exposed in analysis telemetry.
+
+Ratchet follows the supplied piecewise code: lock 0.35R after gain >=8.5 points
+or 1.15R; lock >=0.80R and trail 0.55R after >=12.5 points or 1.55R; lock >=1.35R
+and trail 0.40R after >=18 points or 2.10R. These executable values differ from
+the attachment's introductory +9/+14-point summary. Stops never move backward.
+Historical replay only activates a high-based ratchet on subsequent candles.
+
+The requested pytest command could not run because pytest is not installed.
+The existing unittest runner passed 118 index/structure/learning checks. Full
+254-test discovery had eight failures and three errors in stock replay/data,
+research-ledger and session-maintenance checks; full-suite validation is pending.
+
+## Current daily trend accumulation revision (October 25, 2026)
+
+This supersedes the prior observer fallback restriction. evaluate_snapshot now
+returns daily_trend_dir and a timestamp-based d_spot_15m. Rolling history retains
+500 snapshots, including the require_reference Nifty path. A 15-minute reference
+must be 900–1050 seconds old in the same session; three fast live polls are not
+15 minutes. Until a reference exists the move is zero and trend_15m_ready is
+false. Snapshot history still resets at the first observation of each IST day.
+
+The supplied three accumulation conditions and one-of-two quadrant detector
+are applied: a steady six-point five-minute move, or 3.5 points with a twelve-
+point fifteen-minute move, can produce a daily candidate. Option premium must
+be rising and price must satisfy the supplied session-price condition. The
+strict controller remains present. OI-weighted price/basket-accumulation
+limitations from the observer revision remain applicable.
+
+A ready structure may now pass through between discrete levels. Explicit
+wait-for-retest, too-close, weak-follow-through and chasing reasons remain hard
+vetoes, matched case-insensitively. A ready-structure accumulation entry needs
+verified OI, known wall room at least 30, structure room at least 28 when supplied,
+directional imbalance at least 22 lakh or at least 12 lakh plus 8 lakh cumulative
+shift, the specified 5m/15m move, price no more than eight points against the
+session proxy, and at least one qualifying option/writer quadrant. An unavailable
+structure retains the stricter 50-lakh, two-quadrant, 35-point-room fallback.
+Missing wall room rejects rather than using the attachment's invented 50-point
+default. All supplied numeric trend inputs must be finite.
+
+For accumulation entries only, premium edge uses max(abs(5m move), 0.85 times
+abs(verified 15m move)). The helper default remains 0.95R; level and Sensex
+entries retain their existing effective impulse. The separate generic wall
+check uses the same 30-point floor for ready-structure accumulation, so it does
+not silently reinstate the older 35-point floor. Opposing-wall/price vetoes,
+theta/spread/learning gates, daily target, hard Nifty target, trading window,
+cooldowns, entry cap and consecutive-loss breaker remain in force.
+
+121 index/structure/learning tests passed. New tests cover actual elapsed-time
+history, weak one-quadrant signals in both directions, ready-between-level
+entries at boundary room, and rejection of missing room/hard retest obstacles.
+The backtests increased frequency but produced substantial net losses; this
+revision fails the requested profit objectives. No live session was launched
+or restarted as part of this change. See the latest research section.
+
+## Current structural-only correction (October 25, 2026)
+
+ACCUMULATION_BREAKOUT_V1 execution and its effective 15m impulse boost are
+removed. Nifty must have the LEVEL_CANDLE_AND_STRIKE_OI_V1 model, allowed
+structure, nonempty same-strike confirmation, a verified three-strike OI
+reference, and an actual OI imbalance of at least 50 lakh. The existing
+opposing-wall/price veto enforces direction. Structure room/RR, premium, theta,
+liquidity, learning and all daily/session limits remain in force. The Sensex
+entry path is preserved; the attachment's unconditional not-level gate would
+incorrectly block Sensex, which does not use the Nifty-only level model.
+
+Session and 15-minute observations remain telemetry; they cannot authorize
+entries between levels or boost the premium-edge estimate. Missing, waiting
+or rejected structure holds Nifty. Confirmed retests still use existing
+LEVEL_V1 quality/alignment checks; no additional retest ban was specified by
+the correction. No production learning reset or live restart was performed.
+122 index/structure/learning checks pass, including rejection of strong trend
+signals without structure, sub-50-lakh actual imbalances and unverified OI.

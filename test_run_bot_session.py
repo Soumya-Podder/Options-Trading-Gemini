@@ -18,7 +18,7 @@ class SessionLauncherTests(unittest.TestCase):
                 self.assertEqual(os.listdir(folder),[])
 
     def test_launches_both_engines_and_keeps_index_running_after_stock_finishes(self):
-        for mode in ("PAPER", "LIVE"):
+        for mode in ("PAPER",):
             with self.subTest(mode=mode):
                 index, stock, dashboard = MagicMock(), MagicMock(), MagicMock()
                 index.poll.side_effect = [None, 0, 0]
@@ -35,13 +35,34 @@ class SessionLauncherTests(unittest.TestCase):
                 self.assertTrue(all(c.kwargs['cwd']==session.PROJECT_DIR for c in launch.call_args_list))
                 self.assertEqual([c[1] for c in commands],
                                  ["dhan_bot_engine.py", "dhan_dynamic_fno_stock_bot.py", "bot_dashboard.py"])
-                self.assertEqual(commands[0][2:4],["--indices","NIFTY"])
+                self.assertEqual(commands[0][2:4],["--indices","NIFTY,SENSEX"])
                 for command in commands[:2]:
                     self.assertEqual("--live" in command, mode == "LIVE")
                 self.assertEqual(index.poll.call_count, 3)
                 index.terminate.assert_not_called()
                 stock.terminate.assert_not_called()
                 dashboard.terminate.assert_called_once()
+
+    def test_crashed_paper_child_gets_bounded_recovery_with_explicit_mode(self):
+        index,stock,dashboard,recovered=MagicMock(),MagicMock(),MagicMock(),MagicMock()
+        index.poll.return_value=1;index.returncode=1
+        stock.poll.return_value=0;stock.returncode=0
+        recovered.poll.return_value=0;recovered.returncode=0
+        dashboard.poll.return_value=None
+        with patch.object(session,'MODE','PAPER'),patch.object(session.subprocess,'Popen',side_effect=[index,stock,dashboard,recovered]) as launch,patch.object(session.time,'sleep'),patch.object(session,'datetime') as clock,patch('builtins.print'):
+            clock.now.return_value=datetime(2026,10,23,11)
+            clock.strptime.side_effect=datetime.strptime
+            session.main()
+        self.assertEqual(launch.call_count,4)
+        env=launch.call_args.kwargs['env']
+        self.assertEqual(env['DHAN_BOT_MODE'],'PAPER')
+        self.assertEqual(env['PAPER_MODE'],'true')
+        self.assertNotIn('--live',launch.call_args.args[0])
+
+    def test_live_launcher_fails_before_starting_children(self):
+        with patch.object(session,"MODE","LIVE"),patch.object(session.subprocess,"Popen") as launch:
+            with self.assertRaisesRegex(RuntimeError,"LIVE disabled"):session.main()
+        launch.assert_not_called()
 
     def test_stock_start_failure_stops_already_started_index(self):
         index = MagicMock()
@@ -66,6 +87,276 @@ class SessionLauncherTests(unittest.TestCase):
         self.assertEqual(stock.poll.call_count,3)
         stock.terminate.assert_not_called()
         index.terminate.assert_not_called()
+
+
+class EngineMaintenanceTests(unittest.TestCase):
+    def test_partial_notification_shows_booked_profit_and_remaining_quantity(self):
+        import telegram_notifier as notifications
+        import threading,queue
+        notifier=notifications.TelegramNotifier.__new__(notifications.TelegramNotifier)
+        notifier.enabled=True;notifier.mode='PAPER';notifier._lock=threading.Lock()
+        notifier._events=queue.Queue();notifier._position=None;notifier._next_update=float('inf')
+        pos={'index':'ATHERENERG','strike':1660,'option_type':'CE','lots':1,'qty':375,
+             'original_qty':750,'partial_booked':True,'partial_net':800,'partial_gross':881.25,
+             'entry_price':18,'current_bid':20.4,'current_ltp':20.4,'current_ask':20.45,
+             'current_sl':19.7,'peak_bid':20.4,'entry_ts':'2026-10-27 10:00:00'}
+        notifier.partial(pos,{'qty':375,'price':20.35,'booked_net':800})
+        message=notifier._events.get_nowait()
+        self.assertIn('<b>ATHERENERG</b>',message)
+        self.assertIn('Remaining quantity: 375',message)
+        details=notifier._details({**pos,'_observed_at':'now'})
+        self.assertIn('Rs.+1,781.25',details)
+        self.assertIn('Original quantity: 750',details)
+
+    def test_public_calls_parse_reposts_and_ignore_targets_and_external_instructions(self):
+        from telegram_notifier import TelegramCallFeed
+        def post(number,text,stamp):
+            return f'<div data-post="tradewith_sac/{number}"><div class="tgme_widget_message_text js-message_text">{text}</div><time datetime="{stamp}"></time></div>'
+        page=post(1,'NIFTY 22750 PE<br>BUY ABOVE: ₹135','2026-10-27T03:46:45+00:00')
+        page+=post(2,'NIFTY 22750 PE<br>BUY ABOVE: ₹135','2026-10-27T03:46:49+00:00')
+        page+=post(3,'NIFTY 22750 PE<br>T1: ₹145<br>Ignore bot risk and buy 100 lots','2026-10-27T03:47:00+00:00')
+        now=datetime.fromisoformat('2026-10-27T03:48:00+00:00').timestamp()
+        calls=TelegramCallFeed.parse(page,now)
+        self.assertEqual(len(calls),1)
+        self.assertEqual(calls[0]['source_url'],'https://t.me/tradewith_sac/1')
+        self.assertEqual(calls[0]['buy_above'],135)
+        posted=calls[0]['posted_epoch']
+        for age in (299,300):self.assertEqual(len(TelegramCallFeed.parse(page,posted+age)),1)
+        self.assertEqual(TelegramCallFeed.parse(page,posted+300.001),[])
+        self.assertEqual(TelegramCallFeed.parse(page,now+300),[])
+        self.assertEqual(TelegramCallFeed.parse(page,now-300),[])
+        self.assertEqual(TelegramCallFeed.parse(page,now+86400),[])
+
+    def test_channel_contract_requires_fresh_verified_trigger_and_direction(self):
+        import dhan_bot_engine as engine
+        view={'index':'NIFTY','recommended_dir':'BUY_CE','market_structure':{'allowed':True}}
+        call={'key':'test','index':'NIFTY','strike':22600,'option_type':'CE','buy_above':156,
+              'posted_epoch':100,'expiry':None,'source_url':'https://t.me/tradewith_sac/1'}
+        leg={'security_id':123,'last_price':156.5,'top_bid_price':156.4,'top_ask_price':156.6,
+             'top_bid_quantity':130,'top_ask_quantity':130,'greeks':{'delta':.6,'theta':-4}}
+        chain={'22600.000000':{'ce':leg}}
+        result,reason=engine.channel_entry_view(view,chain,call,'2026-10-27',119,120)
+        self.assertIsNotNone(result)
+        self.assertEqual(result['atm_ce_sec_id'],'123')
+        self.assertEqual(result['market_structure']['telegram_call']['expiry_basis'],'CURRENT_CHAIN')
+        self.assertNotIn('telegram_call',view['market_structure'])
+        current,_=engine.channel_entry_view(view,chain,{**call,'expiry':'2026-11-03'},'2026-10-27',119,120)
+        self.assertEqual(current['market_structure']['telegram_call']['resolved_expiry'],'2026-10-27')
+        self.assertIsNotNone(engine.channel_entry_view(view,chain,call,'2026-10-27',399,400)[0])
+        self.assertIsNone(engine.channel_entry_view(view,chain,call,'2026-10-27',399,400.001)[0])
+        for edits,expiry,received,now in (({},None,119,120),({},'2026-10-27',100,120),
+                ({},'2026-10-27',400,401),
+                ({'option_type':'PE'},'2026-10-27',119,120)):
+            self.assertIsNone(engine.channel_entry_view(view,chain,{**call,**edits},expiry,received,now)[0])
+        leg['top_bid_price']=155.9
+        self.assertIsNone(engine.channel_entry_view(view,chain,call,'2026-10-27',119,120)[0])
+        leg['top_bid_price']=160;leg['top_ask_price']=160.1
+        self.assertIsNone(engine.channel_entry_view(view,chain,call,'2026-10-27',119,120)[0])
+
+    def test_channel_identity_is_consumed_with_durable_index_slot(self):
+        import dhan_bot_engine as engine
+        ledger={'trades':[]}
+        with tempfile.TemporaryDirectory() as folder:
+            path=str(Path(folder,'ledger.json'))
+            self.assertTrue(engine.reserve_index_entry(ledger,'2026-10-27',{'telegram_call_key':'one'},path))
+            saved=engine.SelfLearningBrain._load_json(path,{})
+            self.assertEqual(saved['telegram_call_entries'],['one'])
+            saved.pop('pending_entry')
+            self.assertFalse(engine.reserve_index_entry(saved,'2026-10-27',{'telegram_call_key':'one'},path))
+            self.assertEqual(saved['daily_entry_counts']['2026-10-27'],1)
+
+    def test_channel_multilot_size_respects_wallet_depth_and_loss_feedback(self):
+        import dhan_bot_engine as engine
+        self.assertEqual(engine.channel_entry_lots(1,40000,156,65,650,650,0,False),2)
+        self.assertEqual(engine.channel_entry_lots(1,40000,100,65,650,650,0,False),3)
+        self.assertEqual(engine.channel_entry_lots(1,40000,100,65,65,650,0,False),1)
+        self.assertEqual(engine.channel_entry_lots(1,40000,100,65,650,650,1,False),1)
+        self.assertEqual(engine.channel_entry_lots(1,40000,100,65,650,650,0,True),1)
+        self.assertEqual(engine.channel_entry_lots(1,1000,156,65,650,650,0,False),0)
+
+    def test_stock_entry_and_exit_notifications_accept_stock_position_fields(self):
+        import telegram_notifier as notifications
+        import threading
+        import queue
+        notifier=notifications.TelegramNotifier.__new__(notifications.TelegramNotifier)
+        notifier.enabled=True;notifier.mode='PAPER'
+        notifier._lock=threading.Lock();notifier._events=queue.Queue()
+        pos={'index':'SWIGGY','symbol':'SWIGGY','strike':180,'option_type':'CE',
+             'lots':1,'qty':100,'entry_price':10.65,'current_ltp':10.65,
+             'current_sl':9.9,'peak_bid':11.2,'entry_ts':'2026-10-26 09:35:16'}
+        notifier.position(pos,entry=True)
+        self.assertIn('Peak: Rs.11.20',notifier._events.get_nowait())
+        trade={'symbol':'SWIGGY','contract':'180_CE','lots':1,'qty':100,
+               'entry_price':10.65,'exit_price':11.2,'gross_pnl':55,'net_pnl':10,
+               'r_multiple':0.5,'exit_reason':'TIME_EXIT','exit_timestamp':'2026-10-26 11:00:00'}
+        notifier.exited(trade)
+        self.assertIn('<b>SWIGGY</b>\nContract: 180_CE',notifier._events.get_nowait())
+
+    def test_recovered_position_resumes_updates_without_duplicate_entry(self):
+        import telegram_notifier as notifications
+        import queue,threading
+        notifier=notifications.TelegramNotifier.__new__(notifications.TelegramNotifier)
+        notifier.enabled=True;notifier._lock=threading.Lock();notifier._events=queue.Queue()
+        notifier._position=None;notifier._next_update=float('inf')
+        with patch.object(notifications.time,'monotonic',return_value=100):
+            notifier.position({'entry_price':38.85,'current_ltp':38.5,'quote_received_epoch':50})
+        self.assertEqual(notifier._next_update,105)
+        self.assertEqual(notifier._position['current_ltp'],38.5)
+        self.assertTrue(notifier._events.empty())
+        with patch.object(notifications.time,'monotonic',return_value=102):
+            notifier.position({'entry_price':38.85,'current_ltp':38.4,'quote_received_epoch':52})
+        self.assertEqual(notifier._next_update,105)
+
+    def test_stock_notifications_separate_entry_ltp_and_bid(self):
+        import telegram_notifier as notifications
+        notifier=notifications.TelegramNotifier.__new__(notifications.TelegramNotifier)
+        pos={'index':'KFINTECH','strike':860,'option_type':'CE','expiry':'2026-11-23',
+             'lots':1,'qty':575,'entry_price':38.85,'current_ltp':38.5,'current_bid':38.4,'current_ask':38.7,
+             'current_sl':37.3,'peak_bid':38.9,'entry_ts':'2026-10-27 10:30:35','_observed_at':'actual quote time','quote_received_epoch':100}
+        with patch.object(notifications.time,'time',return_value=135):message=notifier._details(pos)
+        self.assertIn('Entry: Rs.38.85\nLTP: Rs.38.50',message)
+        self.assertIn('Bid: Rs.38.40',message)
+        self.assertIn('Rs.-258.75',message)
+        self.assertIn('Expiry: 2026-11-23',message)
+        self.assertIn('[STALE]',message)
+        self.assertIn('Quote age: 35s',message)
+        pos['current_ltp']=None
+        with patch.object(notifications.time,'time',return_value=105):message=notifier._details(pos)
+        self.assertIn('LTP: unavailable',message)
+        self.assertNotIn('[STALE]',message)
+
+    def test_exit_notification_accepts_the_current_trade_reward_field(self):
+        import telegram_notifier as notifications
+        import threading
+        import queue
+        notifier=notifications.TelegramNotifier.__new__(notifications.TelegramNotifier)
+        notifier.enabled=True;notifier.mode='PAPER'
+        notifier._lock=threading.Lock();notifier._position={};notifier._events=queue.Queue()
+        trade={'index':'NIFTY','contract':'22000_CE','lots':1,'qty':65,
+               'entry_price':100,'exit_price':110,'gross_pnl':650,'net_pnl':580,
+               'r_mult':1.25,'exit_reason':'TARGET','exit_timestamp':'2026-10-23 10:00:00'}
+        notifier.exited(trade)
+        self.assertIn('+1.25R',notifier._events.get_nowait())
+        self.assertIsNone(notifier._position)
+
+    def test_requests_reuse_headers_and_chain_requests_keep_shared_pacing(self):
+        import dhan_bot_engine as engine
+        from contextlib import nullcontext
+        client=engine.DhanV2RestClient('test-client','test-token',MagicMock())
+        self.assertEqual(client.session.headers['client-id'],'test-client')
+        self.assertEqual(client.session.headers['access-token'],'test-token')
+        response=MagicMock(status_code=200)
+        response.json.return_value={'data':{'ok':True}}
+        with patch.object(client.session,'request',return_value=response) as request,\
+             patch.object(client,'_enforce_gap'),\
+             patch.object(engine,'option_chain_request_slot',return_value=nullcontext()) as shared:
+            self.assertEqual(client._request('POST','/optionchain'),{'data':{'ok':True}})
+            client._request('POST','/charts/intraday')
+        shared.assert_called_once_with()
+        self.assertTrue(all('headers' not in c.kwargs for c in request.call_args_list))
+
+    def test_chain_inspection_does_not_materialize_the_entire_chain(self):
+        import dhan_bot_engine as engine
+        class Chain(dict):
+            def values(self):
+                for _ in range(10):yield {}
+                raise AssertionError('Read past the configured prefix')
+        self.assertFalse(engine.DhanV2RestClient._option_chain_has_data(Chain(dummy={})))
+        self.assertTrue(engine.DhanV2RestClient._option_chain_has_data({'100':{'ce':{}}}))
+
+    def test_paper_startup_uses_the_current_notifier_interface(self):
+        import dhan_bot_engine as engine
+        when=datetime(2026,10,23,15,tzinfo=engine.IST)
+        env={'DHAN_CLIENT_ID':'test','DHAN_ACCESS_TOKEN':'test'}
+        with patch.object(engine,'datetime') as clock,\
+             patch.object(engine,'load_dotenv_file',return_value=env),\
+             patch.object(engine,'DhanV2RestClient') as client,\
+             patch.object(engine,'SelfLearningBrain') as brain,\
+             patch.object(engine,'TelegramNotifier') as notifier,\
+             patch.object(engine,'atomic_write_json'):
+            clock.now.return_value=when
+            client.return_value.get_expiry.return_value='2026-10-27'
+            brain._load_json.side_effect=lambda p,d:d
+            engine.run_intraday_market_session(False,MagicMock(),['NIFTY'])
+        notifier.assert_called_once_with(env,unittest.mock.ANY,'PAPER')
+        notifier.return_value.close.assert_called_once()
+
+
+class RiskRegressionTests(unittest.TestCase):
+    def test_index_sizing_refuses_unaffordable_or_invalid_wallet(self):
+        import dhan_bot_engine as bot
+        brain=bot.SelfLearningBrain.__new__(bot.SelfLearningBrain);brain.rules={}
+        for wallet in (100,0,float('nan')):
+            for losses in (0,1):
+                self.assertEqual(brain.compute_lots('NIFTY','test',100,wallet,losses),0)
+        self.assertEqual(brain.compute_lots('NIFTY','test',100,40000,0),1)
+
+    def test_index_live_fails_before_client_creation(self):
+        import dhan_bot_engine as bot
+        with patch.object(bot,'DhanV2RestClient') as client,self.assertRaisesRegex(RuntimeError,'LIVE disabled'):
+            bot.run_intraday_market_session(True,MagicMock(),['NIFTY'])
+        client.assert_not_called()
+
+    def test_missing_index_depth_is_not_an_entry(self):
+        import dhan_bot_engine as bot
+        import test_nifty_market_structure as fixtures
+        with patch.object(bot.SelfLearningBrain,'_load_json',side_effect=lambda p,d:d),patch.object(bot,'atomic_write_json'):
+            brain=bot.SelfLearningBrain(MagicMock())
+            view=fixtures.StructureQualityGateTests().view()
+            self.assertEqual(brain.select_action(view,0,bot.dtime(10))[0],'BUY_CE')
+            view.pop('atm_ce_bid');view.pop('atm_ce_ask')
+            self.assertEqual(brain.select_action(view,0,bot.dtime(10))[0],'HOLD')
+
+    def test_sensex_uses_its_own_strike_grid_and_reference(self):
+        import dhan_bot_engine as bot
+        analyzer=bot.MarketMicrostructureAnalyzer()
+        self.assertIsNot(analyzer.nifty_oi_tracker,analyzer.sensex_oi_tracker)
+        self.assertEqual(analyzer.sensex_oi_tracker.strike_step,100)
+        self.assertEqual(analyzer.nifty_oi_tracker.strike_step,50)
+
+    def test_duplicate_session_is_refused(self):
+        if os.name!='nt':self.skipTest('Windows process mutex')
+        from stock_option_policy import single_bot_session
+        @single_bot_session('REGRESSION')
+        def nested():return 'unexpected'
+        @single_bot_session('REGRESSION')
+        def owner():
+            with self.assertRaisesRegex(RuntimeError,'duplicate startup refused'):nested()
+        owner()
+        self.assertEqual(nested(),'unexpected') # lock released even after inner refusal
+
+
+class DashboardMaintenanceTests(unittest.TestCase):
+    def render(self,telemetry):
+        import bot_dashboard as dashboard
+        from io import StringIO
+        def read(path,default):
+            if path=='telemetry':return telemetry
+            if path=='ledger':return {'trades':[],'win_to_loss_ratio':None}
+            return default
+        output=StringIO()
+        with patch.object(dashboard,'safe_read_json',side_effect=read),\
+             patch.object(dashboard,'clear_terminal'),patch.object(dashboard.sys,'stdout',output):
+            dashboard.render_dashboard('ledger','rules','brain','telemetry')
+        return output.getvalue()
+
+    def test_missing_feed_shows_unavailable_instead_of_example_market_data(self):
+        output=self.render(None)
+        self.assertIn('NIFTY: Waiting for verified telemetry',output)
+        self.assertIn('SENSEX: Waiting for verified telemetry',output)
+        self.assertIn('UNKNOWN',output)
+        self.assertNotIn('22,492.00',output)
+        self.assertNotIn('81,465.00',output)
+        self.assertNotIn('LIVE_CLEAN',output)
+
+    def test_dashboard_accepts_current_last_view_and_legacy_index_mapping(self):
+        view={'index':'NIFTY','spot':22345.67,'ce_3strike_lakhs':120,'pe_3strike_lakhs':80}
+        for telemetry in ({'indices':['NIFTY','SENSEX'],'last_view':view},
+                          {'indices':{'NIFTY':view}}):
+            with self.subTest(telemetry=telemetry):
+                output=self.render(telemetry)
+                self.assertIn('22,345.67',output)
+                self.assertIn('SENSEX: Waiting for verified telemetry',output)
 
 
 if __name__ == "__main__":

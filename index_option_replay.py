@@ -14,7 +14,7 @@ def replay_option_trade(entry_idx,is_ce,timestamps,opens,highs,lows,closes,strik
                         split,ratchet,eod_time,entry_at_open=False,
                         expected_strike=None,slippage_pct=0.0,require_session_end=False,
                         session_profit_check=None,current_session_policy=False,
-                        stop_points_for_entry=None):
+                        stop_points_for_entry=None,hard_target_points=None,max_hold_minutes=None,profit_floor_check=None):
     arrays=(opens,highs,lows,closes,strikes)
     if (not timestamps or any(len(a)!=len(timestamps) for a in arrays)
             or not 0<=entry_idx<len(timestamps) or not math.isfinite(sl_points) or sl_points<=0
@@ -50,6 +50,7 @@ def replay_option_trade(entry_idx,is_ce,timestamps,opens,highs,lows,closes,strik
         raise ReplayDataError("Nonpositive initial stop",entry_idx)
     peak=entry
     armed=False
+    profit_floor_armed=False
     remaining=lots*lot_size
     fills=exit_fills if exit_fills is not None else []
     if fills:
@@ -69,7 +70,7 @@ def replay_option_trade(entry_idx,is_ce,timestamps,opens,highs,lows,closes,strik
 
     def target_one(j):
         nonlocal remaining,first_done
-        fills.append({"qty":split[0],"price":sell(entry+10),"timestamp":str(datetime.fromtimestamp(timestamps[j])),"reason":"TARGET_1_10_POINTS"})
+        fills.append({"qty":split[0],"price":sell(entry+12),"timestamp":str(datetime.fromtimestamp(timestamps[j])),"reason":"TARGET_1_12_POINTS"})
         remaining-=split[0]
         first_done=True
 
@@ -104,35 +105,48 @@ def replay_option_trade(entry_idx,is_ce,timestamps,opens,highs,lows,closes,strik
             raise ReplayDataError("Missing post-entry option bars",j)
         if strike!=entry_strike:
             raise ReplayDataError("Rolling strike changed; fixed-contract OHLC unavailable",j)
-        reason="ASYMMETRIC_TRAIL_PROFIT" if armed and stop>entry else "INITIAL_SL_HIT"
+        reason="DAILY_PROFIT_PROTECTION" if profit_floor_armed else "ASYMMETRIC_TRAIL_PROFIT" if armed and stop>entry else "INITIAL_SL_HIT"
         # The opening price is observed before this candle's high and low.
         if o<=stop:
             return finish(j,o,reason)
-        if current_session_policy and (j-entry_idx)*interval_min>=25 and peak-entry<0.8*sl_points:
+        if current_session_policy and (j-entry_idx)*interval_min>=18 and peak-entry<0.55*sl_points:
             return finish(j,o,"THETA_TIME_STOP")
+        if hard_target_points is not None and o>=entry+hard_target_points:
+            if split and not first_done and hard_target_points>=12:target_one(j)
+            return finish(j,entry+hard_target_points,'TARGET_2_20_POINTS')
         if session_profit_check is not None and session_profit_check(entry,remaining,fills,sell(o)):
-            return finish(j,o,"DAILY_NET_PROFIT_TARGET")
+            return finish(j,o,"TARGET_2_20_POINTS" if o-entry>=18 else "DAILY_NET_PROFIT_TARGET")
         if split:
-            if not first_done and o>=entry+10:
+            if not first_done and o>=entry+12:
                 target_one(j)
-            if o>=entry+20:
-                return finish(j,entry+20,"TARGET_2_20_POINTS")
+            if o>=entry+22:
+                return finish(j,entry+22,"TARGET_2_20_POINTS")
         # Unknown intrabar order uses the existing stop before later targets.
         if l<=stop:
             return finish(j,stop,reason)
         daily=daily_trigger(h)
-        if split and not first_done and h>=entry+10 and (daily is None or entry+10<daily):
+        if split and not first_done and h>=entry+12 and (daily is None or entry+12<daily):
             target_one(j)
             daily=daily_trigger(h)
-        if daily is not None and (not split or daily<=entry+20):
-            return finish(j,daily,"DAILY_NET_PROFIT_TARGET")
+        if hard_target_points is not None and h>=entry+hard_target_points and (daily is None or entry+hard_target_points<=daily):
+            return finish(j,entry+hard_target_points,'TARGET_2_20_POINTS')
+        if daily is not None and (not split or daily<=entry+22):
+            return finish(j,daily,"TARGET_2_20_POINTS" if daily-entry>=18 else "DAILY_NET_PROFIT_TARGET")
         if split:
-            if not first_done and h>=entry+10:
+            if not first_done and h>=entry+12:
                 target_one(j)
-            if h>=entry+20:
-                return finish(j,entry+20,"TARGET_2_20_POINTS")
+            if h>=entry+22:
+                return finish(j,entry+22,"TARGET_2_20_POINTS")
         peak=max(peak,h)
+        if profit_floor_check is not None:
+            floor=profit_floor_check(entry,remaining,fills)
+            if floor is not None and h>=floor:
+                # Prior-bar protection only: no invented intrabar ordering.
+                stop=max(stop,floor)
+                profit_floor_armed=True
         elapsed=(j-entry_idx+(1 if entry_at_open else 0))*interval_min
+        if max_hold_minutes is not None and elapsed>=max_hold_minutes:
+            return finish(j,c,"MAX_HOLD_TIME")
         if not current_session_policy and elapsed>=25 and peak-entry<0.8*sl_points:
             return finish(j,c,"THETA_TIME_STOP")
         # A high from this candle can only move the stop for following candles.
@@ -144,3 +158,20 @@ def replay_option_trade(entry_idx,is_ce,timestamps,opens,highs,lows,closes,strik
         raise ReplayDataError("History ends before session close",len(timestamps)-1)
     return finish(len(timestamps)-1,float(closes[-1]),
                   "EOD_SQUAREOFF" if end.date()==entry_day and end.time()>=eod_time else "END_OF_WINDOW")
+
+
+def fixed_contract_bars(legs, timestamps, strike):
+    """Follow an exact strike across relative series within one session/expiry.
+
+    Every value is a returned Dhan bar. Missing bars remain NaN and stop replay
+    if reached. Conflicting duplicate observations are never silently preferred.
+    """
+    out={'timestamp':list(timestamps),**{k:[] for k in ('open','high','low','close','strike')}}
+    for t in timestamps:
+        found=[rows[t] for rows in legs.values() if t in rows and rows[t]['strike']==strike]
+        if found and any(any(abs(r[k]-found[0][k])>1e-7 for k in ('open','high','low','close')) for r in found[1:]):
+            raise ValueError(f'Conflicting fixed-strike observations at {t}')
+        row=found[0] if found else {}
+        for k in ('open','high','low','close','strike'):
+            out[k].append(row.get(k,float('nan')))
+    return out

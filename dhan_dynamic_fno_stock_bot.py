@@ -19,8 +19,8 @@ import requests
 from collections import Counter
 from bisect import bisect_left
 from pathlib import Path
-from stock_option_signals import evaluate_stock_setup
-from stock_option_policy import premium_plan, rank_candidates, DailyTradeGate, stock_reentry_reason
+from stock_option_signals import evaluate_stock_setup, scanx_stock_membership, recent_entry_momentum
+from stock_option_policy import premium_plan, rank_candidates, DailyTradeGate, stock_reentry_reason, option_chain_request_slot, single_bot_session
 
 IST = timezone(timedelta(hours=5, minutes=30))
 SESSION_START_TIME = dtime(9, 15)
@@ -84,12 +84,12 @@ def round_tick(price: float, tick: float = 0.05) -> float:
     return round(round(price / tick) * tick, 2)
 
 
-def compute_fno_option_charges(buy_price: float, sell_price: float, qty: int) -> float:
+def compute_fno_option_charges(buy_price: float, sell_price: float, qty: int, exit_orders=1) -> float:
     """Statutory Indian NSE_FNO Option Buying charges (Brokerage Rs.40 + STT + Exch + SEBI + Stamp + GST)."""
     buy_turn = buy_price * qty
     sell_turn = sell_price * qty
     tot_turn = buy_turn + sell_turn
-    brokerage = 40.0
+    brokerage = 20.0 * (1 + exit_orders)
     stt = sell_turn * 0.0015  # NSE rate effective 2026-04-01
     exch_fee = tot_turn * 0.0003503
     sebi = tot_turn * 0.000001
@@ -117,10 +117,11 @@ def load_or_init_ledger(live_mode: bool, initial_capital: float) -> Dict[str, An
             with open(LEDGER_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, dict) and "trades" in data:
-                data["mode"] = "LIVE" if live_mode else "PAPER"
+                if data.get("mode", "PAPER") != default_ledger["mode"]:
+                    raise ValueError("Ledger mode mismatch; reconcile before starting")
                 return data
-        except Exception:
-            pass
+        except (OSError,ValueError,TypeError) as error:
+            raise ValueError("Existing ledger needs reconciliation; refusing to overwrite") from error
     atomic_write_json(LEDGER_FILE, default_ledger)
     return default_ledger
 
@@ -141,8 +142,9 @@ class DynamicStrategyConfig:
         self.min_day_change_pct = float(getattr(args, "min_pct", None) or env.get("SCANX_MIN_DAY_PCT", 2.20))
         self.ema_period = int(env.get("SCANX_EMA_PERIOD", 10))
         self.max_concurrent = int(env.get("STOCK_OPT_MAX_CONCURRENT", 2))
-        self.max_daily_trades = int(env.get("STOCK_OPT_MAX_DAILY_TRADES", 2))
+        self.max_daily_trades = int(env.get("STOCK_OPT_MAX_DAILY_TRADES", 4))
         self.max_consec_losses = int(env.get("MAX_CONSECUTIVE_LOSSES_PER_DAY", 2))
+        self.daily_loss_limit = float(env.get("STOCK_OPT_DAILY_LOSS_LIMIT",3000))
 
         self.target_pct = float(env.get("STOCK_OPT_TARGET_PCT", 12.0))
         self.stop_pct = float(env.get("STOCK_OPT_STOP_PCT", 5.0))
@@ -151,9 +153,12 @@ class DynamicStrategyConfig:
         self.max_spread_pct = float(env.get("STOCK_OPT_MAX_SPREAD_PCT", 3.5))
         self.max_hold_bars_5m = int(env.get("STOCK_OPT_MAX_HOLD_BARS_5M", 12))
         self.rupee_target = float(env.get("STOCK_OPT_RUPEE_TARGET", 900))
-        self.rupee_max_risk = float(env.get("STOCK_OPT_RUPEE_MAX_RISK", 1800))
+        self.runner_target = float(env.get('STOCK_OPT_RUNNER_TARGET',5000))
+        self.rupee_max_risk = float(env.get("STOCK_OPT_RUPEE_MAX_RISK", 1500))
         self.max_lots = int(env.get("STOCK_OPT_MAX_LOTS", 2))
-        self.min_days_to_expiry = int(env.get("STOCK_OPT_MIN_DAYS_TO_EXPIRY", 4))
+        # User policy: use the current listed expiry, including expiry day.
+        # A stale minimum-DTE override must never silently select next month.
+        self.min_days_to_expiry = 0
         self.min_delta = float(env.get("STOCK_OPT_MIN_DELTA", 0.38))
         self.max_delta = float(env.get("STOCK_OPT_MAX_DELTA", 0.78))
         self.max_theta_pct_per_day = float(env.get("STOCK_OPT_MAX_THETA_PCT_PER_DAY", 6))
@@ -165,27 +170,53 @@ class DynamicStrategyConfig:
         self.enable_opening_trend=env.get("STOCK_OPT_OPENING_TREND","false").strip().lower()=="true"
         self.extend_rupee_target=env.get("STOCK_OPT_EXTEND_RUPEE_TARGET","false").strip().lower()=="true"
         self.reentry_after_loss=env.get("STOCK_OPT_REENTRY_AFTER_LOSS","false").strip().lower()=="true"
+        self.require_confirmed_breakout=env.get('STOCK_OPT_REQUIRE_CONFIRMED_BREAKOUT','false').strip().lower()=='true'
+        self.staged_profit=env.get('STOCK_OPT_STAGED_PROFIT','false').strip().lower()=='true'
+        self.runner_max_hold_minutes=float(env.get('STOCK_OPT_RUNNER_MAX_HOLD_MINUTES',90))
         numbers = (self.target_pct, self.stop_pct, self.min_rr_target, self.slippage_pct,
                    self.max_spread_pct, self.rupee_target, self.rupee_max_risk,
                    self.min_delta, self.max_delta, self.max_theta_pct_per_day, self.max_premium,
-                   self.poll_interval_sec)
+                   self.poll_interval_sec,self.runner_target,self.daily_loss_limit,self.runner_max_hold_minutes)
         if not all(math.isfinite(v) for v in numbers):
             raise ValueError("Stock option settings must be finite")
         if not (3 <= self.target_pct <= 20 and 0.5 <= self.stop_pct <= 10 and self.min_rr_target >= 1.2
                 and 0 <= self.slippage_pct < 100 and 0 < self.max_spread_pct <= 5
-                and 1 <= self.max_concurrent <= self.max_daily_trades <= 2
-                and self.rupee_target > 0 and self.rupee_max_risk > 0 and self.max_lots >= 1
-                and 0 < self.min_delta < self.max_delta <= 1 and self.min_days_to_expiry >= 4
+                and 1 <= self.max_concurrent <= min(2,self.max_daily_trades) and self.max_daily_trades <= 4
+                and 1 <= self.max_consec_losses <= 4 and self.daily_loss_limit > 0
+                and 0 < self.rupee_target <= self.runner_target and self.rupee_max_risk > 0 and 1<=self.max_lots<=3
+                and 0 < self.min_delta < self.max_delta <= 1 and self.min_days_to_expiry == 0
                 and self.max_theta_pct_per_day > 0 and self.max_premium >= 3
                 and 300 <= self.confirm_window_sec <= 900
                 and 3 <= self.poll_interval_sec <= 5
                 and 1 <= self.no_progress_bars <= self.max_hold_bars_5m):
             raise ValueError("Invalid stock-option target, risk, Greek or entry limits")
+        if not 5<=self.runner_max_hold_minutes<=120:
+            raise ValueError('Runner holding limit must be between 5 and 120 minutes')
 
-    def plan(self, entry: float, qty: int, max_target_price=None):
-        return premium_plan(entry, qty, compute_fno_option_charges, self.target_pct,
+    def plan(self, entry: float, qty: int, max_target_price=None, min_lots=1):
+        # Cash loss is an exit trigger for the whole position, not an entry veto.
+        plan = premium_plan(entry, qty, compute_fno_option_charges, self.target_pct,
                             self.stop_pct, self.min_rr_target, self.slippage_pct,
-                            self.rupee_target, self.max_lots, self.rupee_max_risk,self.extend_rupee_target,max_target_price)
+                            self.rupee_target, self.max_lots, float("inf"),self.extend_rupee_target,max_target_price,
+                            min_lots=min_lots,cash_loss_limit=self.rupee_max_risk)
+        if plan is None:
+            return None
+        units = plan['qty']
+        # Find the first bid tick whose modeled liquidation loss is within the
+        # cash threshold. Replay uses this stop and still fills gaps at the open.
+        lo, hi = 1, math.ceil(entry * 20)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            fill = math.floor(max(0.05, mid/20 * (1-self.slippage_pct/100))*20+1e-9)/20
+            loss = (entry-fill)*units + compute_fno_option_charges(entry,fill,units)
+            if loss <= self.rupee_max_risk: hi = mid
+            else: lo = mid + 1
+        plan['cash_loss_stop_price'] = lo/20
+        plan['expected_net_risk'] = min(plan['expected_net_risk'],self.rupee_max_risk)
+        plan['expected_net_rr'] = plan['expected_net_reward']/plan['expected_net_risk']
+        plan.update(total_risk_limit=self.rupee_max_risk,
+                    expected_net_risk_per_lot=plan['expected_net_risk']/plan['lots'])
+        return plan
 
 
 class DynamicStockOptionsUniverse:
@@ -205,8 +236,10 @@ class DynamicStockOptionsUniverse:
         return True
 
     @classmethod
-    def load_universe(cls, logger: logging.Logger, min_days_to_expiry=4) -> Dict[str, Dict[str, Any]]:
-        today_str = datetime.now().strftime("%Y-%m-%d")
+    def load_universe(cls, logger: logging.Logger, min_days_to_expiry=0) -> Dict[str, Dict[str, Any]]:
+        if min_days_to_expiry != 0:
+            raise ValueError('Current expiry required; minimum DTE cannot select a later expiry')
+        today_str = datetime.now(IST).strftime("%Y-%m-%d")
         cache_file = os.path.join(CACHE_DIR, f"dynamic_optstk_universe_{today_str}_dte{min_days_to_expiry}.json")
         if os.path.exists(cache_file):
             try:
@@ -275,7 +308,7 @@ class DynamicStockOptionsUniverse:
             if base_sym not in eq_map or not contracts:
                 continue
             valid_exps = sorted({c["expiry"] for c in contracts
-                if (datetime.strptime(c["expiry"], "%Y-%m-%d").date() - datetime.now(IST).date()).days >= min_days_to_expiry})
+                if c['expiry'] >= today_str})
             if not valid_exps:
                 continue
             chosen_exp = valid_exps[0]
@@ -343,6 +376,7 @@ class DynamicStockOptionsUniverse:
                     "gamma": gamma, "iv": iv, "opt_type": opt_type,
                     "opt_security_id": str(security_id), "trading_symbol": contract["trading_symbol"],
                     "lot_size": int(stock_info["fno_lot_size"]), "expiry": stock_info["nearest_expiry"],
+                    "entry_contract_oi":leg.get('oi'),
                     "greeks_timestamp": leg.get("received_epoch", time.time()),
                     "greeks_received_epoch": leg.get("received_epoch", time.time())})
             except (KeyError, TypeError, ValueError):
@@ -451,7 +485,7 @@ class DhanStockOptionsClient:
                         and 0 <= age and (final or age <= 15)):
                     issue_count, coverage_count = len(self.history_events), len(self.history_coverage)
                     data = record(validate(cached["data"]),"cache")
-                    if len(self.history_events) == issue_count:
+                    if not self.history_events[issue_count:]:
                         return data
                     # An old partial cache is not authoritative. Try the network;
                     # only the replacement request determines final coverage.
@@ -479,7 +513,7 @@ class DhanStockOptionsClient:
             self.history_request_at = time.monotonic()
             retry = False
             try:
-                response = self.session.post(f"{self.BASE_URL}/charts/{endpoint}", json=request, timeout=(5, 20))
+                response = self.session.post(f"{self.BASE_URL}/charts/{endpoint}", json=request, timeout=(3,5))
                 if response.status_code != 200:
                     retry = response.status_code == 429 or response.status_code >= 500
                     detail = {"http_status": response.status_code}
@@ -499,7 +533,7 @@ class DhanStockOptionsClient:
                     self.history_circuit_opened_at=None
                     issue_count = len(self.history_events)
                     record(validated,"network")
-                    if use_cache and len(self.history_events) == issue_count:
+                    if use_cache and not self.history_events[issue_count:]:
                         self._history_save(str(path), {"version": CACHE_VERSION, "request_key": key,
                             "received_epoch": time.time(), "data": validated})
                     return validated
@@ -582,9 +616,16 @@ class DhanStockOptionsClient:
             return {}
         self._pace_quote()
         try:
-            resp = self.session.post(f"{self.BASE_URL}/marketfeed/ohlc", json=payload, timeout=12)
+            # Full quotes include cumulative session volume; OHLC alone does not.
+            resp = self.session.post(f"{self.BASE_URL}/marketfeed/quote", json=payload, timeout=(3,5))
             if resp.status_code == 200:
-                return resp.json().get("data", {})
+                data=resp.json().get("data", {})
+                received=time.time()
+                for segment in data.values():
+                    if isinstance(segment,dict):
+                        for quote in segment.values():
+                            if isinstance(quote,dict):quote['received_epoch']=received
+                return data
             elif resp.status_code == 429:
                 time.sleep(5.0)
             else:
@@ -599,6 +640,29 @@ class DhanStockOptionsClient:
         time.sleep(max(0, 1.05 - (time.monotonic() - self.last_quote_ts)))
         self.last_quote_ts = time.monotonic()
 
+    def scanner_previous_session(self, security_id):
+        """Cache the completed daily volume reference in memory for this session."""
+        now=datetime.now(IST);key=(str(security_id),now.date().isoformat())
+        cache=getattr(self,'_scanner_daily_cache',{})
+        self._scanner_daily_cache=cache
+        if key in cache:return cache[key]
+        self._pace_quote()
+        try:
+            response=self.session.post(f'{self.BASE_URL}/charts/historical',json={
+                'securityId':str(security_id),'exchangeSegment':'NSE_EQ','instrument':'EQUITY',
+                'expiryCode':0,'oi':False,'fromDate':(now-timedelta(days=10)).date().isoformat(),
+                'toDate':now.date().isoformat()},timeout=15)
+            if response.status_code!=200:return None
+            raw=response.json();raw=raw.get('data',raw)
+            rows=[(datetime.fromtimestamp(float(t),IST).date(),float(raw['volume'][i]),i)
+                  for i,t in enumerate(raw['timestamp']) if datetime.fromtimestamp(float(t),IST).date()<now.date()]
+            date,volume,index=max(rows)
+            if not math.isfinite(volume) or volume<=0:return None
+            cache[key]={'date':date.isoformat(),'volume':volume,'source':'DHAN_DAILY_OHLC',
+                        'high':float(raw['high'][index]),'low':float(raw['low'][index])}
+            return cache[key]
+        except (requests.RequestException,KeyError,TypeError,ValueError,IndexError):return None
+
     def fetch_option_chain(self, underlying_id, expiry):
         expiry = normalize_expiry(expiry)
         if not expiry:
@@ -609,8 +673,9 @@ class DhanStockOptionsClient:
         time.sleep(max(0, 3.05 - (time.monotonic() - self.last_chain_ts)))
         self.last_chain_ts = time.monotonic()
         try:
-            response = self.session.post(f"{self.BASE_URL}/optionchain", json={
-    "UnderlyingScrip": int(underlying_id), "UnderlyingSeg": "NSE_EQ", "Expiry": expiry}, timeout=12)
+            with option_chain_request_slot():
+                response = self.session.post(f"{self.BASE_URL}/optionchain", json={
+                    "UnderlyingScrip": int(underlying_id), "UnderlyingSeg": "NSE_EQ", "Expiry": expiry}, timeout=(3,5))
             if response.status_code == 200:
                 chain = response.json().get("data", {}).get("oc", {})
                 received = time.time()
@@ -630,7 +695,7 @@ class DhanStockOptionsClient:
         self._pace_quote()
         try:
             response = self.session.post(f"{self.BASE_URL}/marketfeed/quote",
-                json={"NSE_FNO": [int(s) for s in security_ids]}, timeout=12)
+                json={"NSE_FNO": [int(s) for s in security_ids]}, timeout=(3,5))
             if response.status_code == 200:
                 quotes = response.json().get("data", {}).get("NSE_FNO", {})
                 received = time.time()
@@ -683,19 +748,19 @@ class DhanStockOptionsClient:
 
 
 def shortlist_movers(quotes, cfg):
-    """Preserve the existing ScanX momentum shortlist: top eight each side."""
+    """Day-change prefilter over every quoted stock; no top-N or price cutoff."""
     bulls, bears = [], []
     for sec_id, quote in quotes.items():
         ltp = float(quote.get("last_price", 0) or 0)
         prev = float(quote.get("ohlc", {}).get("close", 0) or 0)
-        if ltp <= 25 or prev <= 0:
+        if not all(math.isfinite(v) and v>0 for v in (ltp,prev)):
             continue
         change = 100 * (ltp / prev - 1)
         if change >= cfg.min_day_change_pct:
             bulls.append((change, str(sec_id), ltp))
         elif change <= -cfg.min_day_change_pct:
             bears.append((change, str(sec_id), ltp))
-    return sorted(bulls, reverse=True)[:8] + sorted(bears)[:8]
+    return sorted(bulls, reverse=True) + sorted(bears)
 
 
 def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day_change_pct, cfg, reasons=None):
@@ -706,13 +771,27 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
     candles = client.fetch_intraday_candles(stock_info["eq_security_id"], interval="5")
     if not candles:
         return reject("Underlying candle history unavailable")
+    daily_reference=client.scanner_previous_session(stock_info['eq_security_id'])
+    if not daily_reference:return reject('Scanner previous-session daily volume unavailable')
+    current = client.fetch_batch_ohlc([stock_info["eq_security_id"]]).get("NSE_EQ", {}).get(str(stock_info["eq_security_id"]), {})
+    current['previous_session_reference']=daily_reference
+    membership=scanx_stock_membership(candles,current,time.time(),cfg.min_day_change_pct,cfg.ema_period,
+                                     require_daily_volume=not cfg.require_confirmed_breakout)
+    if not membership['allowed']:
+        return reject('Scanner membership: '+membership['reason'])
+    client.logger.info('[STOCK SCANNER %s] %s | %s','CANDIDATE' if cfg.require_confirmed_breakout else 'MATCH',
+                       stock_info['symbol'],json.dumps(membership))
     sig = evaluate_stock_setup(candles, time.time(), cfg.min_day_change_pct, cfg.ema_period,
                                enable_opening_trend=cfg.enable_opening_trend,reasons=reasons,
-                               confirm_window_sec=cfg.confirm_window_sec)
+                               confirm_window_sec=cfg.confirm_window_sec,
+                               previous_close=membership['previous_close'],
+                               require_breakout=cfg.require_confirmed_breakout,previous_session=daily_reference)
     if not sig:
         if reasons:return None
         return reject("No fresh confirmed momentum setup (EMA/VWAP/volume/body/proximity)")
-    current = client.fetch_batch_ohlc([stock_info["eq_security_id"]]).get("NSE_EQ", {}).get(str(stock_info["eq_security_id"]), {})
+    if sig['opt_type']!=membership['opt_type']:
+        return reject('Trade confirmation conflicts with scanner direction')
+    sig['scanner_membership']=membership
     spot_ltp = float(current.get("last_price", 0) or 0)
     if spot_ltp <= 0:
         return reject("Current underlying quote unavailable")
@@ -721,13 +800,42 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
     advance = direction * (spot_ltp - sig["conf_close"])
     if advance < -0.10 * sig["atr_5m"] - 1e-9 or advance > 0.85 * sig["atr_5m"] + 1e-9:
         return reject(f"Underlying follow-through {advance:.2f} outside {-0.10*sig['atr_5m']:.2f} to {0.85*sig['atr_5m']:.2f}")
+    level=(sig.get('breakout_confirmation') or {}).get('trigger_level')
+    if level is not None and direction*(spot_ltp-level)<=0:
+        return reject('Live price has lost the confirmed breakout level')
+    # Older valid five-minute signals must not survive a newer failed impulse.
+    checked_at=time.time()
+    if checked_at-(sig.get('signal_timestamp',checked_at)+300)>=120:
+        minutes=client.fetch_intraday_candles(stock_info['eq_security_id'],interval='1',
+            from_date=datetime.fromtimestamp(checked_at-600,IST).isoformat(),
+            to_date=datetime.fromtimestamp(checked_at,IST).isoformat(),use_cache=False)
+        momentum=recent_entry_momentum(minutes,sig,spot_ltp,time.time())
+        if not momentum['allowed']:return reject(momentum['reason'])
+        sig['fresh_entry_momentum']=momentum
     chain = client.fetch_option_chain(stock_info["eq_security_id"], stock_info["nearest_expiry"])
     if not chain:
         return reject(f"Option chain unavailable for expiry {stock_info['nearest_expiry']}")
     contract = DynamicStockOptionsUniverse.resolve_atm_option(stock_info, spot_ltp, sig["opt_type"], chain, cfg)
     if not contract:
         return reject("No master-matched option with valid broker Greeks in the delta band")
-    return {**sig, **contract, "spot_ltp": spot_ltp, "eq_security_id": stock_info["eq_security_id"]}
+    final_quote=client.fetch_batch_ohlc([stock_info['eq_security_id']]).get('NSE_EQ',{}).get(str(stock_info['eq_security_id']),{})
+    try:
+        if not 0<=quote_received_age(final_quote,time.time())<=8:return reject('Final underlying quote stale or future-dated')
+        final_spot=float(final_quote.get('last_price',0))
+        if not math.isfinite(final_spot) or final_spot<=0:return reject('Final underlying quote unavailable')
+        final_advance=direction*(final_spot-sig['conf_close'])
+        if not -0.10*sig['atr_5m']-1e-9<=final_advance<=0.85*sig['atr_5m']+1e-9:
+            return reject('Underlying confirmation failed during option selection')
+        if level is not None and direction*(final_spot-level)<=0:
+            return reject('Breakout level failed during option selection')
+        if sig.get('fresh_entry_momentum'):
+            final_momentum=recent_entry_momentum(minutes,sig,final_spot,time.time())
+            if not final_momentum['allowed']:return reject(final_momentum['reason'])
+            sig['fresh_entry_momentum']=final_momentum
+    except (TypeError,ValueError,OverflowError):return reject('Final underlying quote malformed')
+    if sig.get('breakout_confirmation'):
+        client.logger.info('[STOCK BREAKOUT CONFIRMED] %s | %s',stock_info['symbol'],json.dumps(sig['breakout_confirmation']))
+    return {**sig, **contract, "spot_ltp": final_spot, "eq_security_id": stock_info["eq_security_id"]}
 
 
 def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
@@ -767,7 +875,7 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
             # target-move estimate and the unchanged cash-risk ceiling.
             delta,theta,gamma=(float(sig[k]) for k in ('delta','theta','gamma'))
             move=1.5*float(sig['atr_5m'])
-            decay=max(0,-theta)*cfg.max_hold_bars_5m*5/(24*60)
+            decay=max(0,-theta)*cfg.max_hold_bars_5m*5/375
             premium_move=abs(delta)*move+0.5*gamma*move*move-decay
             # Strong movers use the explicit 55% scenario screen below; the
             # cash target, full planned RR and cash-risk cap remain mandatory.
@@ -781,6 +889,9 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
             return reject(f"Displayed depth below {plan['lots']} lots")
         if bid <= plan["initial_sl"]:
             return reject("Bid already at or below the planned stop")
+        effective_stop=max(plan['initial_sl'],plan['cash_loss_stop_price'])
+        if ask-bid > 0.40*(ask-effective_stop)+1e-9:
+            return reject('Spread consumes over 40% of effective stop distance')
         if ask * qty + plan["estimated_costs"] > wallet:
             return reject("Insufficient wallet for the planned size")
         delta, theta, gamma, iv = (float(sig[k]) for k in ("delta", "theta", "gamma", "iv"))
@@ -795,16 +906,17 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         if not 0 <= now_epoch-sig.get("greeks_received_epoch", sig["greeks_timestamp"]) <= 120:
             return reject("Greek snapshot received over 120s ago or future-dated")
         dte = (datetime.strptime(sig["expiry"], "%Y-%m-%d").date() - datetime.fromtimestamp(now_epoch, IST).date()).days
-        if dte < cfg.min_days_to_expiry:
-            return reject(f"Only {dte} days to expiry, need {cfg.min_days_to_expiry}")
+        if dte < 0:
+            return reject('Contract already expired')
         theta_pct = max(0, -theta)/ask*100
         if theta_pct > cfg.max_theta_pct_per_day:
             return reject(f"Theta {theta_pct:.2f}%/day above {cfg.max_theta_pct_per_day:.2f}%")
-        decay = max(0, -theta) * cfg.max_hold_bars_5m * 5 / (24*60)
+        decay = max(0, -theta) * cfg.max_hold_bars_5m * 5 / 375
         if decay*qty >= cfg.rupee_target:
             return reject(f"Decay over hold Rs.{decay*qty:.0f} exceeds the Rs.{cfg.rupee_target:.0f} target")
         move = 1.5 * float(sig["atr_5m"])
         expected_gain = abs(delta)*move + 0.5*gamma*move*move - decay
+        if not math.isfinite(expected_gain):return reject('Non-finite expected option move')
         net_gain = expected_gain*qty - plan["target_estimated_costs"]
         minimum_fraction=0.55 if strong_mover else (1.0 if cfg.extend_rupee_target else 0.75)
         required_gain=max(cfg.rupee_target,plan.get('net_profit_target',cfg.rupee_target))*minimum_fraction
@@ -817,11 +929,31 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         iv_limit = 0.9 if strong_mover else 0.8
         if (iv-low)/(high-low) >= iv_limit:
             return reject(f"IV in the top {100*(1-(iv-low)/(high-low)):.0f}% of the chain")
+        sizing={'basis':'Smallest qualifying size','lots':plan['lots']}
+        # Scale only a strong, higher-timeframe-aligned setup that already
+        # passed every one-position entry check. Fresh depth/cash still bind.
+        if float(sig.get('signal_quality',0))>=80 and sig.get('higher_timeframe_aligned'):
+            lot_size=int(sig['lot_size'])
+            for lots in range(plan['lots']+1,min(3,cfg.max_lots)+1):
+                larger=cfg.plan(ask,lot_size,min_lots=lots,
+                    max_target_price=ask+premium_move if cfg.extend_rupee_target and not strong_mover else None)
+                if not larger or larger['lots']!=lots:continue
+                if ask-bid>0.40*(ask-max(larger['initial_sl'],larger['cash_loss_stop_price']))+1e-9:continue
+                units=larger['qty']
+                if min(int(bid_node['quantity']),int(ask_node['quantity']))<units:continue
+                if ask*units+larger['estimated_costs']>wallet or decay*units>=cfg.rupee_target:continue
+                projected=expected_gain*units-larger['target_estimated_costs']
+                if projected<max(1.2*larger['net_profit_target'],1.5*larger['expected_net_risk']):continue
+                plan=larger;qty=units;net_gain=projected
+                sizing={'basis':'Strong aligned setup with buffered reward, funded size and depth',
+                        'lots':lots,'projected_net_gain':round(projected,2),
+                        'planned_total_risk':round(larger['expected_net_risk'],2)}
+                if projected>=cfg.runner_target:break
         try:
             last_trade_age = now_epoch - datetime.strptime(quote["last_trade_time"], "%d/%m/%Y %H:%M:%S").replace(tzinfo=IST).timestamp()
         except (KeyError, TypeError, ValueError):
             last_trade_age = None
-        return {**sig, **plan, "opt_ltp": ask, "bid": bid, "spread_pct": spread,
+        return {**sig, **plan, "opt_ltp": ask, "bid": bid, "spread_pct": spread,"size_selection":sizing,
                 "quoted_spread_points": ask-bid,
                 "spread_fraction_of_initial_risk": (ask-bid)/(ask-plan["initial_sl"]),
                 "bid_room_to_initial_stop": bid-plan["initial_sl"],
@@ -853,33 +985,163 @@ def update_ledger_metrics(ledger):
         ledger[balance] = round(ledger["initial_capital"] + ledger[pnl], 2)
 
 
+def stock_position_value(pos, price=None):
+    """One entry, all booked exits, and optional liquidation of remaining units."""
+    fills=list(pos.get('exit_fills') or [])
+    if any(int(f['qty'])<=0 or not math.isfinite(float(f['price'])) or float(f['price'])<=0 for f in fills):
+        raise ValueError('Invalid recorded partial fill')
+    if price is not None and pos.get('original_qty') is not None:
+        if sum(int(f['qty']) for f in fills)+pos['qty']!=pos['original_qty']:
+            raise ValueError('Remaining and booked quantities do not reconcile')
+    if price is not None:fills.append({'qty':pos['qty'],'price':price})
+    qty=sum(int(f['qty']) for f in fills)
+    if qty<=0:return {'qty':0,'gross':0.0,'fees':0.0,'net':0.0,'price':0.0}
+    weighted=sum(float(f['price'])*int(f['qty']) for f in fills)/qty
+    gross=round((weighted-pos['entry_price'])*qty,2)
+    fees=compute_fno_option_charges(pos['entry_price'],weighted,qty,exit_orders=len(fills))
+    return {'qty':qty,'gross':gross,'fees':fees,'net':round(gross-fees,2),'price':weighted}
+
+
+def book_stock_partial(pos, quote, now, cfg, gate, day):
+    """Book whole lots once; persist the PAPER fill before changing memory."""
+    if not cfg.staged_profit or pos.get('partial_booked') or not (pos.get('runner_assessment') or {}).get('hold'):
+        return None
+    if not 0<=now.timestamp()-(pos.get('runner_assessment') or {}).get('assessed_epoch',0)<=8:return None
+    lot_size=int(pos.get('lot_size',0));lots=int(pos.get('lots',1))
+    if lot_size<=0 or lots<2 or pos['qty']!=lots*lot_size:return None
+    try:
+        bid=float(quote['depth']['buy'][0]['price']);size=int(quote['depth']['buy'][0]['quantity'])
+        if not math.isfinite(bid) or bid<=pos['current_sl'] or size<pos['qty'] or not 0<=quote_received_age(quote,now.timestamp())<=8:return None
+        fill=math.floor(bid*(1-cfg.slippage_pct/100)*20+1e-9)/20
+        # Budget the additional exit order before protecting the base profit.
+        total_net=stock_position_value(pos,fill)['net']
+        if total_net<pos.get('net_profit_target',cfg.rupee_target)+23.60 or total_net>=cfg.runner_target:return None
+        sold=(lots//2)*lot_size
+        updated=dict(pos)
+        updated['original_qty']=pos.get('original_qty',pos['qty'])
+        updated['original_lots']=pos.get('original_lots',lots)
+        updated['qty']=pos['qty']-sold;updated['lots']=updated['qty']//lot_size
+        updated['exit_fills']=list(pos.get('exit_fills') or [])+[{'qty':sold,'price':fill,
+            'timestamp':now.strftime('%Y-%m-%d %H:%M:%S'),'reason':'PARTIAL_BASE_PROFIT'}]
+        updated['partial_booked']=True
+        booked=stock_position_value(updated)
+        updated.update(partial_gross=booked['gross'],partial_net=booked['net'])
+        updated['runner_net_target']=min(cfg.runner_target,
+            booked['net']+cfg.runner_target*updated['qty']/updated['original_qty'])
+        # No second entry fee; reserve the additional exit-order cost.
+        updated['estimated_costs']=float(pos.get('estimated_costs',0))+23.60
+        gate.update_position(day,pos['slot'],updated)
+        pos.clear();pos.update(updated)
+        return {'qty':sold,'price':fill,'booked_net':booked['net']}
+    except (KeyError,TypeError,ValueError,OverflowError):return None
+
+
 def close_paper_position(ledger, pos, price, reason, now):
-    qty = pos["qty"]
-    gross = round((price - pos["entry_price"]) * qty, 2)
-    fees = compute_fno_option_charges(pos["entry_price"], price, qty)
+    totals=stock_position_value(pos,price)
+    qty=totals['qty'];gross=totals['gross'];fees=totals['fees']
     rec = {k: pos[k] for k in ("symbol", "contract", "opt_type", "scanner", "qty", "entry_price")}
     rec.update(timestamp=pos["entry_ts"], exit_timestamp=now.strftime("%Y-%m-%d %H:%M:%S"),
-               lots=pos.get("lots", 1), exit_price=price, gross_pnl=gross, charges=fees, net_pnl=round(gross-fees, 2),
+               lots=pos.get('original_lots',pos.get("lots", 1)),qty=qty,exit_price=totals['price'], gross_pnl=gross, charges=fees, net_pnl=totals['net'],
                r_multiple=round(gross / (pos["opt_1r"] * qty), 2), exit_reason=reason,
                data_source="PAPER_BID_ASK", entry_id=pos["entry_id"])
+    if pos.get('exit_fills'):
+        rec['exit_fills']=list(pos['exit_fills'])+[{'qty':pos['qty'],'price':price,
+            'timestamp':now.strftime('%Y-%m-%d %H:%M:%S'),'reason':reason}]
     rec['learning_risk_rs']=round(float(pos.get('expected_net_risk',pos['opt_1r']*qty+fees)),2)
     rec['learning_r_multiple']=round(rec['net_pnl']/rec['learning_risk_rs'],6) if rec['learning_risk_rs']>0 else None
     # Preserve decision-time evidence when the daily gate closes its position.
     # These fields are observations, not relaxed entry criteria or new signals.
     rec['entry_diagnostics']={k:pos[k] for k in (
-        'signal_timestamp','conf_close','conf_high','conf_low','atr_5m','day_change_pct',
+        'signal_timestamp','conf_close','conf_high','conf_low','atr_5m','day_change_pct','scanner_membership',
+        'cash_price_pressure','volume_confirmation','volume_context','breakout_continuation',
         'ema10_15m','ema10_15m_slope','higher_timeframe_aligned',
         'vwap','bid','opt_ltp','spread_pct','quoted_spread_points',
         'spread_fraction_of_initial_risk','bid_room_to_initial_stop',
-        'initial_sl','rupee_target_price','expected_net_rr','expected_net_risk',
+        'initial_sl','rupee_target_price','expected_net_rr','expected_net_risk','runner_assessment','entry_contract_oi','size_selection',
         'delta','theta','gamma','iv','iv_range_low','iv_range_high','dte',
-        'quote_age_seconds','greeks_receipt_age_seconds','confirmation_age_seconds') if k in pos}
+        'quote_age_seconds','greeks_receipt_age_seconds','confirmation_age_seconds','fresh_entry_momentum','breakout_confirmation',
+        'signal_quality','quality_volume_ratio','selection_analysis','selection_comparison') if k in pos}
     # Idempotent if interrupted between ledger save and closing the daily record.
     if not any(t.get("entry_id") == pos["entry_id"] for t in ledger["trades"]):
         ledger["trades"].append(rec)
         update_ledger_metrics(ledger)
         atomic_write_json(LEDGER_FILE, ledger)
     return rec
+
+
+def assess_stock_runner(pos, quote, underlying, chain, now_epoch, cfg):
+    """Conservative live scenario; never change entry size to reach the runner cap."""
+    target=cfg.runner_target
+    result={'hold':False,'target_net':target,'reason':'Runner evidence unavailable','assessed_epoch':now_epoch}
+    try:
+        target=min(cfg.runner_target,float(pos.get('runner_net_target',cfg.runner_target)))
+        if not math.isfinite(target) or target<=0:return result
+        result['target_net']=target
+        bid=float(quote['depth']['buy'][0]['price']);qty=int(pos['qty'])
+        ask=float(quote['depth']['sell'][0]['price'])
+        if not 0<=quote_received_age(quote,now_epoch)<=8 or not 0<=quote_received_age(underlying,now_epoch)<=8:return result
+        if int(quote['depth']['buy'][0]['quantity'])<qty:return result
+        if not math.isfinite(ask) or qty<=0 or ask<=bid or (ask-bid)/ask*100>cfg.max_spread_pct:return result
+        spot=float(underlying['last_price']);sign=1 if pos['opt_type']=='CE' else -1
+        advance=sign*(spot-float(pos['conf_close']));atr=float(pos['atr_5m'])
+        observations=pos.get('underlying_observations',[])
+        prior=next((v for v in reversed(observations) if 270<=now_epoch-float(v[0])<=450),None)
+        if prior is None:return result
+        impulse=sign*(spot-float(prior[1]))
+        if impulse<0.25*atr:return result
+        if cfg.staged_profit:
+            if len(prior)<3:return result
+            increment=float(underlying['volume'])-float(prior[2])
+            baseline=float((pos.get('volume_context') or {}).get('post_opening_median') or
+                           (pos.get('volume_context') or {}).get('regular_average') or 0)
+            needed_volume=.75*baseline*(now_epoch-float(prior[0]))/300
+            if not all(math.isfinite(v) for v in (increment,baseline,needed_volume)) or baseline<=0 or increment<=0 or increment<needed_volume:
+                return result
+            result['recent_volume']=round(increment,2)
+        hold_limit=(max(cfg.max_hold_bars_5m*5,cfg.runner_max_hold_minutes)
+                    if cfg.staged_profit and pos.get('partial_booked') else cfg.max_hold_bars_5m*5)
+        remaining=hold_limit-(now_epoch-pos['entry_epoch'])/60
+        cutoff=(datetime.fromtimestamp(now_epoch,IST).replace(hour=14,minute=45,second=0,microsecond=0).timestamp()-now_epoch)/60
+        if remaining<5 or cutoff<5 or atr<=0 or advance<0.25*atr:return result
+        node=next(v for k,v in chain.items() if float(k)==float(pos['strike']))[pos['opt_type'].lower()]
+        delta=abs(float(node['greeks']['delta']));theta=abs(float(node['greeks']['theta']))
+        old_oi=float(pos['entry_contract_oi']);current_oi=float(node['oi'])
+        if not all(math.isfinite(v) for v in (bid,spot,advance,atr,delta,theta,old_oi,current_oi)):return result
+        if old_oi<=0 or abs(current_oi-old_oi)<max(float(pos['lot_size']),0.01*old_oi):return result
+        if not cfg.min_delta<=delta<=cfg.max_delta or bid<=pos['entry_price']:return result
+        fill=math.floor(bid*(1-cfg.slippage_pct/100)*20+1e-9)/20
+        net=stock_position_value(pos,fill)['net']
+        needed=max(0,(target-net)/qty)
+        horizon=min(remaining,cutoff,15)
+        gain=max(0,delta*min(3*atr,2*impulse)-theta*horizon/375-bid*cfg.slippage_pct/100)
+        result.update(hold=gain>=1.2*needed,current_net=round(net,2),
+                      oi_regime='LONG_BUILDUP' if current_oi>old_oi else 'SHORT_COVERING',
+                      underlying_impulse_5m=round(impulse,4),
+                      required_premium_gain=round(needed,2),scenario_gain=round(gain,2),
+                      reason='Underlying continuation and held-contract OI support runner' if gain>=1.2*needed else 'Remaining move does not support upper target')
+        return result
+    except (KeyError,TypeError,ValueError,OverflowError,StopIteration,ZeroDivisionError):return result
+
+
+def update_position_quote(position, quote, now_epoch):
+    """Keep observed LTP and executable depth distinct from the entry ask."""
+    if not isinstance(quote,dict) or not 0<=quote_received_age(quote,now_epoch)<=30:return False
+    def positive(value):
+        try:
+            number=float(value)
+            return number if math.isfinite(number) and number>0 else None
+        except (ValueError,TypeError,OverflowError):return None
+    depth=quote.get('depth') or {}
+    if not isinstance(depth,dict):depth={}
+    def top(side):
+        rows=depth.get(side) or []
+        return positive(rows[0].get('price')) if isinstance(rows,list) and rows and isinstance(rows[0],dict) else None
+    ltp=positive(quote.get('last_price'));bid=top('buy');ask=top('sell')
+    if ltp is None and bid is None and ask is None:return False
+    position.update(current_ltp=ltp,current_bid=bid,current_ask=ask,
+                    quote_received_epoch=float(quote['received_epoch']),
+                    quote_price_basis='LTP_WITH_BID_VALUATION')
+    return True
 
 
 def paper_exit(pos, quote, now, cfg):
@@ -892,28 +1154,88 @@ def paper_exit(pos, quote, now, cfg):
         return None
     elapsed = now.timestamp() - pos["entry_epoch"]
     pos["peak_bid"] = max(pos.get("peak_bid", pos["entry_price"]), bid)
+    assessment=pos.get('runner_assessment') or {}
+    runner_hold=bool(assessment.get('hold') and 0<=now.timestamp()-assessment.get('assessed_epoch',now.timestamp())<=8)
     jump = pos["trail_jump"]
-    if jump > 0 and pos["peak_bid"] - pos["entry_price"] >= 2 * jump:
-        pos["current_sl"] = max(pos["current_sl"], round_tick(pos["peak_bid"] - jump))
     price = math.floor(max(0.05, bid * (1 - cfg.slippage_pct/100))*20 + 1e-9)/20
-    net = (price-pos["entry_price"])*pos["qty"] - compute_fno_option_charges(pos["entry_price"], price, pos["qty"])
+    net = stock_position_value(pos,price)['net']
+    staged_wait=cfg.staged_profit and pos.get('lots',1)>=2 and not pos.get('partial_booked')
+    def protect_net_floor(target):
+        if net<target:return
+        lo=math.ceil(pos['entry_price']*20);hi=math.floor(bid*20)
+        if lo>hi:return
+        while lo<hi:
+            mid=(lo+hi)//2;fill=math.floor((mid/20)*(1-cfg.slippage_pct/100)*20+1e-9)/20
+            if stock_position_value(pos,fill)['net']>=target:hi=mid
+            else:lo=mid+1
+        pos['current_sl']=max(pos['current_sl'],lo/20)
+    if staged_wait and jump>0 and pos['peak_bid']-pos['entry_price']>=1.5*jump:
+        protect_net_floor(0.0)
+    if not staged_wait and jump>0 and pos['peak_bid']-pos['entry_price']+1e-9>=2.2*jump:
+        distance=max(0.85*jump,pos['opt_1r']) if runner_hold else 0.85*jump
+        pos['current_sl']=max(pos['current_sl'],round_tick(pos['peak_bid']-distance))
+    if runner_hold and not staged_wait:
+        protect_net_floor(max(0,pos.get('partial_net',0)) if pos.get('partial_booked')
+                          else pos.get('net_profit_target',cfg.rupee_target))
     reason = None
-    if bid <= pos["current_sl"]:
+    if net <= -cfg.rupee_max_risk:
+        reason = "CASH_LOSS_LIMIT"
+    elif bid <= pos["current_sl"]:
         reason = "TRAIL_STOP" if pos["current_sl"] > pos["initial_sl"] else "PREMIUM_STOP"
-    elif bid >= pos["rupee_target_price"]:
+    elif pos.get('partial_booked') and not runner_hold:
+        reason='RUNNER_CONFIRMATION_LOST'
+    elif runner_hold and net>=min(cfg.runner_target,pos.get('runner_net_target',cfg.runner_target)):
+        reason='RUNNER_NET_TARGET'
+    elif not runner_hold and bid >= pos["rupee_target_price"]:
         reason = "RUPEE_TARGET"
-    elif bid >= pos["hard_target_price"]:
+    elif not runner_hold and bid >= pos["hard_target_price"]:
         reason = "PREMIUM_TARGET"
     elif now.time().replace(tzinfo=None) >= SESSION_END_TIME:
         reason = "EOD_SQUAREOFF"
     elif elapsed >= cfg.no_progress_bars * 300 and pos["peak_bid"] < pos["entry_price"] + jump:
         reason = "NO_PROGRESS"
-    elif elapsed >= cfg.max_hold_bars_5m * 300:
+    elif elapsed >= (max(cfg.max_hold_bars_5m*5,cfg.runner_max_hold_minutes)*60
+                     if cfg.staged_profit and pos.get('partial_booked') and runner_hold else cfg.max_hold_bars_5m*300):
         reason = "TIME_EXIT"
     return (price, reason) if reason else None
 
 
+def executed_stock_outcomes(ledger, gate):
+    """Executed outcomes remain risk/learning evidence after reporting exclusions."""
+    records={str(t.get("entry_id",i)):dict(t) for i,t in enumerate(ledger.get("trades",[]))}
+    path=getattr(gate,"path",None)
+    if isinstance(path,(str,os.PathLike)):
+        from pathlib import Path
+        for filename in Path(path).glob("*.json"):
+            try:
+                saved=json.loads(filename.read_text(encoding="utf-8"))
+                trade=saved.get("close_details",{})
+                if saved.get("state")=="closed" and trade.get("entry_id") and "net_pnl" in trade:
+                    records[str(trade["entry_id"])]=trade
+            except (OSError,ValueError,TypeError):
+                raise ValueError("Unreadable execution history; reconcile before new entries")
+    return sorted(records.values(),key=lambda t:t.get("exit_timestamp",t.get("timestamp","")))
+
+
+def stock_daily_risk_reason(outcomes, positions, cfg, today, additional_risk=0):
+    trades=sorted((t for t in outcomes if str(t.get("timestamp","")).startswith(today)),
+                  key=lambda t:t.get("exit_timestamp",t.get("timestamp","")))
+    net=sum(float(t["net_pnl"]) for t in trades)
+    losses=0
+    for trade in reversed(trades):
+        if float(trade["net_pnl"])>0:break
+        losses+=1
+    if losses>=cfg.max_consec_losses:return "Consecutive net-loss limit reached"
+    reserved=sum(float(p.get("expected_net_risk",p.get("opt_1r",0)*p.get("qty",0))) for p in positions)
+    if net-reserved-float(additional_risk)<-cfg.daily_loss_limit or net<=-cfg.daily_loss_limit:
+        return "Daily loss budget including open-position risk exhausted"
+    return None
+
+
+@single_bot_session("STOCK")
 def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
+    if live_mode:
+        raise RuntimeError("LIVE disabled: broker fill and exit reconciliation is not implemented; use PAPER.")
     env = load_dotenv_file(".env")
     if not env.get("DHAN_CLIENT_ID") or not env.get("DHAN_ACCESS_TOKEN"):
         raise ValueError("Missing Dhan credentials in .env")
@@ -938,13 +1260,16 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
         else:
             positions.append(position)
     telegram = TelegramNotifier(env, logger, "LIVE" if live_mode else "PAPER") if TelegramNotifier and not scan_once else None
-    logger.info("Stock options: max %d/day | net target Rs.%.0f | estimated risk cap Rs.%.0f",
+    logger.info("Stock options: max %d/day | net target Rs.%.0f | cash loss exit Rs.%.0f per position",
                 cfg.max_daily_trades, cfg.rupee_target, cfg.rupee_max_risk)
     logger.info("Entry profile: gap continuation %s | cash-target extension %s | maximum %d lots",
                 cfg.enable_opening_trend,cfg.extend_rupee_target,cfg.max_lots)
     logger.info("Market quote refresh: %.1fs; position checks also run between screening requests",
                 cfg.poll_interval_sec)
+    logger.info('Stock PAPER runner upper cap Rs.%.0f | staged profit %s | extended runner cap %.0f minutes',
+                cfg.runner_target,cfg.staged_profit,cfg.runner_max_hold_minutes)
     market_quotes = {}
+    runner_chains = {}
     next_refresh = 0.0
     servicing = False
 
@@ -966,7 +1291,45 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                 # Receipt timestamps are stamped after HTTP completes. Using
                 # the pre-request time would give fresh depth a negative age.
                 now = datetime.now(IST)
+                for pos in positions:
+                    update_position_quote(pos,quotes.get(str(pos['opt_security_id']),{}),now.timestamp())
                 for pos in positions[:]:
+                    urgent_quote=quotes.get(str(pos["opt_security_id"]),{})
+                    try:urgent_bid=float(urgent_quote['depth']['buy'][0]['price'])
+                    except (KeyError,TypeError,ValueError,IndexError):continue
+                    urgent=paper_exit(pos,urgent_quote,now,cfg)
+                    if urgent and urgent[1] in ("CASH_LOSS_LIMIT","TRAIL_STOP","PREMIUM_STOP","EOD_SQUAREOFF","NO_PROGRESS","TIME_EXIT"):
+                        rec=close_paper_position(ledger,pos,*urgent,now)
+                        gate.mark_closed(today,rec,pos["slot"])
+                        positions.remove(pos)
+                        logger.info("[PAPER OPTSTK EXIT] %s | %s | net Rs.%+.2f",pos["contract"],urgent[1],rec["net_pnl"])
+                        if telegram:telegram.exited(rec)
+                for pos in positions[:]:
+                    quote=quotes.get(str(pos['opt_security_id']),{})
+                    try:
+                        bid=float(quote['depth']['buy'][0]['price'])
+                        net=stock_position_value(pos,bid)['net']
+                        if net>=pos.get('net_profit_target',cfg.rupee_target):
+                            # Refresh held-contract Greeks/OI only when a runner is relevant.
+                            context=runner_chains.get(str(pos['opt_security_id'])) or {}
+                            if time.time()-context.get('received_epoch',0)>30:
+                                fresh_chain=client.fetch_option_chain(pos['eq_security_id'],pos['expiry'])
+                                context={'received_epoch':time.time(),'chain':fresh_chain or {}}
+                                runner_chains[str(pos['opt_security_id'])]=context
+                            decision_now=datetime.now(IST)
+                            old=(pos.get('runner_assessment') or {}).get('hold')
+                            pos['runner_assessment']=assess_stock_runner(pos,quote,
+                                market_quotes.get(str(pos.get('eq_security_id','')),{}),context.get('chain',{}),decision_now.timestamp(),cfg)
+                            if old!=pos['runner_assessment']['hold']:
+                                logger.info('[STOCK RUNNER] %s | %s',pos['symbol'],json.dumps(pos['runner_assessment']))
+                            now=decision_now
+                    except (KeyError,TypeError,ValueError,IndexError):
+                        pos['runner_assessment']={'hold':False,'reason':'Runner quote malformed'}
+                    partial=book_stock_partial(pos,quote,now,cfg,gate,today)
+                    if partial:
+                        logger.info('[PAPER OPTSTK PARTIAL] %s | %d units @ %.2f | booked net Rs.%+.2f',
+                            pos['contract'],partial['qty'],partial['price'],partial['booked_net'])
+                        if telegram:telegram.partial(pos,partial)
                     decision = paper_exit(pos, quotes.get(str(pos["opt_security_id"]), {}), now, cfg)
                     if decision:
                         rec = close_paper_position(ledger, pos, *decision, now)
@@ -977,12 +1340,22 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                             telegram.exited(rec)
                     else:
                         state = (pos["current_sl"], pos["peak_bid"])
-                        if state != tuple(pos.get("persisted_state") or ()):
+                        quote_due=(pos.get('quote_received_epoch',0)-pos.get('persisted_quote_epoch',0)>=30)
+                        if state != tuple(pos.get("persisted_state") or ()) or quote_due:
                             pos["persisted_state"] = state
+                            pos['persisted_quote_epoch']=pos.get('quote_received_epoch',0)
                             gate.update_position(today, pos["slot"], pos)
+                        if telegram:telegram.position(pos)
             if SESSION_START_TIME <= now.time().replace(tzinfo=None) < SESSION_END_TIME:
                 # Clear a failed refresh instead of reusing an older scan quote.
                 market_quotes = client.fetch_batch_ohlc(list(universe)).get("NSE_EQ", {})
+                for pos in positions:
+                    observed=market_quotes.get(str(pos.get('eq_security_id','')),{})
+                    if 0<=quote_received_age(observed,time.time())<=8:
+                        stamp=float(observed['received_epoch']);spot=float(observed['last_price'])
+                        history=[v for v in pos.get('underlying_observations',[]) if stamp-float(v[0])<=600]
+                        if not history or stamp>history[-1][0]:history.append([stamp,spot,observed.get('volume')])
+                        pos['underlying_observations']=history
         finally:
             servicing = False
 
@@ -993,7 +1366,14 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
             if now.strftime("%Y-%m-%d") != today or now.weekday() >= 5 or (now.time().replace(tzinfo=None) >= SESSION_END_TIME and not positions):
                 return
             service_market_data()
-            completed = [] if scan_once else [t for t in ledger["trades"] if str(t.get("timestamp", "")).startswith(today)]
+            outcomes=[] if scan_once else executed_stock_outcomes(ledger,gate)
+            completed = [t for t in outcomes if str(t.get("timestamp", "")).startswith(today)]
+            risk_reason=None if scan_once else stock_daily_risk_reason(outcomes,positions,cfg,today)
+            if risk_reason:
+                logger.warning("[STOCK RISK] %s",risk_reason)
+                if not positions:return
+                time.sleep(cfg.poll_interval_sec)
+                continue
             consumed = 0 if scan_once else max(gate.count_entries(today), len(completed)+len(positions))
             if consumed >= cfg.max_daily_trades or len(positions) >= cfg.max_concurrent:
                 if not positions:
@@ -1012,47 +1392,78 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
             candidates = []
             used_symbols = {p["symbol"] for p in positions}
             if not cfg.reentry_after_loss:used_symbols|={t['symbol'] for t in completed}
-            for change, sec_id, ltp in shortlist:
-                service_market_data()
-                if datetime.now(IST).strftime("%Y-%m-%d") != today or datetime.now(IST).time().replace(tzinfo=None) >= SESSION_END_TIME:
-                    break
-                if sec_id not in universe or universe[sec_id]["symbol"] in used_symbols:
-                    continue
-                if cfg.reentry_after_loss:
-                    reason=stock_reentry_reason(universe[sec_id]['symbol'],completed,time.time())
-                    if reason:
-                        logger.info('[OPTSTK REENTRY WAIT] %s | %s',universe[sec_id]['symbol'],reason)
+            def screened_candidates():
+                pool=[]
+                pool_started=None
+                def ranked_pool():
+                    ranked=rank_candidates(pool,executed_stock_outcomes(ledger,gate),time.time())
+                    comparison=[{'symbol':c['symbol'],**c['selection_analysis']} for c in ranked]
+                    if comparison:logger.info('[STOCK SELECTION] %s',json.dumps(comparison))
+                    for candidate in ranked:
+                        candidate['selection_comparison']=comparison
+                        yield candidate
+                    pool.clear()
+                for change, sec_id, ltp in shortlist:
+                    service_market_data()
+                    # Compare a small live group, not the entire slow universe.
+                    # Check the soft deadline between requests; final quotes are
+                    # rebuilt before entry even when a request runs long.
+                    if pool and time.monotonic()-pool_started>=8:
+                        yield from ranked_pool()
+                        pool_started=None
+                    if datetime.now(IST).strftime("%Y-%m-%d") != today or datetime.now(IST).time().replace(tzinfo=None) >= SESSION_END_TIME:
+                        break
+                    if sec_id not in universe or universe[sec_id]["symbol"] in used_symbols:
                         continue
-                signal_reasons = []
-                sig = verify_live_scanx_and_resolve_stock_option(client, universe[sec_id], ltp, change, cfg, reasons=signal_reasons)
-                if sig:
                     if cfg.reentry_after_loss:
-                        reason=stock_reentry_reason(sig['symbol'],completed,time.time(),sig['signal_timestamp'])
+                        reason=stock_reentry_reason(universe[sec_id]['symbol'],completed,time.time())
                         if reason:
-                            logger.info('[OPTSTK REENTRY WAIT] %s | %s',sig['symbol'],reason)
+                            logger.info('[OPTSTK REENTRY WAIT] %s | %s',universe[sec_id]['symbol'],reason)
                             continue
-                    signals.append(sig)
-                    depth = client.fetch_option_quotes([sig["opt_security_id"]])
-                    reasons = []
-                    qualified = qualify_quote(sig, depth.get(str(sig["opt_security_id"]), {}), cfg, wallet, reasons=reasons)
-                    if qualified:
-                        candidates.append(qualified)
+                    signal_reasons = []
+                    sig = verify_live_scanx_and_resolve_stock_option(client, universe[sec_id], ltp, change, cfg, reasons=signal_reasons)
+                    if sig:
+                        if cfg.reentry_after_loss:
+                            reason=stock_reentry_reason(sig['symbol'],completed,time.time(),sig['signal_timestamp'])
+                            if reason:
+                                logger.info('[OPTSTK REENTRY WAIT] %s | %s',sig['symbol'],reason)
+                                continue
+                        signals.append(sig)
+                        depth = client.fetch_option_quotes([sig["opt_security_id"]])
+                        reasons = []
+                        qualified = qualify_quote(sig, depth.get(str(sig["opt_security_id"]), {}), cfg, wallet, reasons=reasons)
+                        if qualified:
+                            candidates.append(qualified)
+                            if not scan_once:
+                                if not pool:pool_started=time.monotonic()
+                                pool.append(qualified)
+                                if len(pool)>=3:
+                                    yield from ranked_pool()
+                                    pool_started=None
+                        else:
+                            logger.info("[OPTSTK REJECT] %s %s | %s", sig["symbol"], sig["opt_type"], reasons[0] if reasons else "Unspecified rejection")
                     else:
-                        logger.info("[OPTSTK REJECT] %s %s | %s", sig["symbol"], sig["opt_type"], reasons[0] if reasons else "Unspecified rejection")
-                else:
-                    logger.info("[OPTSTK REJECT] %s | %s", universe[sec_id]["symbol"], signal_reasons[0] if signal_reasons else "Setup unavailable")
-            ranked = rank_candidates(candidates,ledger.get('trades',[]) if ledger else [],time.time())
-            logger.info("Shortlist %d | confirmed %d | qualified %d", len(shortlist), len(signals), len(ranked))
+                        logger.info("[OPTSTK REJECT] %s | %s", universe[sec_id]["symbol"], signal_reasons[0] if signal_reasons else "Setup unavailable")
+                if pool:yield from ranked_pool()
             if scan_once:
+                list(screened_candidates())
+                ranked = rank_candidates(candidates, [], time.time())
+                logger.info("Shortlist %d | confirmed %d | qualified %d", len(shortlist), len(signals), len(ranked))
                 return
             capacity = min(cfg.max_concurrent-len(positions), cfg.max_daily_trades-consumed)
             entered = 0
-            for best in ranked:
+            # Bounded comparison chooses among qualified setups; every choice
+            # gets a fresh final recheck before a durable reservation.
+            for best in screened_candidates():
+                selection_comparison=best.get('selection_comparison',[])
                 service_market_data()
                 # Screening can now close a position. Recalculate cash and
                 # reserved slots before qualification and never reuse its funds
                 # or its symbol based on a stale scan-start snapshot.
-                completed = [t for t in ledger["trades"] if str(t.get("timestamp", "")).startswith(today)]
+                outcomes=executed_stock_outcomes(ledger,gate)
+                completed = [t for t in outcomes if str(t.get("timestamp", "")).startswith(today)]
+                if stock_daily_risk_reason(outcomes,positions,cfg,today,best.get("expected_net_risk",0)):
+                    continue
                 consumed = max(gate.count_entries(today), len(completed)+len(positions))
                 if consumed >= cfg.max_daily_trades or len(positions) >= cfg.max_concurrent:
                     break
@@ -1089,19 +1500,30 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                 now = datetime.now(IST)
                 if not best or now.time().replace(tzinfo=None) >= SESSION_END_TIME:
                     continue
-                refreshed=rank_candidates([best],ledger.get('trades',[]),now.timestamp())
+                refreshed=rank_candidates([best],executed_stock_outcomes(ledger,gate),now.timestamp())
                 if not refreshed:
                     logger.info("[OPTSTK LEARNING PAUSE] %s | Recent closed net losses for this setup",symbol)
                     continue
                 best=refreshed[0]
+                best['selection_comparison']=selection_comparison
+                # Recheck the final sized plan after screening may have serviced
+                # exits or changed available cash/risk.
+                outcomes=executed_stock_outcomes(ledger,gate)
+                if stock_daily_risk_reason(outcomes,positions,cfg,today,best.get('expected_net_risk',0)):
+                    continue
+                available=ledger['virtual_balance_net']-sum(p['entry_price']*p['qty']+p['estimated_costs'] for p in positions)
+                if best['opt_ltp']*best['qty']+best['estimated_costs']>available:
+                    continue
                 slot = next((i for i in range(1, cfg.max_daily_trades+1) if gate.read(today, i) is None), None)
                 if slot is None:
                     break
                 pos = {**best, "index": best["symbol"], "option_type": best["opt_type"], "slot": slot,
                     "contract": f"{best['symbol']} {best['strike']:g}_{best['opt_type']}",
-                    "entry_price": best["opt_ltp"], "current_ltp": best["opt_ltp"], "peak_bid": best["opt_ltp"],
+                    "entry_price": best["opt_ltp"], "current_ltp": None, "peak_bid": best["opt_ltp"],
                     "current_sl": best["initial_sl"], "entry_ts": now.strftime("%Y-%m-%d %H:%M:%S"),
                     "entry_epoch": now.timestamp(), "entry_id": f"STOCK_{today}_{slot}"}
+                update_position_quote(pos,fresh.get(str(best['opt_security_id']),{}),now.timestamp())
+                pos['persisted_quote_epoch']=pos.get('quote_received_epoch',0)
                 if not gate.reserve(today, {"mode": "LIVE" if live_mode else "PAPER", "position": pos}, slot):
                     return
                 entered += 1
@@ -1118,6 +1540,8 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                     logger.info("[PAPER OPTSTK ENTRY] %s | %d lots @ %.2f", pos["contract"], pos["lots"], pos["entry_price"])
                     if telegram:
                         telegram.position(pos, entry=True)
+            logger.info("Shortlist %d | confirmed %d | qualified %d | entered %d",
+                        len(shortlist), len(signals), len(candidates), entered)
             if live_mode and gate.count_entries(today):
                 return
             time.sleep(max(0.05, next_refresh-time.monotonic()))
@@ -1127,10 +1551,12 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
             telegram.close()
 
 
-def simulate_fixed_premium_trade(entry_ts, bars, qty, cfg):
-    """Real OHLC only. Reject missing bars/rolling-strike changes; stop first on ties."""
-    if not SESSION_START_TIME <= datetime.fromtimestamp(entry_ts, IST).time().replace(tzinfo=None) < SESSION_END_TIME:
-        return None
+def simulate_fixed_premium_trade(entry_ts, bars, qty, cfg, opt_type="CE"):
+    """Conservative fixed-strike OHLC replay; incomplete paths are unvalidated.
+
+    This is a price-path simulation, not a reconstruction of historical depth,
+    Greeks, contract selection or the live runner overlay.
+    """
     first = bars.get(entry_ts)
     if not first or first.get("strike", 0) <= 0 or not 3 <= first.get("open", 0) <= cfg.max_premium:
         return None
@@ -1138,43 +1564,50 @@ def simulate_fixed_premium_trade(entry_ts, bars, qty, cfg):
     plan = cfg.plan(entry, qty)
     if not plan:
         return None
-    stop, peak = plan["initial_sl"], entry
+    stop, peak = max(plan["initial_sl"],plan['cash_loss_stop_price']), entry
     target = min(plan["hard_target_price"], plan["rupee_target_price"])
+    entry_strike = float(first["strike"])
     for offset in range(cfg.max_hold_bars_5m):
         ts = entry_ts + offset * 300
         bar = bars.get(ts)
-        if not bar or bar.get("strike") != first["strike"]:
+        if not bar or float(bar.get("strike", 0)) != entry_strike:
             return None
         o, h, l, c = (float(bar[k]) for k in ("open", "high", "low", "close"))
         if not all(math.isfinite(x) and x > 0 for x in (o,h,l,c)) or not l <= min(o,c) <= max(o,c) <= h:
             return None
-        price, reason = None, None
-        # Existing stop first; a newly raised trail only applies to following bars.
-        # OHLC does not establish whether the high preceded the low.
-        if o <= stop:
-            price, reason = o, "TRAIL_STOP" if stop > plan["initial_sl"] else "PREMIUM_STOP"
+        bar_time = datetime.fromtimestamp(ts, IST).time().replace(tzinfo=None)
+        close_time = datetime.fromtimestamp(ts + 300, IST).time().replace(tzinfo=None)
+        # The open is observed before either intrabar extreme. Gaps fill at the
+        # executable open; otherwise stop-first resolves unknowable bar order.
+        if bar_time >= SESSION_END_TIME:
+            price, reason, exit_ts = o, "EOD_SQUAREOFF", ts
+        elif o <= stop:
+            price, reason, exit_ts = o, ("CASH_LOSS_LIMIT" if stop == plan['cash_loss_stop_price'] and stop > plan['initial_sl'] else "TRAIL_STOP" if stop > plan["initial_sl"] else "PREMIUM_STOP"), ts
         elif o >= target:
-            price, reason = target, "RUPEE_TARGET"
+            price, reason, exit_ts = o, "RUPEE_TARGET", ts
         elif l <= stop:
-            price, reason = min(o, stop), "TRAIL_STOP" if stop > plan["initial_sl"] else "PREMIUM_STOP"
+            price, reason, exit_ts = stop, ("CASH_LOSS_LIMIT" if stop == plan['cash_loss_stop_price'] and stop > plan['initial_sl'] else "TRAIL_STOP" if stop > plan["initial_sl"] else "PREMIUM_STOP"), ts + 300
         elif h >= target:
-            price, reason = target, "RUPEE_TARGET"
-        elif datetime.fromtimestamp(ts+300, IST).time().replace(tzinfo=None) >= SESSION_END_TIME:
-            price, reason = c, "EOD_SQUAREOFF"
+            price, reason, exit_ts = target, "RUPEE_TARGET", ts + 300
+        elif close_time >= SESSION_END_TIME:
+            price, reason, exit_ts = c, "EOD_SQUAREOFF", ts + 300
         else:
-            peak = max(peak, h)
-            if offset+1 >= cfg.no_progress_bars and peak < entry+plan["trail_jump"]:
-                price, reason = c, "NO_PROGRESS"
-            elif offset == cfg.max_hold_bars_5m-1:
-                price, reason = c, "TIME_EXIT"
-            if peak-entry >= 2*plan["trail_jump"]:
-                stop = max(stop, round_tick(peak-plan["trail_jump"]))
+            peak = max(peak,h)
+            price, reason, exit_ts = c, None, ts + 300
+            if offset + 1 >= cfg.no_progress_bars and peak < entry + plan["trail_jump"]:
+                reason = "NO_PROGRESS"
+            elif offset == cfg.max_hold_bars_5m - 1:
+                reason = "TIME_EXIT"
+            # Ratchets from this bar only become executable on the next bar.
+            jump = plan["trail_jump"]
+            if jump > 0 and peak - entry + 1e-9 >= 2.2 * jump:
+                stop = max(stop,round_tick(peak - 0.85 * jump))
         if reason:
-            # Floor fills to avoid rounding away the modeled adverse slippage.
-            price = math.floor(max(0.05,price*(1-cfg.slippage_pct/100))*20 + 1e-9)/20
-            return {**plan, "entry_price": entry, "exit_price": price, "exit_reason": reason,
-                "exit_timestamp": datetime.fromtimestamp(ts+300,IST).strftime("%Y-%m-%d %H:%M:%S"),
-                "strike": first["strike"]}
+            price = math.floor(max(0.05,price*(1-cfg.slippage_pct/100))*20+1e-9)/20
+            return {**plan,"entry_price":entry,"exit_price":price,"exit_reason":reason,
+                    "exit_timestamp":datetime.fromtimestamp(exit_ts,IST).strftime("%Y-%m-%d %H:%M:%S"),
+                    "strike":entry_strike,"simulation_scope":("BASE_EXIT_ONLY_EXCLUDES_LIVE_STAGED_RUNNER"
+                        if cfg.staged_profit else "FIXED_STRIKE_OHLC_ONLY")}
     return None
 
 
@@ -1221,27 +1654,40 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current
             lower=bisect_left(candles['timestamp'],(dt-timedelta(days=5)).replace(hour=0,minute=0,second=0,microsecond=0).timestamp()) if current_implementation else 0
             prefix = {k: v[lower:i+1] for k, v in candles.items() if isinstance(v, list)}
             sig = evaluate_stock_setup(prefix, ts+300, cfg.min_day_change_pct, cfg.ema_period,
-                                        enable_opening_trend=cfg.enable_opening_trend,confirm_window_sec=cfg.confirm_window_sec)
+                                        enable_opening_trend=cfg.enable_opening_trend,confirm_window_sec=cfg.confirm_window_sec,
+                                        require_breakout=cfg.require_confirmed_breakout)
             if sig:
                 signals[(ts+300, sec)] = sig
     ledger = {"mode": "BACKTEST", "initial_capital": cfg.initial_capital, "trades": [],
               "entry_configuration":{"opening_trend":cfg.enable_opening_trend,"extend_rupee_target":cfg.extend_rupee_target,
+                  "require_confirmed_breakout":cfg.require_confirmed_breakout,
+                  "staged_profit":cfg.staged_profit,"runner_max_hold_minutes":cfg.runner_max_hold_minutes,
                   "rupee_target":cfg.rupee_target,"rupee_max_risk":cfg.rupee_max_risk,"max_lots":cfg.max_lots,
                   "min_net_rr":cfg.min_rr_target,"max_spread_pct":cfg.max_spread_pct,"confirm_window_sec":cfg.confirm_window_sec,
-                  "signal_lookback_calendar_days":5 if current_implementation else None},
+                  "signal_lookback_calendar_days":5 if current_implementation else None,
+                  "daily_loss_limit":cfg.daily_loss_limit,"max_consecutive_net_losses":cfg.max_consec_losses},
               "limitations": ["Current universe and lot sizes; historical membership not reconstructed",
                               "Five-minute OHLC lacks bid/ask and intrabar path; modeled slippage, not verified fills",
                               "Missing bars or rolling ATM strike changes are unvalidated, never synthetic",
                               "Exit-policy replay only: historical broker Greeks, IV range, DTE and delta-selected contracts unavailable",
-                              "Trailing stops advance on following bars; same-bar trail path is unvalidated"]}
+                              "Trailing stops advance on following bars; same-bar trail path is unvalidated",
+                              "Live staged profit/runner decisions require archived decision-time quotes, volume and OI; not reconstructed by this base-exit replay"]}
     used_days, option_maps, skipped = {}, {}, 0
     data_skips, strategy_rejections = Counter(), Counter()
     active_until = []
     used_symbols = {}
+    unresolved_days=set()
     for ts in sorted(snapshots):
         day = datetime.fromtimestamp(ts, IST).strftime("%Y-%m-%d")
         active_until = [end_ts for end_ts in active_until if end_ts > ts]
         if used_days.get(day, 0) >= cfg.max_daily_trades or len(active_until) >= cfg.max_concurrent:
+            continue
+        if day in unresolved_days:continue
+        known=[t for t in ledger['trades'] if datetime.strptime(t['exit_timestamp'],'%Y-%m-%d %H:%M:%S').replace(tzinfo=IST).timestamp()<=ts]
+        pending=[t for t in ledger['trades'] if t not in known]
+        risk_reason=stock_daily_risk_reason(known,pending,cfg,day)
+        if risk_reason:
+            strategy_rejections[risk_reason]+=1
             continue
         candidates = []
         for _, sec, _ in shortlist_movers(snapshots[ts], cfg):
@@ -1292,13 +1738,18 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current
             entry = round_tick(option_maps[best["map_key"]][ts]["open"]*(1+cfg.slippage_pct/100))
             if entry*best["qty"] + best["estimated_costs"] > wallet:
                 continue
+            risk_reason=stock_daily_risk_reason(known,pending,cfg,day,best.get('expected_net_risk',0))
+            if risk_reason:
+                strategy_rejections[risk_reason]+=1
+                continue
             wallet -= entry*best["qty"] + best["estimated_costs"]
             # Consume date BEFORE looking at future outcome, including missing data.
             used_symbols.setdefault(day, set()).add(best["symbol"])
             active_until.append(ts + cfg.max_hold_bars_5m*300)
             used_days[day] = used_days.get(day, 0) + 1
-            sim = simulate_fixed_premium_trade(ts, option_maps[best["map_key"]], best["lot_size"], cfg)
+            sim = simulate_fixed_premium_trade(ts, option_maps[best["map_key"]], best["lot_size"], cfg, best["opt_type"])
             if sim is None:
+                unresolved_days.add(day)
                 data_skips["simulation_missing_invalid_bars_or_strike_change"] += 1
                 skipped += 1
                 continue
@@ -1313,7 +1764,10 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current
                 "gross_pnl": gross, "charges": fees, "net_pnl": round(gross-fees, 2),
                 "scanner":best['scanner'],"learning_risk_rs":best.get('expected_net_risk',sim['opt_1r']*qty+fees),
                 "data_source": "ROLLING_ATM_5M_UNVERIFIED_CONTRACT_IDENTITY"})
+            pending.append(ledger["trades"][-1])
+    ledger['limitations'].append('Live selective up-sizing and the PAPER runner require fresh depth, Greeks and underlying quotes; this baseline historical replay does not reproduce those decisions.')
     update_ledger_metrics(ledger)
+    ledger["unresolved_session_dates"]=sorted(unresolved_days)
     ledger["unvalidated_candidates_or_outcomes"] = skipped
     ledger["stock_coverage"] = len(frames)
     events = client.history_events
@@ -1336,11 +1790,11 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Selective stock options: best confirmed shortlist setup, maximum two entries per day")
+    parser = argparse.ArgumentParser(description="Selective stock options: confirmed setups, maximum four entries per day and two concurrent positions")
     parser.add_argument("--live", action="store_true", help="Submit capped rupee-target brackets with broker trailing stops; verify fills in Dhan")
     parser.add_argument("--scan-once", action="store_true", help="Rank current qualifying setups without trading")
     parser.add_argument("--backtest-days", type=int, default=0)
-    parser.add_argument("--max-stocks", type=int, default=50, help="Historical coverage, alphabetically selected; 0 for all")
+    parser.add_argument("--max-stocks", type=int, default=0, help="Historical coverage; 0 scans the full universe, positive values limit alphabetically")
     parser.add_argument("--min-pct", type=float, default=None)
     parser.add_argument("--min-rr", type=float, default=None, help="Minimum estimated net reward/risk, at least 1.2")
     parser.add_argument("--reset-ledger", action="store_true", help="Reset stock paper ledger; does not reset daily entry limit")
@@ -1354,4 +1808,8 @@ if __name__ == "__main__":
         if result["status"] == "INCOMPLETE_DATA":
             raise SystemExit(2)
     else:
-        run_dynamic_stock_options_session(args.live, args.scan_once, strat_cfg, log)
+        try:
+            run_dynamic_stock_options_session(args.live, args.scan_once, strat_cfg, log)
+        except Exception:
+            log.exception('Stock-options session stopped unexpectedly; saved reservations must be recovered before new entries.')
+            raise

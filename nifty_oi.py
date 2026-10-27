@@ -7,7 +7,9 @@ IST=timezone(timedelta(hours=5,minutes=30))
 
 
 class NiftyOITracker:
-    def __init__(self):
+    def __init__(self, strike_step=50):
+        if strike_step <= 0:raise ValueError("Strike step must be positive")
+        self.strike_step=strike_step
         self.history=deque(maxlen=200)
         self.context=None
 
@@ -27,7 +29,7 @@ class NiftyOITracker:
                 if not math.isfinite(strike) or strike<=0:continue
                 for side in ('ce','pe'):
                     raw=sides.get(side,{})
-                    if not isinstance(raw,dict):continue
+                    if not isinstance(raw,dict) or 'oi' not in raw or 'last_price' not in raw:continue
                     oi=float(raw['oi']);price=float(raw['last_price'])
                     if not all(math.isfinite(v) and v>=0 for v in (oi,price)):continue
                     previous=raw.get('previous_oi')
@@ -36,18 +38,18 @@ class NiftyOITracker:
                     nodes[(strike,side)]={'oi':oi,'price':price,'previous_oi':previous,
                                           'security_id':str(raw.get('security_id',raw.get('securityId','')))}
             except (KeyError,TypeError,ValueError,OverflowError):continue
-        eligible=[s for s in self.history if 300<=now-s['time']<=390]
+        eligible=[s for s in self.history if 270<=now-s['time']<=450]
         prior=eligible[-1] if eligible else None
-        put_anchor=math.floor(spot/50)*50
-        calls=[put_anchor+50+i*50 for i in range(3)]
-        puts=[put_anchor-i*50 for i in range(3)]
+        put_anchor=math.floor(spot/self.strike_step)*self.strike_step
+        calls=[put_anchor+self.strike_step+i*self.strike_step for i in range(3)]
+        puts=[put_anchor-i*self.strike_step for i in range(3)]
         basket=[(k,'ce') for k in calls]+[(k,'pe') for k in puts]
         reason='Five-minute OI comparison ready'
         ready=True
         if any(k not in nodes or nodes[k]['price']<=0 for k in basket):
             ready=False;reason='Missing current contract OI or premium'
         elif prior is None:
-            ready=False;reason='Need a same-expiry snapshot 300–390 seconds earlier'
+            ready=False;reason='Need a same-expiry snapshot 270–450 seconds earlier'
         elif any(k not in prior['nodes'] or prior['nodes'][k]['price']<=0 for k in basket):
             ready=False;reason='Current contracts absent in five-minute reference'
         elif any(nodes[k]['security_id'] and prior['nodes'][k]['security_id'] and nodes[k]['security_id']!=prior['nodes'][k]['security_id'] for k in basket):
@@ -61,7 +63,7 @@ class NiftyOITracker:
                 reference[prefix+'_prem']=sum(prior['nodes'][k]['price'] for k in keys)
         rows=[]
         for (strike,side),node in nodes.items():
-            if abs(strike-spot)>500:continue
+            if abs(strike-spot)>10*self.strike_step:continue
             old=prior['nodes'].get((strike,side)) if prior else None
             same=old and (not node['security_id'] or not old['security_id'] or node['security_id']==old['security_id'])
             rows.append({'strike':strike,'side':side,'oi':node['oi'],
@@ -86,6 +88,11 @@ class NiftyOITracker:
               'support_put_oi':supports,'resistance_call_oi':resistances,
               'nearby_strikes':sorted(rows,key=lambda r:(r['strike'],r['side'])),
               'freshness_limit':'Response receipt time does not establish exchange OI update time'}
+        if reference is not None:
+            for side in ('ce','pe'):
+                current=[nodes[k] for k in basket if k[1]==side]
+                info[side+'_oi_change_5m']=sum(n['oi'] for n in current)-reference[side+'_oi']
+                info[side+'_premium_change_5m']=sum(n['price'] for n in current)-reference[side+'_prem']
         if self.history and now<=self.history[-1]['time']:
             self.history.clear();reference=None;info.update(ready=False,reason='Non-increasing snapshot time')
         self.history.append({'time':now,'spot':spot,'nodes':nodes})

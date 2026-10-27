@@ -14,6 +14,7 @@ venv/
 
 # Downloaded market data and runtime logs
 dhan_hist_cache/
+stock_option_daily_entries/
 *.log
 
 # Local editor and agent files

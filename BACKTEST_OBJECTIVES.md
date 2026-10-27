@@ -1,8 +1,9 @@
 # Current backtest objectives
 
-Updated October 23, 2026 at the user's request.
+Updated October 25, 2026 at the user's request.
 
-- Primary research target: Rs.15,000 gross profit per month, before brokerage and other charges.
+- Primary research target: at least Rs.15,000 combined Nifty and Sensex net profit per month, after modeled brokerage and other charges.
+- Each index must also show average net profit per winning trade above Rs.1,000. This alone does not establish positive expectancy or satisfy the monthly objective.
 - This supersedes the earlier Rs.10,000 gross per ten trading days research objective. Historical reports retain their original objectives and results for auditability.
 - Report net profit after modeled charges alongside gross profit; never describe gross results as take-home profit.
 - Retain the separately requested Rs.1,200 net daily closing objective. This is a daily stopping rule, not a requirement to force a trade or guarantee a daily return.

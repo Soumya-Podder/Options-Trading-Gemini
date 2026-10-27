@@ -11,6 +11,7 @@ import os
 import sys
 import time
 import subprocess
+from stock_option_policy import single_bot_session
 from datetime import datetime
 PROJECT_DIR=os.path.dirname(os.path.abspath(__file__))
 
@@ -29,22 +30,27 @@ MODE = os.environ.get("DHAN_BOT_MODE", "PAPER" if PAPER_FLAG == "true" else "LIV
 PYTHON_EXEC = sys.executable
 
 
+@single_bot_session("LAUNCHER")
 def main():
+    if MODE != "PAPER":
+        raise RuntimeError("LIVE disabled pending broker reconciliation; launcher supports PAPER only")
     print(f"[{datetime.now()}] Session Manager started. Mode: {MODE}")
     
     index_process = None
     stock_process = None
     dashboard_process = None
     reported_exits = set()
+    restarts={"Index bot":0,"Stock-options bot":0}
+    child_env={**os.environ,"DHAN_BOT_MODE":"PAPER","PAPER_MODE":"true"}
 
     try:
         # 1. Launch the Real-Data Self-Learning Options Bot Engine
-        index_cmd = [PYTHON_EXEC, "dhan_bot_engine.py", "--indices", "NIFTY"]
+        index_cmd = [PYTHON_EXEC, "dhan_bot_engine.py", "--indices", "NIFTY,SENSEX"]
         if MODE == "LIVE":
             index_cmd.append("--live")
 
         print(f"[{datetime.now()}] Launching {' '.join(index_cmd)} (Mode: {MODE})...")
-        index_process = subprocess.Popen(index_cmd,cwd=PROJECT_DIR)
+        index_process = subprocess.Popen(index_cmd,cwd=PROJECT_DIR,env=child_env)
 
         # Stagger startup to avoid an initial burst of data requests.
         time.sleep(3.0)
@@ -53,14 +59,14 @@ def main():
         if MODE == "LIVE":
             stock_cmd.append("--live")
         print(f"[{datetime.now()}] Launching {' '.join(stock_cmd)} (Mode: {MODE})...")
-        stock_process = subprocess.Popen(stock_cmd,cwd=PROJECT_DIR)
+        stock_process = subprocess.Popen(stock_cmd,cwd=PROJECT_DIR,env=child_env)
 
         # Give the bot 3 seconds to initialize connections & local state
         time.sleep(3.0)
 
         # 2. Launch the Live Terminal Dashboard
         print(f"[{datetime.now()}] Launching bot_dashboard.py...")
-        dashboard_process = subprocess.Popen([PYTHON_EXEC, "bot_dashboard.py", "--refresh", "2.0"],cwd=PROJECT_DIR)
+        dashboard_process = subprocess.Popen([PYTHON_EXEC, "bot_dashboard.py", "--refresh", "2.0"],cwd=PROJECT_DIR,env=child_env)
 
         # 3. Monitor loop until 02:46 PM IST or manual termination
         while True:
@@ -77,6 +83,16 @@ def main():
             if "Stock-options bot" not in reported_exits and stock_done:
                 reported_exits.add("Stock-options bot")
                 print(f"[{datetime.now()}] Stock engine finished (code {stock_process.returncode}); index continues.")
+            for name,proc,command in (("Index bot",index_process,index_cmd),("Stock-options bot",stock_process,stock_cmd)):
+                if proc.returncode is not None and isinstance(proc.returncode,int) and proc.returncode!=0:
+                    now=datetime.now()
+                    if now.weekday()<5 and now.time()<datetime.strptime("14:45","%H:%M").time() and restarts[name]<2:
+                        restarts[name]+=1
+                        print(f"[{now}] {name} crashed; PAPER recovery attempt {restarts[name]}/2. Saved reservations remain consumed.")
+                        replacement=subprocess.Popen(command,cwd=PROJECT_DIR,env=child_env)
+                        if name=="Index bot":index_process=replacement;index_done=False
+                        else:stock_process=replacement;stock_done=False
+                        reported_exits.discard(name)
             if index_done and stock_done:
                 break
 

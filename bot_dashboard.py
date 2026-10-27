@@ -6,11 +6,9 @@ Fixes Windows CMD/PowerShell scrollback stacking and line-wrap truncation.
 """
 
 import os
-import re
 import sys
 import time
 import json
-import math
 import argparse
 from datetime import datetime
 from typing import Dict, Any
@@ -43,35 +41,17 @@ def clear_terminal() -> None:
 
 
 def safe_read_json(filepath: str, default: Any) -> Any:
-    if not os.path.exists(filepath):
-        return default
     for _ in range(3):
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 return json.load(f)
+        except FileNotFoundError:
+            return default
         except (json.JSONDecodeError, OSError):
             time.sleep(0.05)
     return default
 
 
-def parse_rule_signature(sig: str) -> Dict[str, str]:
-    out = {
-        "wall": "SUB_50L_DIFF",
-        "ce": "NEUTRAL",
-        "pe": "NEUTRAL",
-        "ctrl": "SCANNING",
-        "dom": "BALANCED_CHOP",
-        "dir": "HOLD",
-    }
-    if not sig:
-        return out
-    for key in ("wall", "ce", "pe", "ctrl", "dom"):
-        m = re.search(rf"{key}=([A-Z0-9_]+)", sig)
-        if m:
-            out[key] = m.group(1)
-    if "->" in sig:
-        out["dir"] = sig.split("->")[-1].strip()
-    return out
 
 
 def format_quadrant_badge(quad: str) -> str:
@@ -134,67 +114,6 @@ def build_oi_tug_of_war_bar(diff_ce_minus_pe_lakhs: float, threshold_lakhs: floa
     return f"BULL(PE) [{left}|{right}] BEAR(CE) {status}"
 
 
-def reconstruct_telemetry_from_files(
-    ledger: Dict[str, Any], rules: Dict[str, Any], log_path: str
-) -> Dict[str, Any]:
-    trades = ledger.get("trades", [])
-    last_trade = trades[-1] if trades else {}
-    last_sig = last_trade.get("rule_used", "")
-    if not last_sig and rules:
-        last_sig = list(rules.keys())[-1]
-    parsed = parse_rule_signature(last_sig)
-    nifty_spot = 22492.0
-    sensex_spot = 81465.0
-    nifty_diff_l = 58.0 if parsed["wall"] == "CALL_SIDE_GT_50L" else (-56.5 if parsed["wall"] == "PUT_SIDE_GT_50L" else 22.4)
-    sensex_diff_l = 52.5 if parsed["wall"] == "CALL_SIDE_GT_50L" else (-54.0 if parsed["wall"] == "PUT_SIDE_GT_50L" else 18.0)
-
-    if os.path.exists(log_path):
-        try:
-            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
-                lines = f.readlines()[-40:]
-            for line in reversed(lines):
-                m = re.search(r"Diff\s*=\s*([+\-0-9,]+)", line)
-                if m:
-                    raw_diff = int(m.group(1).replace(",", ""))
-                    if "NIFTY" in line:
-                        nifty_diff_l = round(raw_diff / 100_000.0, 2)
-                    elif "SENSEX" in line:
-                        sensex_diff_l = round(raw_diff / 100_000.0, 2)
-                    break
-        except OSError:
-            pass
-
-    def make_index_view(idx: str, spot: float, step: int, diff_lakhs: float) -> Dict[str, Any]:
-        put_anchor = int(math.floor(spot / step) * step)
-        call_anchor = put_anchor + step
-        call_strikes = [call_anchor + i * step for i in range(3)]
-        put_strikes = [put_anchor - i * step for i in range(3)]
-        base_pe_l = 94.0 if idx == "NIFTY" else 62.0
-        ce_l = round(base_pe_l + diff_lakhs, 2)
-        return {
-            "spot": spot,
-            "call_strikes_above": call_strikes,
-            "put_strikes_below": put_strikes,
-            "ce_3strike_lakhs": max(15.0, ce_l),
-            "pe_3strike_lakhs": base_pe_l,
-            "diff_ce_minus_pe_lakhs": diff_lakhs,
-            "exceeds_50_lakhs": abs(diff_lakhs) >= 50.0,
-            "ce_quadrant": parsed["ce"] if parsed["ce"] != "NEUTRAL" else "SHORT_BUILDUP",
-            "pe_quadrant": parsed["pe"] if parsed["pe"] != "NEUTRAL" else "SHORT_COVERING",
-            "market_controller": parsed["ctrl"] if parsed["ctrl"] != "SCANNING" else "BUYERS_AND_CALL_WRITERS_ALIGNED",
-            "market_dominance": parsed["dom"],
-            "data_health": last_trade.get("data_health", "LIVE_CLEAN"),
-        }
-
-    return {
-        "updated_at": datetime.now().strftime("%H:%M:%S"),
-        "api_poll_interval_sec": 3.0,
-        "indices": {
-            "NIFTY": make_index_view("NIFTY", nifty_spot, 50, nifty_diff_l),
-            "SENSEX": make_index_view("SENSEX", sensex_spot, 100, sensex_diff_l),
-        },
-        "active_position": None,
-    }
 
 
 def render_dashboard(
@@ -202,7 +121,6 @@ def render_dashboard(
     rules_file: str,
     brain_file: str,
     telemetry_file: str,
-    log_file: str,
 ) -> None:
     ledger = safe_read_json(
         ledger_file,
@@ -222,9 +140,9 @@ def render_dashboard(
     )
     rules = safe_read_json(rules_file, {})
     brain = safe_read_json(brain_file, {"epsilon": 0.08, "replay_buffer": []})
-    telemetry = safe_read_json(telemetry_file, None)
-    if telemetry is None:
-        telemetry = reconstruct_telemetry_from_files(ledger, rules, log_file)
+    telemetry = safe_read_json(telemetry_file, {})
+    if not isinstance(telemetry, dict):
+        telemetry = {}
 
     mode = ledger.get("mode", "PAPER")
     init_cap = float(ledger.get("initial_capital", 30000.0))
@@ -238,7 +156,7 @@ def render_dashboard(
     win_rate = (len(wins) / len(trades) * 100.0) if trades else 0.0
     avg_win = float(ledger.get("avg_winning_value_rs", 0.0))
     avg_loss = float(ledger.get("avg_losing_value_rs", 0.0))
-    wl_ratio = float(ledger.get("win_to_loss_ratio", avg_win / max(avg_loss, 1.0) if avg_loss > 0 else 0.0))
+    wl_ratio = float(ledger.get("win_to_loss_ratio", avg_win / max(avg_loss, 1.0) if avg_loss > 0 else 0.0) or 0.0)
 
     clear_terminal()
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S IST")
@@ -270,19 +188,28 @@ def render_dashboard(
     lines.append(border)
 
     indices_data = telemetry.get("indices", {})
+    if not isinstance(indices_data, dict):
+        indices_data = {}
+    last_view = telemetry.get("last_view")
+    if isinstance(last_view, dict) and last_view.get("index") in ("NIFTY", "SENSEX"):
+        indices_data = {**indices_data, last_view["index"]: last_view}
     for idx_name in ("NIFTY", "SENSEX"):
         info = indices_data.get(idx_name, {})
-        spot = float(info.get("spot", 22492.0 if idx_name == "NIFTY" else 81465.0))
-        c_strikes = info.get("call_strikes_above", [22500, 22550, 22600])
-        p_strikes = info.get("put_strikes_below", [22450, 22400, 22350])
-        ce_l = float(info.get("ce_3strike_lakhs", 152.0))
-        pe_l = float(info.get("pe_3strike_lakhs", 94.0))
+        if not info or any(info.get(key) is None for key in ("spot", "ce_3strike_lakhs", "pe_3strike_lakhs")):
+            lines.append(f"{CYAN}|{RESET} {idx_name}: Waiting for verified telemetry")
+            lines.append(border)
+            continue
+        spot = float(info["spot"])
+        c_strikes = info.get("call_strikes_above", [])
+        p_strikes = info.get("put_strikes_below", [])
+        ce_l = float(info["ce_3strike_lakhs"])
+        pe_l = float(info["pe_3strike_lakhs"])
         diff_l = float(info.get("diff_ce_minus_pe_lakhs", ce_l - pe_l))
-        ce_q = info.get("ce_quadrant", "SHORT_BUILDUP")
-        pe_q = info.get("pe_quadrant", "LONG_BUILDUP")
-        ctrl = info.get("market_controller", "BUYERS_AND_CALL_WRITERS_ALIGNED")
-        dom = info.get("market_dominance", "BEARS_DOMINATING")
-        health = info.get("data_health", "LIVE_CLEAN")
+        ce_q = info.get("ce_quadrant", "NEUTRAL")
+        pe_q = info.get("pe_quadrant", "NEUTRAL")
+        ctrl = info.get("market_controller", "UNKNOWN")
+        dom = info.get("market_dominance", "UNKNOWN")
+        health = info.get("data_health", "UNKNOWN")
         c_str = "+".join(str(s) for s in c_strikes)
         p_str = "+".join(str(s) for s in p_strikes)
         tug_bar = build_oi_tug_of_war_bar(diff_l, threshold_lakhs=50.0)
@@ -325,7 +252,10 @@ def render_dashboard(
                 else f"{GREEN}AUTONOMOUS HUNTING (Gate: >=50L Wall + 4-Quadrant Alignment){RESET}"
             )
         )
-        lines.append(f"{CYAN}|{RESET} {BOLD}STATE:{RESET} FLAT  {BOLD}GUARDRAIL:{RESET} {guard_mode}")
+        state_label = "FLAT" if telemetry else "UNKNOWN"
+        if not indices_data:
+            guard_mode = f"{YELLOW}Awaiting verified telemetry{RESET}"
+        lines.append(f"{CYAN}|{RESET} {BOLD}STATE:{RESET} {state_label}  {BOLD}GUARDRAIL:{RESET} {guard_mode}")
     lines.append(border)
 
     rule_objs = list(rules.values())
@@ -397,12 +327,11 @@ if __name__ == "__main__":
     parser.add_argument("--rules", default="learned_rules.json")
     parser.add_argument("--brain", default="bot_brain_state.json")
     parser.add_argument("--telemetry", default="live_telemetry.json")
-    parser.add_argument("--log", default="dhan_bot_session.log")
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
     try:
         while True:
-            render_dashboard(args.ledger, args.rules, args.brain, args.telemetry, args.log)
+            render_dashboard(args.ledger, args.rules, args.brain, args.telemetry)
             if args.once:
                 break
             time.sleep(args.refresh)

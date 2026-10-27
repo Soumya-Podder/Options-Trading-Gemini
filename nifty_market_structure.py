@@ -6,10 +6,93 @@ from market_regime import opening_trend
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
+def assess_nifty_opening_reclaim(index_bars, ce_contract, pe_contract, as_of, spot):
+    """Research-only opening signal; never substitutes for live qualification.
+
+    Uses two contiguous, closed one-minute observations and identical-strike,
+    same-expiry option histories. Timestamp labels are conservatively treated
+    as candle starts. Historical OHLC cannot establish executable depth or fills.
+    """
+    result={'ready':False,'candidate_dir':'HOLD','qualified_for_execution':False,
+            'reason':'Opening reclaim inputs unavailable','source':'INDEX_AND_EXACT_OPTION_1M',
+            'execution_enabled':False}
+    try:
+        if not all(math.isfinite(float(v)) for v in (as_of,spot)) or spot<=0:return result
+        now=datetime.fromtimestamp(as_of,IST)
+        if not (9,15)<=(now.hour,now.minute)<(9,30):
+            result['reason']='Outside opening-reclaim research window';return result
+        if (ce_contract['side']!='CE' or pe_contract['side']!='PE'
+                or ce_contract['strike']!=pe_contract['strike']
+                or not math.isfinite(float(ce_contract['strike'])) or float(ce_contract['strike'])<=0
+                or not ce_contract.get('expiry') or ce_contract['expiry']!=pe_contract.get('expiry')
+                or not ce_contract.get('security_id') or not pe_contract.get('security_id')):
+            result['reason']='Opening contracts do not identify the same strike and expiry';return result
+
+        def closed_rows(rows, option=False):
+            out={}
+            for row in rows:
+                stamp=float(row['timestamp'])
+                if not math.isfinite(stamp) or stamp!=int(stamp) or stamp in out:raise ValueError()
+                dt=datetime.fromtimestamp(stamp,IST)
+                if dt.date()!=now.date() or not (9,15)<=(dt.hour,dt.minute)<(9,30) or stamp+60>as_of:continue
+                o,h,l,c=(float(row[k]) for k in ('open','high','low','close'))
+                if not all(math.isfinite(v) and v>0 for v in (o,h,l,c)) or not l<=min(o,c)<=max(o,c)<=h:raise ValueError()
+                value={**row,'open':o,'high':h,'low':l,'close':c}
+                if option:
+                    oi=float(row['open_interest'])
+                    if not math.isfinite(oi) or oi<=0:raise ValueError()
+                    value['open_interest']=oi
+                out[int(stamp)]=value
+            return out
+
+        index=closed_rows(index_bars)
+        if len(index)<2:
+            result['reason']='Need two closed one-minute index candles';return result
+        older,latest=sorted(index)[-2:]
+        if latest-older!=60 or not 0<=as_of-(latest+60)<=60:
+            result['reason']='Opening confirmation is stale or gapped';return result
+        options={'CE':closed_rows(ce_contract['candles'],True),
+                 'PE':closed_rows(pe_contract['candles'],True)}
+        if any(t not in rows for rows in options.values() for t in (older,latest)):
+            result['reason']='Missing matching one-minute option/OI observations';return result
+        a,b=index[older],index[latest]
+        direction='BUY_PE' if b['close']<a['low']-2 else 'BUY_CE' if b['close']>a['high']+2 else 'HOLD'
+        result.update(ready=True,signal_candle_epoch=latest,earliest_decision_epoch=latest+60)
+        if direction=='HOLD':
+            result['reason']='No closed opening-range break';return result
+        side,writer=('PE','CE') if direction=='BUY_PE' else ('CE','PE')
+        previous,current=options[side][older],options[side][latest]
+        writer_old,writer_now=options[writer][older],options[writer][latest]
+        option_change=current['close']-previous['close']
+        writer_change=writer_now['close']-writer_old['close']
+        writer_build=writer_now['open_interest']-writer_old['open_interest']
+        selected_build=current['open_interest']-previous['open_interest']
+        if not (current['close']>previous['high'] and option_change>0 and selected_build!=0 and writer_change<0 and writer_build>0):
+            result['reason']='No option reclaim with opposing writer buildup';return result
+        span=b['high']-b['low'];body=abs(b['close']-b['open'])
+        close_strength=(b['high']-b['close']) if side=='PE' else (b['close']-b['low'])
+        if span<=0 or body/span<0.5 or close_strength/span<0.7:
+            result['reason']='Opening index candle lacks directional strength';return result
+        sign=-1 if side=='PE' else 1
+        advance=sign*(spot-b['close'])
+        if advance < -2 or advance>max(5,span*0.25):
+            result['reason']='Opening price has left the confirmation zone';return result
+        result.update(candidate_dir=direction,reason='Closed one-minute break, option reclaim and matched writer OI',
+                      strike=ce_contract['strike'],expiry=ce_contract['expiry'],
+                      underlying_trigger=a['low'] if side=='PE' else a['high'],
+                      option_reclaim_level=previous['high'],writer_oi_change=writer_build,
+                      selected_oi_change=current['open_interest']-previous['open_interest'],
+                      selected_price_change=option_change,writer_price_change=writer_change,
+                      reference_seconds=60)
+        return result
+    except (KeyError,TypeError,ValueError,OverflowError):
+        result['reason']='Malformed opening-reclaim input';return result
+
+
 def assess_nifty_structure(candles, chain, as_of, spot, direction,
                            buffer=3.0, min_room=20.0, min_structure_rr=1.5, trigger_levels=None,
                            include_nearest=False, enable_opening_trend=False, enable_opening_drive=False,
-                           confirm_window_sec=600):
+                           confirm_window_sec=600, enable_breakout_entries=False):
     """Return auditable levels and a gate; never treat OI as a certain barrier."""
     result = {"allowed": False, "ready":False,"reason": "Price structure unavailable", "source": "INDEX_5M_OHLC"}
     try:
@@ -111,12 +194,17 @@ def assess_nifty_structure(candles, chain, as_of, spot, direction,
                       put_oi_buildup=put_buildup,call_oi_buildup=call_buildup,
                       nearest_put_oi_level=nearest_put,nearest_call_oi_level=nearest_call,
                       swing_levels=sorted(set(swings)),confirmation_close=latest["close"])
+        if enable_breakout_entries and len(today)>=7:
+            base=today[-4:-1]
+            scale=sum(b["high"]-b["low"] for b in today[-10:])/len(today[-10:])
+            if max(b["high"] for b in base)-min(b["low"] for b in base)<=1.5*scale:
+                result["entry_levels"]=[max(b["high"] for b in base),min(b["low"] for b in base)]
         if direction not in ("BUY_CE","BUY_PE"):
             result["reason"]="No directional OI/momentum signal"
             return result
         bullish=direction=="BUY_CE"
         sign=1 if bullish else -1
-        if sign*(latest["close"]-latest["open"])<=0 or sign*(spot-latest["close"]) < -buffer:
+        if sign*(latest["close"]-latest["open"])<=0 or (not enable_breakout_entries and sign*(spot-latest["close"]) < -buffer):
             result["reason"]="Price has not held directional confirmation"
             return result
         candle_range=latest["high"]-latest["low"]
@@ -127,7 +215,11 @@ def assess_nifty_structure(candles, chain, as_of, spot, direction,
             return result
         recent=today[-10:]
         ranges=[max(b["high"]-b["low"],abs(b["high"]-a["close"]),abs(b["low"]-a["close"])) for a,b in zip(recent,recent[1:])]
-        chase_limit=max(buffer,0.25*sum(ranges)/len(ranges))
+        atr=sum(ranges)/len(ranges)
+        chase_limit=max(buffer,0.25*atr)
+        if enable_breakout_entries and sign*(spot-latest["close"]) < -max(buffer,0.35*atr):
+            result["reason"]="Pullback exceeds volatility-bounded confirmation zone"
+            return result
         if sign*(spot-latest["close"])>chase_limit:
             result["reason"]="Current price has advanced beyond the confirmation entry zone"
             return result
@@ -136,6 +228,10 @@ def assess_nifty_structure(candles, chain, as_of, spot, direction,
             "day_high","day_low","range_high_before_confirmation","range_low_before_confirmation")]
             +swings+[r["strike"] for r in (put_wall,call_wall,put_buildup,call_buildup) if r]
             +([r["strike"] for r in (nearest_put,nearest_call) if r] if include_nearest else [])))
+        if enable_breakout_entries and len(today)>=7:
+            base=today[-4:-1]
+            if max(b["high"] for b in base)-min(b["low"] for b in base)<=1.5*atr:
+                entry_levels=sorted(set(entry_levels+[max(b["high"] for b in base),min(b["low"] for b in base)]))
         result["entry_levels"]=entry_levels
         events=[]
         if regime and regime['direction']==direction:
@@ -157,7 +253,13 @@ def assess_nifty_structure(candles, chain, as_of, spot, direction,
             previous_touch=previous["low"]<=level+buffer and previous["high"]>=level-buffer
             rejected=(beyond and previous_beyond and previous_touch
                       and sign*(latest["close"]-(previous["high"] if bullish else previous["low"]))>buffer)
-            if continued and (held or retest or rejected):
+            fresh=(enable_breakout_entries and beyond and not previous_beyond and touched
+                   and sign*(spot-level)>buffer and body/candle_range>=0.5
+                   and close_strength/candle_range>=0.7 and candle_range<=2.0*atr
+                   and sign*(latest["close"]-level)<=atr)
+            if fresh:
+                events.append((abs(spot-level),level,"BREAKOUT_CONFIRMED"))
+            if continued and (held or retest or rejected) and (not enable_breakout_entries or sign*(spot-level)>buffer):
                 setup="RETEST_CONFIRMED" if retest else "BREAKOUT_HOLD" if held else "REJECTION_CONFIRMED"
                 events.append((abs(spot-level),level,setup))
         if not events:
@@ -167,7 +269,9 @@ def assess_nifty_structure(candles, chain, as_of, spot, direction,
         # Exclude the latest candle's high/low from the next pre-existing obstacle.
         opposing=[v for v in entry_levels if sign*(v-spot)>0]
         room=min((sign*(v-spot) for v in opposing),default=None)
-        risk=abs(spot-(min(level,latest["low"]) if bullish else max(level,latest["high"])))
+        invalidation=(max(level,latest["low"]) if bullish else min(level,latest["high"])) if enable_breakout_entries else (min(level,latest["low"]) if bullish else max(level,latest["high"]))
+        risk=sign*(spot-invalidation)
+        result["invalidation_level"]=invalidation
         result.update(setup=event,trigger_level=level,next_opposing_level=(spot+sign*room if room is not None else None),
                       room_points=room,structural_risk_points=risk,
                       structure_rr=(room/risk if room is not None and risk>0 else None))
@@ -184,7 +288,7 @@ def assess_nifty_structure(candles, chain, as_of, spot, direction,
 
 def apply_nifty_level_entry(analysis, candles, chain, as_of, include_nearest=False,
                             enable_opening_trend=False, enable_opening_drive=False, enable_price_levels=False,
-                            confirm_window_sec=600):
+                            confirm_window_sec=600, enable_breakout_entries=False):
     """Generate direction from a marked OI level, closed reaction and same-strike OI.
 
     Mark walls from the five-minute reference, before the confirmation candle.
@@ -192,10 +296,10 @@ def apply_nifty_level_entry(analysis, candles, chain, as_of, include_nearest=Fal
     Mutates the analysis used by both execution and replay, leaving basket tags
     available as diagnostics rather than direction prerequisites.
     """
-    analysis["entry_model"]="LEVEL_CANDLE_AND_STRIKE_OI_V1"
+    analysis["entry_model"]="LEVEL_CANDLE_AND_STRIKE_OI_V2" if enable_breakout_entries else "LEVEL_CANDLE_AND_STRIKE_OI_V1"
     analysis['entry_profile']={'opening_trend':enable_opening_trend,'opening_drive':enable_opening_drive,
                                'nearest_level_expansion':include_nearest,'price_level_confirmation':enable_price_levels,
-                               'confirm_window_sec':confirm_window_sec,'strong_day_range_points':80}
+                               'confirm_window_sec':confirm_window_sec,'strong_day_range_points':80,'breakout_entries':enable_breakout_entries}
     analysis["recommended_dir"]="HOLD"
     rejected={"ready":False,"allowed":False,"reason":"Need matched five-minute strike OI", "source":"INDEX_5M_OHLC"}
     analysis["market_structure"]=rejected
@@ -224,6 +328,8 @@ def apply_nifty_level_entry(analysis, candles, chain, as_of, include_nearest=Fal
                 direction="BUY_CE" if side=="pe" else "BUY_PE"
             elif change<0 and premium>0:
                 direction="BUY_CE" if side=="ce" else "BUY_PE"
+            if enable_breakout_entries and abs(change)<max(100000.0,prior*0.01):
+                continue
             if direction:
                 confirmations[direction].setdefault(strike,[]).append(dict(row))
         except (KeyError,TypeError,ValueError,OverflowError):
@@ -232,7 +338,7 @@ def apply_nifty_level_entry(analysis, candles, chain, as_of, include_nearest=Fal
     # OI/premium confirmation remains mandatory for every trigger.
     probe=assess_nifty_structure(candles,marked,as_of,analysis["spot"],"HOLD",include_nearest=include_nearest,
                                  enable_opening_trend=enable_opening_trend,enable_opening_drive=enable_opening_drive,
-                                 confirm_window_sec=confirm_window_sec)
+                                 confirm_window_sec=confirm_window_sec,enable_breakout_entries=enable_breakout_entries)
     if not probe.get("ready"):
         analysis["market_structure"]=probe
         return probe
@@ -250,6 +356,7 @@ def apply_nifty_level_entry(analysis, candles, chain, as_of, include_nearest=Fal
             price_levels=[v for k,v in probe['levels'].items() if k not in (
                 'day_high','day_low','range_high_before_confirmation','range_low_before_confirmation')]
             price_levels+=probe.get('swing_levels',[])
+            if enable_breakout_entries:price_levels+=probe.get('entry_levels',[])
             for level in price_levels:
                 nearest=min(available_strikes,key=lambda k:(abs(k-level),k))
                 if nearest in rows and abs(nearest-level)<=25:
@@ -267,7 +374,7 @@ def apply_nifty_level_entry(analysis, candles, chain, as_of, include_nearest=Fal
         structure=assess_nifty_structure(candles,marked,as_of,analysis["spot"],direction,
                                         trigger_levels=triggers,include_nearest=include_nearest,
                                         enable_opening_trend=enable_opening_trend,enable_opening_drive=enable_opening_drive,
-                                 confirm_window_sec=confirm_window_sec)
+                                 confirm_window_sec=confirm_window_sec,enable_breakout_entries=enable_breakout_entries)
         structure.update(entry_model=analysis["entry_model"],level_reference_age_seconds=oi.get("reference_age_seconds"))
         checks[direction]={k:structure.get(k) for k in ("allowed","reason","trigger_level","setup","room_points","structure_rr")}
         checks[direction]["oi_confirmed_levels"]=sorted(triggers)
