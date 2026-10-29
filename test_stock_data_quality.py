@@ -181,7 +181,7 @@ class FreshnessTests(unittest.TestCase):
 
 
 class BacktestCoverageTests(unittest.TestCase):
-    def run_case(self, missing, partial=False, scored=False):
+    def run_case(self, missing, partial=False, scored=False, scanner_allowed=True):
         class End(datetime):
             @classmethod
             def now(cls,tz=None):return cls(2026,9,19,tzinfo=tz)
@@ -204,10 +204,13 @@ class BacktestCoverageTests(unittest.TestCase):
             client.fetch_intraday_candles.side_effect=fetch_partial
         with patch.object(bot,"datetime",End),patch.object(bot,"DhanStockOptionsClient",return_value=client), \
              patch.object(bot.DynamicStockOptionsUniverse,"load_universe",return_value={"1":{"symbol":"TEST","eq_security_id":"1","fno_lot_size":100}}), \
+             patch.object(bot,'scanx_stock_membership',return_value={'allowed':scanner_allowed,'reason':'Session volume not above previous full-session volume'}), \
              patch.object(bot,"evaluate_stock_setup",return_value={"opt_type":"CE","scanner":"TEST"}),patch.object(bot,"atomic_write_json"):
             ledger=bot.run_stock_options_historical_backtest(5,0,bot.DynamicStrategyConfig({},argparse.Namespace()),MagicMock())
             if partial:
                 client.fetch_rolling_stock_option.assert_called_once()
+            if not scanner_allowed:
+                client.fetch_rolling_stock_option.assert_not_called()
             return ledger
 
     def test_current_replay_matches_five_day_live_history(self):
@@ -225,6 +228,7 @@ class BacktestCoverageTests(unittest.TestCase):
             observed.append((prefix,as_of));return None
         with patch.object(bot,'datetime',End),patch.object(bot,'DhanStockOptionsClient',return_value=client), \
              patch.object(bot.DynamicStockOptionsUniverse,'load_universe',return_value={'1':{'symbol':'TEST','eq_security_id':'1','fno_lot_size':100}}), \
+             patch.object(bot,'scanx_stock_membership',return_value={'allowed':True}), \
              patch.object(bot,'evaluate_stock_setup',side_effect=evaluate),patch.object(bot,'atomic_write_json'):
             result=bot.run_stock_options_historical_backtest(5,0,bot.DynamicStrategyConfig({},argparse.Namespace()),MagicMock(),current_implementation=True)
         self.assertEqual(client.fetch_intraday_candles.call_args.kwargs['from_date'],'2026-09-09')
@@ -241,6 +245,12 @@ class BacktestCoverageTests(unittest.TestCase):
         self.assertFalse(result['price_identity_validated'])
         self.assertEqual(result['status'],'INCOMPLETE_DATA')
         self.assertEqual(result['trades'][0]['data_source'],'ROLLING_ATM_5M_UNVERIFIED_CONTRACT_IDENTITY')
+
+    def test_failed_scanner_cannot_become_a_backtest_entry(self):
+        result=self.run_case(False,scored=True,scanner_allowed=False)
+        self.assertEqual(result['total_trades'],0)
+        self.assertEqual(result['scanner_rejection_counts'],
+            {'Session volume not above previous full-session volume':1})
 
     def test_history_warning_allows_setups_but_marks_report_incomplete(self):
         ledger=self.run_case(False,partial=True)

@@ -210,6 +210,9 @@ def assess_nifty_structure(candles, chain, as_of, spot, direction,
         candle_range=latest["high"]-latest["low"]
         body=abs(latest["close"]-latest["open"])
         close_strength=(latest["close"]-latest["low"] if bullish else latest["high"]-latest["close"])
+        if candle_range>0:
+            result.update(confirmation_body_fraction=body/candle_range,
+                          confirmation_close_strength=close_strength/candle_range)
         if candle_range<=0 or body/candle_range<min_body or close_strength/candle_range<min_close:
             result["reason"]="Weak follow-through candle body or closing location"
             return result

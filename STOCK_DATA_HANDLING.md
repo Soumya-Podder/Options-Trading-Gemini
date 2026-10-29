@@ -439,3 +439,83 @@ quality score merely by inflating the mean. Comparison summaries and final fresh
 selection analysis are logged and stored in the existing entry diagnostics.
 A failed top-candidate recheck moves to the next candidate, while normal quote
 refresh and existing position exits continue between screening requests.
+
+
+2026-10-27 requested base-lock and entry revision
+
+The latest local PAPER profile supersedes the earlier Rs.3,200/Rs.6,000 setup:
+base target Rs.1,200, runner ceiling Rs.5,500, target reference 16%, premium stop
+7.5%, minimum net RR 1.5, cash-target extension, confirmed breakouts, opening
+trend and staged profit enabled, at most two lots. The previously configured
+Rs.1,800 whole-position cash-loss trigger, 30-minute no-progress window,
+90-minute ordinary hold and 105-minute booked-runner limit remain unchanged.
+All holding remains subject to the 14:45 IST cutoff. .env is local and ignored.
+
+Cash-target extension uses min(25, max(target_pct, 18)) percent rather than a
+100% premium ceiling. An unaffordable/unreachable cash target is rejected or
+requires another qualifying lot; it is never silently reduced. Target-based
+trail spacing returns to 25% of entry-to-base-target distance.
+
+Initial, final and pre-entry stock checks all cap chase at +0.35 ATR beyond
+the confirmation close. Confirmed breakout candles cannot exceed 1.5 ATR;
+those closing by 09:45 IST need directional close strength at least 0.80.
+These rules do not add a mandatory separate retest candle or exactly reproduce
+an external scanner's five indicators.
+
+At the base bid target, paper_exit records base_target_locked and raises the
+stop to max(entry + 0.5R, base target - 0.5R), without lowering an existing stop.
+The base target is no longer an automatic full exit. Existing runner/locked
+positions trail with at least 1R spacing; an unmanaged retracement after a
+1R extension above base can exit as RUPEE_TARGET_TRAILED. Combined net runner
+ceiling, protective stops, time limits, session cutoff and fresh depth remain.
+A stop floor is not a guaranteed fill or guaranteed net profit during gaps.
+
+The preceding fast-runner revision remains: before 270 seconds of position
+age, impulse may use the confirmation close, with measured post-entry volume
+still required for staged runners. Older trades need a 270-450 second reference.
+Unchanged OI no longer vetoes assessment; fresh depth, Greeks, volume and the
+remaining-move check still apply. Durable partial runners are not liquidated
+solely because an assessment pauses. Their combined target can be below the
+runner ceiling after partial booking.
+
+Historical OHLC simulation still closes at its base target and excludes the
+live staged runner and the new base-lock hold logic. It must not be presented
+as validation of this profile or a guaranteed profit improvement.
+
+
+2026-10-28 scanner membership correction (supersedes the volume bypass)
+
+All live PAPER entry attempts now require current cumulative session volume
+above the previous full-session volume, independently of confirmed-breakout
+mode. This applies both during candidate screening and the final entry recheck.
+Only after strict scanner membership passes are the individual stock breakout,
+confirmation and option execution checks evaluated. The low-level scanner helper no longer exposes any volume-bypass switch. SONACOMS at 11:35 on October 28 had 2,827,356
+current volume versus 19,084,943 previous volume and must not qualify through
+this corrected gate. Its existing PAPER reservation, eventual P&L and learning
+outcome remain intact. Future logs label passing scanner results MATCH.
+
+
+Permanent scanner invariants (2026-10-28)
+
+There is no require_daily_volume override in scanx_stock_membership. Cumulative
+volume must exceed previous full-session volume for every membership decision.
+The day-change threshold cannot be relaxed below 2%, and the scanner uses the
+previous completed 15-minute EMA(10). Confirmed breakout, opening-trend,
+learning, runner or Telegram context cannot override scanner membership.
+Historical stock signal replay now calls the same strict scanner gate before
+individual analysis and records scanner_rejection_counts. Missing complete
+previous-session volume coverage fails closed instead of assuming membership.
+Historical OHLC-derived scanner prices are modeled, not archived live quotes.
+All saved old diagnostic replays retain their earlier limitations and must not
+be relabeled as compliant with these scanner invariants.
+
+
+28 October 2026 - stock entry price-action paths:
+The strict scanner remains mandatory. Direct closed breakouts may enter only within 0.75 ATR of the pre-existing level, with existing volume/body/EMA checks. Otherwise wait for a separate closed retest: one to three contiguous pullback candles, each volume at most 80% of the original breakout volume, closing no farther than the level buffer inside the old range. Pullback wick must touch within -0.25 to +0.35 ATR of the level; renewed confirmation must break the pullback range with 1.2x its maximum volume. Existing confirmation-volume and candle-quality checks still apply. Retest confirmation must remain within 0.75 ATR of the original level. Live retest entries allow at most 0.25 ATR retreat from their new confirmation close, versus 0.10 ATR for direct entries; both retain the +0.35 ATR chase cap and must hold the breakout level. Bullish/bearish symmetry, closed-bar timing and missing-bar rejection are tested. Entry diagnostics record entry_path, original breakout time, pullback bars, volume ratios and structural invalidation level. The latter is diagnostic, not a new exit rule. No improvement in profit is claimed without replay validation. Existing option-risk and profit-protection exits are unchanged.
+
+
+28 October 2026 - stock exit controls:
+All lot counts now arm fee/slippage-aware breakeven after the larger of 1.5 trail jumps and 0.75 initial premium risk points, provided the current executable value still covers costs. Stops never loosen. Two consecutive post-entry closed one-minute underlying candles beyond the broken level by 0.10 ATR, with the latest candle opposing the trade, trigger UNDERLYING_BREAKOUT_FAILED. This check runs at most every 30 seconds after urgent option-stop/cash exits; stale or incomplete candles cannot trigger it. Available bid levels are walked for PAPER liquidation; insufficient aggregate depth withholds a fabricated fill and is recorded. Each position keeps a bounded 24-sample exit-monitor ring, with receipt age, available quantity, executable VWAP, quote gaps and unusable checks. Closed trade exit_diagnostics include trigger, actual modeled fill, stop, peak and cash-limit overrun. No fill at an unavailable stop is fabricated. Base OHLC replay shares the new breakeven threshold for subsequent bars only; it still excludes structural one-minute exits, depth execution and the live staged runner. No new ledger/report files required; no historical PnL rewritten.
+
+
+29 October 2026 entry validation: confirmed closed breakouts may retrace at most 0.25 five-minute ATR, capped at half the confirmation candle close-to-adverse-extreme distance, while holding the breakout level plus its confirmation buffer. The upper chase limit remains 0.35 ATR. Unconfirmed setups retain their existing band. Scanner membership, direction, quote freshness and signal expiry are checked again after option selection. Entry validation bounds and observed prices are retained in existing trade diagnostics. These are execution-rule changes, not evidence of improved historical profit.

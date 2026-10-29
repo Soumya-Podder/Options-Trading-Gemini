@@ -2,21 +2,21 @@
   "IF wall=CALL_SIDE_GT_50L & ce=SHORT_BUILDUP & pe=SHORT_COVERING & ctrl=BUYERS_AND_CALL_WRITERS_ALIGNED & dom=BEARS_DOMINATING -> BUY_PE": {
     "rule_id": "RULE_001",
     "condition_signature": "IF wall=CALL_SIDE_GT_50L & ce=SHORT_BUILDUP & pe=SHORT_COVERING & ctrl=BUYERS_AND_CALL_WRITERS_ALIGNED & dom=BEARS_DOMINATING -> BUY_PE",
-    "status": "PRUNED",
-    "trades_count": 2,
+    "status": "CANDIDATE",
+    "trades_count": 1,
     "wins_count": 0,
-    "losses_count": 2,
+    "losses_count": 1,
     "unique_days_traded": [
       "2026-08-17",
       "2026-08-24"
     ],
     "total_win_r": 0.0,
-    "total_loss_r": 2.0,
+    "total_loss_r": 1.0,
     "avg_win_r": 0.0,
     "avg_loss_r": 1.0,
     "expectancy_r": -1.0,
     "intraday_losses": 0,
-    "last_lot_loss": true,
+    "last_lot_loss": false,
     "muted_on_day": "",
     "pruned_on_day": "2026-10-23",
     "prune_count": 1
@@ -24,21 +24,21 @@
   "IF wall=CALL_SIDE_GT_50L & ce=LONG_UNWINDING & pe=SHORT_COVERING & ctrl=BUYERS_AND_CALL_WRITERS_ALIGNED & dom=BEARS_DOMINATING -> BUY_PE": {
     "rule_id": "RULE_002",
     "condition_signature": "IF wall=CALL_SIDE_GT_50L & ce=LONG_UNWINDING & pe=SHORT_COVERING & ctrl=BUYERS_AND_CALL_WRITERS_ALIGNED & dom=BEARS_DOMINATING -> BUY_PE",
-    "status": "PRUNED",
-    "trades_count": 2,
+    "status": "CANDIDATE",
+    "trades_count": 1,
     "wins_count": 0,
-    "losses_count": 2,
+    "losses_count": 1,
     "unique_days_traded": [
       "2026-09-25",
       "2026-09-28"
     ],
     "total_win_r": 0.0,
-    "total_loss_r": 1.45,
+    "total_loss_r": 0.725,
     "avg_win_r": 0.0,
     "avg_loss_r": 0.72,
     "expectancy_r": -0.72,
     "intraday_losses": 0,
-    "last_lot_loss": true,
+    "last_lot_loss": false,
     "muted_on_day": "",
     "pruned_on_day": "2026-10-23",
     "prune_count": 1
@@ -129,23 +129,23 @@
   "IF wall=PUT_SIDE_GT_50L & ce=LONG_BUILDUP & pe=LONG_UNWINDING & ctrl=PUT_WRITERS_DOMINATING_FLOOR & dom=BULLS_DOMINATING -> BUY_CE": {
     "rule_id": "RULE_006",
     "condition_signature": "IF wall=PUT_SIDE_GT_50L & ce=LONG_BUILDUP & pe=LONG_UNWINDING & ctrl=PUT_WRITERS_DOMINATING_FLOOR & dom=BULLS_DOMINATING -> BUY_CE",
-    "status": "PRUNED",
-    "trades_count": 5,
-    "wins_count": 2,
-    "losses_count": 3,
+    "status": "CANDIDATE",
+    "trades_count": 2,
+    "wins_count": 1,
+    "losses_count": 1,
     "unique_days_traded": [
       "2026-08-19",
       "2026-09-09",
       "2026-09-11",
       "2026-09-29"
     ],
-    "total_win_r": 1.25,
-    "total_loss_r": 2.45,
+    "total_win_r": 0.625,
+    "total_loss_r": 1.225,
     "avg_win_r": 0.62,
-    "avg_loss_r": 0.82,
-    "expectancy_r": -0.24,
+    "avg_loss_r": 1.23,
+    "expectancy_r": -0.3,
     "intraday_losses": 0,
-    "last_lot_loss": true,
+    "last_lot_loss": false,
     "muted_on_day": "2026-09-29",
     "pruned_on_day": "2026-10-23",
     "prune_count": 1
@@ -153,10 +153,10 @@
   "IF wall=PUT_SIDE_GT_50L & ce=LONG_BUILDUP & pe=SHORT_BUILDUP & ctrl=PUT_WRITERS_DOMINATING_FLOOR & dom=BULLS_DOMINATING -> BUY_CE": {
     "rule_id": "RULE_007",
     "condition_signature": "IF wall=PUT_SIDE_GT_50L & ce=LONG_BUILDUP & pe=SHORT_BUILDUP & ctrl=PUT_WRITERS_DOMINATING_FLOOR & dom=BULLS_DOMINATING -> BUY_CE",
-    "status": "PRUNED",
-    "trades_count": 6,
-    "wins_count": 2,
-    "losses_count": 4,
+    "status": "CANDIDATE",
+    "trades_count": 3,
+    "wins_count": 1,
+    "losses_count": 2,
     "unique_days_traded": [
       "2026-09-10",
       "2026-09-11",
@@ -164,13 +164,13 @@
       "2026-09-22",
       "2026-09-23"
     ],
-    "total_win_r": 9.26,
-    "total_loss_r": 4.0,
+    "total_win_r": 4.63,
+    "total_loss_r": 2.0,
     "avg_win_r": 4.63,
     "avg_loss_r": 1.0,
     "expectancy_r": 0.88,
     "intraday_losses": 0,
-    "last_lot_loss": true,
+    "last_lot_loss": false,
     "muted_on_day": "",
     "pruned_on_day": "2026-10-23",
     "prune_count": 1
@@ -193,5 +193,45 @@
     "intraday_losses": 0,
     "last_lot_loss": true,
     "muted_on_day": ""
+  },
+  "LEVEL_V2 BREAKOUT_CONFIRMED & strike_oi=pe -> BUY_CE": {
+    "rule_id": "RULE_009",
+    "condition_signature": "LEVEL_V2 BREAKOUT_CONFIRMED & strike_oi=pe -> BUY_CE",
+    "status": "CANDIDATE",
+    "trades_count": 1,
+    "wins_count": 1,
+    "losses_count": 0,
+    "unique_days_traded": [
+      "2026-10-28"
+    ],
+    "total_win_r": 0.600615,
+    "total_loss_r": 0.0,
+    "avg_win_r": 0.6,
+    "avg_loss_r": 0.0,
+    "expectancy_r": 0.6,
+    "intraday_losses": 0,
+    "last_lot_loss": false,
+    "muted_on_day": "",
+    "last_trade_day": "2026-10-28"
+  },
+  "LEVEL_V2 BREAKOUT_CONFIRMED & strike_oi=ce,pe -> BUY_CE": {
+    "rule_id": "RULE_010",
+    "condition_signature": "LEVEL_V2 BREAKOUT_CONFIRMED & strike_oi=ce,pe -> BUY_CE",
+    "status": "CANDIDATE",
+    "trades_count": 1,
+    "wins_count": 1,
+    "losses_count": 0,
+    "unique_days_traded": [
+      "2026-10-29"
+    ],
+    "total_win_r": 0.645936,
+    "total_loss_r": 0.0,
+    "avg_win_r": 0.65,
+    "avg_loss_r": 0.0,
+    "expectancy_r": 0.65,
+    "intraday_losses": 0,
+    "last_lot_loss": false,
+    "muted_on_day": "",
+    "last_trade_day": "2026-10-29"
   }
 }

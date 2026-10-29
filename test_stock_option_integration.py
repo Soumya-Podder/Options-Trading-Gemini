@@ -14,6 +14,46 @@ import dhan_dynamic_fno_stock_bot as bot
 
 
 class IntegrationTests(unittest.TestCase):
+    def test_confirmed_breakout_never_bypasses_scanner_daily_volume_gate(self):
+        from unittest.mock import MagicMock
+        cfg=bot.DynamicStrategyConfig({'STOCK_OPT_REQUIRE_CONFIRMED_BREAKOUT':'true'},argparse.Namespace())
+        client=MagicMock()
+        client.fetch_intraday_candles.return_value={'timestamp':[1]}
+        client.scanner_previous_session.return_value={'date':'2026-10-27','volume':19084943}
+        client.fetch_batch_ohlc.return_value={'NSE_EQ':{'4684':{
+            'last_price':871.65,'volume':2827356,'ohlc':{'close':851.85}}}}
+        reasons=[]
+        rejected={'allowed':False,'reason':'Session volume not above previous full-session volume'}
+        with patch.object(bot,'scanx_stock_membership',return_value=rejected) as membership, \
+             patch.object(bot,'evaluate_stock_setup') as evaluate:
+            result=bot.verify_live_scanx_and_resolve_stock_option(client,
+                {'symbol':'SONACOMS','eq_security_id':'4684','nearest_expiry':'2026-11-23'},871.65,2.32,cfg,reasons)
+        self.assertIsNone(result)
+        self.assertEqual(membership.call_args.args[3:],(cfg.min_day_change_pct,cfg.ema_period))
+        self.assertIn('Session volume not above previous full-session volume',reasons[0])
+        evaluate.assert_not_called()
+        client.fetch_option_chain.assert_not_called()
+
+    def test_single_lot_base_target_locks_stop_then_allows_runner_or_protective_exit(self):
+        cfg=bot.DynamicStrategyConfig({'STOCK_OPT_RUPEE_TARGET':'1200','STOCK_OPT_RUNNER_TARGET':'5500',
+            'STOCK_OPT_STOP_PCT':'4','STOCK_OPT_TARGET_PCT':'16','STOCK_OPT_MIN_NET_RR':'1.5',
+            'STOCK_OPT_EXTEND_RUPEE_TARGET':'true'},argparse.Namespace())
+        plan=cfg.plan(50,500)
+        self.assertEqual(plan['lots'],1)
+        pos={**plan,'entry_price':50,'entry_epoch':self.now.timestamp(),
+             'current_sl':plan['initial_sl'],'runner_assessment':{'hold':False}}
+        def quote(bid):
+            return {'received_epoch':self.now.timestamp(),'depth':{'buy':[{'price':bid,'quantity':500}]}}
+        self.assertIsNone(bot.paper_exit(pos,quote(plan['rupee_target_price']),self.now,cfg))
+        self.assertTrue(pos['base_target_locked'])
+        self.assertGreater(pos['current_sl'],50)
+        locked=pos['current_sl']
+        self.assertEqual(bot.paper_exit(pos,quote(locked-.05),self.now,cfg)[1],'TRAIL_STOP')
+        self.assertGreaterEqual(pos['current_sl'],locked)
+        self.assertEqual(bot.paper_exit(pos,quote(65),self.now,cfg)[1],'RUNNER_NET_TARGET')
+        # A gap can still exceed the intended floor; the cash-loss exit wins.
+        self.assertEqual(bot.paper_exit(pos,quote(40),self.now,cfg)[1],'CASH_LOSS_LIMIT')
+
     def staged_position(self):
         cfg=bot.DynamicStrategyConfig({'STOCK_OPT_STAGED_PROFIT':'true','STOCK_OPT_RUPEE_TARGET':'1600',
             'STOCK_OPT_TARGET_PCT':'14','STOCK_OPT_STOP_PCT':'4','STOCK_OPT_MAX_LOTS':'3',
@@ -61,11 +101,11 @@ class IntegrationTests(unittest.TestCase):
         quote['received_epoch']-=9
         self.assertIsNone(bot.book_stock_partial(pos,quote,self.now,cfg,gate,'2026-10-22'))
 
-    def test_staged_profit_protects_breakeven_and_exits_when_runner_confirmation_fails(self):
+    def test_staged_profit_protects_breakeven_and_keeps_partial_runner_on_pause(self):
         from unittest.mock import MagicMock
         cfg,pos,quote=self.staged_position()
-        pos['peak_bid']=19;pos['runner_assessment']={'hold':False}
-        quote['depth']['buy'][0]['price']=19
+        pos['peak_bid']=18+1.5*pos['trail_jump']+0.10;pos['runner_assessment']={'hold':False}
+        quote['depth']['buy'][0]['price']=pos['peak_bid']
         self.assertIsNone(bot.paper_exit(pos,quote,self.now,cfg))
         self.assertGreater(pos['current_sl'],18)
         self.assertLessEqual(pos['current_sl'],18.25)
@@ -75,7 +115,10 @@ class IntegrationTests(unittest.TestCase):
         self.assertGreater(partial['booked_net'],0)
         self.assertIsNone(bot.paper_exit(pos,quote,self.now,cfg))
         pos['runner_assessment']={'hold':False}
-        self.assertEqual(bot.paper_exit(pos,quote,self.now,cfg)[1],'RUNNER_CONFIRMATION_LOST')
+        self.assertIsNone(bot.paper_exit(pos,quote,self.now,cfg))
+        self.assertGreater(pos['current_sl'],pos['entry_price'])
+        quote['depth']['buy'][0]['price']=pos['current_sl']
+        self.assertEqual(bot.paper_exit(pos,quote,self.now,cfg)[1],'TRAIL_STOP')
         quote['depth']['buy'][0]['price']=10
         self.assertEqual(bot.paper_exit(pos,quote,self.now,cfg)[1],'CASH_LOSS_LIMIT')
 
@@ -95,6 +138,37 @@ class IntegrationTests(unittest.TestCase):
         self.assertFalse(bot.assess_stock_runner(pos,quote,{**underlying,'volume':1100},chain,self.now.timestamp(),cfg)['hold'])
         pos['entry_epoch']=self.now.timestamp()-5400
         self.assertFalse(bot.assess_stock_runner(pos,quote,underlying,chain,self.now.timestamp(),cfg)['hold'])
+
+    def test_fast_runner_accepts_unchanged_oi_but_requires_fresh_volume(self):
+        cfg,pos,quote=self.staged_position()
+        now=self.now.timestamp()
+        pos.update(conf_close=100,atr_5m=10,entry_contract_oi=100000,
+            entry_epoch=now-60,volume_context={'regular_average':500},
+            underlying_observations=[[now-50,101,1000]])
+        underlying={'last_price':120,'received_epoch':now,'volume':3000}
+        chain={'1660':{'ce':{'oi':100000,'greeks':{'delta':.6,'theta':-1}}}}
+        result=bot.assess_stock_runner(pos,quote,underlying,chain,now,cfg)
+        self.assertTrue(result['hold'])
+        self.assertEqual(result['oi_regime'],'OI_UNCHANGED')
+        self.assertFalse(bot.assess_stock_runner(pos,quote,{**underlying,'volume':1000},chain,now,cfg)['hold'])
+        self.assertFalse(bot.assess_stock_runner(pos,quote,{**underlying,'received_epoch':now-9},chain,now,cfg)['hold'])
+        pos['entry_epoch']=now-600
+        self.assertFalse(bot.assess_stock_runner(pos,quote,underlying,chain,now,cfg)['hold'])
+
+    def test_partial_runner_without_new_assessment_still_honors_target_and_cutoff(self):
+        from unittest.mock import MagicMock
+        cfg,pos,quote=self.staged_position()
+        bot.book_stock_partial(pos,quote,self.now,cfg,MagicMock(),'2026-10-22')
+        pos['runner_assessment']={'hold':False}
+        pos['runner_net_target']=2000
+        quote['depth']['buy'][0]['price']=24
+        self.assertEqual(bot.paper_exit(pos,quote,self.now,cfg)[1],'RUNNER_NET_TARGET')
+        cfg,pos,quote=self.staged_position()
+        bot.book_stock_partial(pos,quote,self.now,cfg,MagicMock(),'2026-10-22')
+        pos['runner_assessment']={'hold':False}
+        cutoff=self.now.replace(hour=14,minute=45)
+        quote['received_epoch']=cutoff.timestamp()
+        self.assertEqual(bot.paper_exit(pos,quote,cutoff,cfg)[1],'EOD_SQUAREOFF')
 
     def test_current_expiry_includes_today_and_cannot_be_pushed_out_by_old_dte_setting(self):
         cfg=bot.DynamicStrategyConfig({'STOCK_OPT_MIN_DAYS_TO_EXPIRY':'4'},argparse.Namespace())
@@ -306,7 +380,7 @@ class IntegrationTests(unittest.TestCase):
         client=MagicMock()
         client.fetch_intraday_candles.return_value={"timestamp":[1]}
         for side,direction in (("CE",1),("PE",-1)):
-            for advance,allowed in ((-0.21,False),(-0.2,True),(0,True),(1,True),(1.7,True),(1.71,False)):
+            for advance,allowed in ((-0.21,False),(-0.2,True),(0,True),(0.7,True),(0.71,False),(1,False)):
                 with self.subTest(side=side,advance=advance):
                     client.fetch_batch_ohlc.return_value={"NSE_EQ":{"1":{"last_price":100+direction*advance,"received_epoch":bot.time.time()}}}
                     sig={"opt_type":side,"conf_close":100,"atr_5m":2}
@@ -334,6 +408,49 @@ class IntegrationTests(unittest.TestCase):
                     result=bot.verify_live_scanx_and_resolve_stock_option(client,stock,100,3,self.cfg,reasons)
                 self.assertEqual(result is not None,allowed)
                 if not allowed:self.assertTrue(reasons)
+
+    def test_structural_entry_band_holds_breakout_without_chasing(self):
+        from unittest.mock import MagicMock
+        for side,direction in (('CE',1),('PE',-1)):
+            for advance,allowed in ((-0.4,True),(-0.51,False),(0.7,True),(0.71,False),(-1.1,False)):
+                with self.subTest(side=side,advance=advance):
+                    client=MagicMock()
+                    client.fetch_intraday_candles.return_value={'timestamp':[1]}
+                    client.fetch_batch_ohlc.return_value={'NSE_EQ':{'1':{
+                        'last_price':100+direction*advance,'received_epoch':bot.time.time()}}}
+                    sig={'opt_type':side,'conf_close':100,'conf_low':98,'conf_high':102,'atr_5m':2,
+                         'signal_timestamp':bot.time.time()-310,
+                         'breakout_confirmation':{'trigger_level':100-direction,'buffer':0.1,
+                            'closed_candle':True,'entry_path':'DIRECT_BREAKOUT'}}
+                    with patch.object(bot,'evaluate_stock_setup',return_value=sig), \
+                         patch.object(bot,'scanx_stock_membership',return_value={'allowed':True,'opt_type':side,'previous_close':100}), \
+                         patch.object(bot.DynamicStockOptionsUniverse,'resolve_atm_option',return_value={'opt_security_id':'9'}):
+                        result=bot.verify_live_scanx_and_resolve_stock_option(client,
+                            {'eq_security_id':'1','nearest_expiry':'2026-11-26','symbol':'TEST'},100,3,self.cfg)
+                    self.assertEqual(result is not None,allowed)
+
+    def test_final_selection_rechecks_scanner_and_signal_expiry(self):
+        from unittest.mock import MagicMock
+        stock={'eq_security_id':'1','nearest_expiry':'2026-11-26','symbol':'TEST'}
+        for failure in ('scanner','expiry'):
+            with self.subTest(failure=failure):
+                client=MagicMock()
+                client.fetch_intraday_candles.return_value={'timestamp':[1]}
+                client.fetch_batch_ohlc.return_value={'NSE_EQ':{'1':{
+                    'last_price':100,'received_epoch':bot.time.time()}}}
+                sig={'opt_type':'CE','conf_close':100,'atr_5m':2,'signal_timestamp':bot.time.time()-310}
+                def resolve(*args):
+                    if failure=='expiry':sig['signal_timestamp']=bot.time.time()-300-self.cfg.confirm_window_sec-1
+                    return {'opt_security_id':'9'}
+                passed={'allowed':True,'opt_type':'CE','previous_close':100}
+                final={'allowed':False,'reason':'Session volume not above previous full-session volume'}
+                reasons=[]
+                with patch.object(bot,'evaluate_stock_setup',return_value=sig), \
+                     patch.object(bot,'scanx_stock_membership',side_effect=[passed,final]), \
+                     patch.object(bot.DynamicStockOptionsUniverse,'resolve_atm_option',side_effect=resolve):
+                    result=bot.verify_live_scanx_and_resolve_stock_option(client,stock,100,3,self.cfg,reasons)
+                self.assertIsNone(result)
+                self.assertIn('Final scanner membership' if failure=='scanner' else 'expired',reasons[-1])
 
     def setUp(self):
         self.cfg = bot.DynamicStrategyConfig({"STOCK_OPT_STOP_PCT":"1", "STOCK_OPT_TARGET_PCT":"10",
@@ -586,7 +703,9 @@ class IntegrationTests(unittest.TestCase):
         q=copy.deepcopy(self.quote)
         q.update(last_trade_time="21/10/2026 10:00:00",received_epoch=self.now.timestamp())
         q["depth"]["buy"][0]["price"]=106
-        self.assertEqual(bot.paper_exit(pos,q,self.now,self.cfg)[1],"RUPEE_TARGET")
+        self.assertIsNone(bot.paper_exit(pos,q,self.now,self.cfg))
+        self.assertTrue(pos['base_target_locked'])
+        self.assertGreater(pos['current_sl'],pos['entry_price'])
         q["received_epoch"]-=31
         self.assertIsNone(bot.paper_exit(pos,q,self.now,self.cfg))
 
@@ -606,11 +725,13 @@ class IntegrationTests(unittest.TestCase):
             return q
         pos = position()
         result = bot.paper_exit(pos,quote(106),self.now,self.cfg)
-        self.assertEqual(result[1],"RUPEE_TARGET")
+        self.assertIsNone(result)
+        self.assertTrue(pos['base_target_locked'])
+        self.assertGreater(pos['current_sl'],100)
         pos = position()
-        self.assertIsNone(bot.paper_exit(pos,quote(103),self.now,self.cfg))
+        self.assertIsNone(bot.paper_exit(pos,quote(100+2.2*plan['trail_jump']+0.05),self.now,self.cfg))
         self.assertGreater(pos["current_sl"],pos["initial_sl"])
-        self.assertEqual(bot.paper_exit(pos,quote(101.5),self.now,self.cfg)[1],"TRAIL_STOP")
+        self.assertEqual(bot.paper_exit(pos,quote(pos['current_sl']-0.05),self.now,self.cfg)[1],"TRAIL_STOP")
         pos = position()
         pos["entry_epoch"] -= self.cfg.no_progress_bars*300
         self.assertEqual(bot.paper_exit(pos,quote(100),self.now,self.cfg)[1],"NO_PROGRESS")
@@ -1028,11 +1149,27 @@ class StockSetupTests(unittest.TestCase):
                 self.assertIsNone(evaluate_stock_setup(data, self.as_of))
 
 class BreakoutContinuationTests(unittest.TestCase):
-    def test_screenshot_profile_can_screen_before_full_day_volume_but_requires_breakout(self):
+    def test_early_breakout_requires_eighty_percent_close_strength_even_on_later_poll(self):
+        self.data['high'][-1]=103.4
+        for now in (self.now,self.now+60):
+            reasons=[]
+            with patch('stock_option_signals._atr',return_value=[2]),patch('stock_option_signals._ema',return_value=[99.9,100.2]):
+                self.assertIsNone(evaluate_stock_setup(self.data,now,min_day_change_pct=2,require_breakout=True,reasons=reasons))
+            self.assertIn('closing strength',reasons[0])
+
+    def test_breakout_range_above_one_and_half_atr_is_rejected(self):
+        self.data['high'][-1]=103.25
+        reasons=[]
+        with patch('stock_option_signals._atr',return_value=[1]),patch('stock_option_signals._ema',return_value=[99.9,100.2]):
+            self.assertIsNone(evaluate_stock_setup(self.data,self.now,min_day_change_pct=2,require_breakout=True,reasons=reasons))
+        self.assertIn('overextended',reasons[0])
+
+    def test_individual_breakout_cannot_override_failed_scanner_volume(self):
         from stock_option_signals import scanx_stock_membership
         quote={'last_price':103,'ohlc':{'close':100},'volume':2000,'received_epoch':self.now}
         self.assertFalse(scanx_stock_membership(self.data,quote,self.now)['allowed'])
-        self.assertTrue(scanx_stock_membership(self.data,quote,self.now,require_daily_volume=False)['allowed'])
+        with self.assertRaises(TypeError):
+            scanx_stock_membership(self.data,quote,self.now,require_daily_volume=False)
         with patch('stock_option_signals._atr',return_value=[2]),patch('stock_option_signals._ema',return_value=[99.9,100.2]):
             signal=evaluate_stock_setup(self.data,self.now,min_day_change_pct=2,require_breakout=True)
             self.assertEqual(signal['scanner'],'CONFIRMED_BREAKOUT_CE')
@@ -1047,6 +1184,14 @@ class BreakoutContinuationTests(unittest.TestCase):
             for k,v in zip(self.data,(self.now,103,120,102,119,99999)):self.data[k].append(v)
             again=evaluate_stock_setup(self.data,self.now,min_day_change_pct=2,require_breakout=True)
             self.assertEqual(again['signal_timestamp'],signal['signal_timestamp'])
+
+    def test_basic_scanner_threshold_and_ema_cannot_be_relaxed(self):
+        from stock_option_signals import scanx_stock_membership
+        quote={'last_price':101.5,'ohlc':{'close':100},'volume':8000,'received_epoch':self.now}
+        self.assertFalse(scanx_stock_membership(self.data,quote,self.now,min_day_change_pct=1)['allowed'])
+        quote['last_price']=103
+        self.assertTrue(scanx_stock_membership(self.data,quote,self.now)['allowed'])
+        self.assertFalse(scanx_stock_membership(self.data,quote,self.now,ema_period=5)['allowed'])
 
     def test_screenshot_profile_early_volume_baseline_is_symmetric_and_not_a_weak_volume_bypass(self):
         prior=75
@@ -1179,3 +1324,82 @@ class BreakoutContinuationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StockExitProtectionTests(unittest.TestCase):
+    def setup_position(self):
+        cfg=bot.DynamicStrategyConfig({'STOCK_OPT_STOP_PCT':'7.5','STOCK_OPT_RUPEE_TARGET':'1200',
+            'STOCK_OPT_RUPEE_MAX_RISK':'1800','STOCK_OPT_MIN_NET_RR':'1.5',
+            'STOCK_OPT_TARGET_PCT':'16','STOCK_OPT_MAX_LOTS':'1',
+            'STOCK_OPT_EXTEND_RUPEE_TARGET':'true','STOCK_OPT_STAGED_PROFIT':'true',
+            'STOCK_OPT_SLIPPAGE_PCT':'0.05'},argparse.Namespace())
+        now=datetime(2026,10,28,12,50,tzinfo=IST)
+        plan=cfg.plan(24.9,950)
+        pos={**plan,'entry_price':24.9,'entry_epoch':now.timestamp()-162,
+             'peak_bid':24.9,'current_sl':plan['initial_sl'],'opt_type':'CE','atr_5m':3.3908844,
+             'breakout_confirmation':{'trigger_level':539}}
+        return cfg,pos,now
+
+    def quote(self,bid,now,quantity=950):
+        return {'received_epoch':now.timestamp(),'depth':{'buy':[{'price':bid,'quantity':quantity}]}}
+
+    def test_pgel_peak_now_protects_single_lot_after_costs_without_waiting_for_trail(self):
+        cfg,pos,now=self.setup_position()
+        self.assertEqual(pos['lots'],1)
+        self.assertIsNone(bot.paper_exit(pos,self.quote(25.5,now),now,cfg))
+        self.assertEqual(pos['current_sl'],pos['initial_sl'])
+        self.assertIsNone(bot.paper_exit(pos,self.quote(26.45,now),now,cfg))
+        floor=pos['current_sl'];self.assertGreater(floor,pos['entry_price'])
+        decision=bot.paper_exit(pos,self.quote(floor,now),now,cfg)
+        self.assertEqual(decision[1],'TRAIL_STOP')
+        self.assertGreaterEqual(bot.stock_position_value(pos,decision[0])['net'],0)
+        self.assertEqual(pos['current_sl'],floor)
+
+    def failure_candles(self,now):
+        start=now.timestamp()-120
+        return {'timestamp':[start,start+60],'open':[539,538.6],'high':[539.1,538.7],
+                'low':[538.5,538.3],'close':[538.6,538.4],'volume':[100,120]}
+
+    def test_failure_requires_two_post_entry_closed_minutes_and_is_symmetric(self):
+        cfg,pos,now=self.setup_position();candles=self.failure_candles(now)
+        result=bot.stock_breakout_failure(pos,candles,now.timestamp())
+        self.assertTrue(result['failed'])
+        pos['breakout_failure']=result
+        decision=bot.paper_exit(pos,self.quote(24.3,now),now,cfg)
+        self.assertEqual(decision[1],'UNDERLYING_BREAKOUT_FAILED')
+        mirrored=copy.deepcopy(candles)
+        for k,source in [('open','open'),('high','low'),('low','high'),('close','close')]:
+            mirrored[k]=[1078-v for v in candles[source]]
+        self.assertTrue(bot.stock_breakout_failure({**pos,'opt_type':'PE'},mirrored,now.timestamp())['failed'])
+        self.assertFalse(bot.stock_breakout_failure(pos,candles,now.timestamp()-1)['failed'])
+        self.assertFalse(bot.stock_breakout_failure(pos,candles,now.timestamp()+91)['failed'])
+        recovered=copy.deepcopy(candles);recovered['close'][0]=539.05
+        self.assertFalse(bot.stock_breakout_failure(pos,recovered,now.timestamp())['failed'])
+        self.assertFalse(bot.stock_breakout_failure({**pos,'entry_epoch':now.timestamp()-60},candles,now.timestamp())['failed'])
+        # Future/forming recovery cannot alter a completed failure.
+        for k,v in zip(candles,(now.timestamp(),540,541,539.5,540.5,1000)):candles[k].append(v)
+        self.assertTrue(bot.stock_breakout_failure(pos,candles,now.timestamp()+30)['failed'])
+
+    def test_depth_walk_fills_multiple_bid_levels_and_records_stop_overrun(self):
+        cfg,pos,now=self.setup_position();pos['current_sl']=25.3
+        quote=self.quote(25.2,now,500);quote['depth']['buy'].append({'price':25.15,'quantity':450})
+        price,reason=bot.paper_exit(pos,quote,now,cfg)
+        self.assertEqual(reason,'TRAIL_STOP');self.assertEqual(price,25.15)
+        self.assertAlmostEqual(pos['exit_diagnostics']['executable_vwap'],(25.2*500+25.15*450)/950)
+        cfg,pos,now=self.setup_position()
+        price,reason=bot.paper_exit(pos,self.quote(22.7,now),now,cfg)
+        self.assertEqual(reason,'CASH_LOSS_LIMIT')
+        self.assertGreater(pos['exit_diagnostics']['cash_limit_overrun'],0)
+        self.assertAlmostEqual(pos['exit_diagnostics']['net_at_exit'],bot.stock_position_value(pos,price)['net'])
+
+    def test_unusable_depth_is_recorded_and_stale_structural_failure_cannot_exit(self):
+        cfg,pos,now=self.setup_position()
+        self.assertIsNone(bot.paper_exit(pos,self.quote(24.8,now,100),now,cfg))
+        self.assertEqual(pos['exit_monitor']['unusable_checks'],1)
+        stale=self.quote(24.8,now);stale['received_epoch']-=31
+        self.assertIsNone(bot.paper_exit(pos,stale,now,cfg))
+        pos['breakout_failure']={'failed':True,'assessed_epoch':now.timestamp()-91}
+        self.assertIsNone(bot.paper_exit(pos,self.quote(24.8,now),now,cfg))
+        self.assertEqual(pos['exit_monitor']['unusable_checks'],2)
+        for i in range(30):bot.paper_exit(pos,self.quote(24.8,now),now,cfg)
+        self.assertEqual(len(pos['exit_monitor']['recent_quotes']),24)

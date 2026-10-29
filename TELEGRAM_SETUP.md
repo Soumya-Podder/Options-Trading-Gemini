@@ -41,3 +41,12 @@ Alerts reflect the existing engine's position and ledger events. LIVE order
 fills are not independently verified by this notification integration.
 
 API reference: https://core.telegram.org/bots/api#sendmessage
+
+
+Authorised two-channel PAPER feed (29 October 2026 onward):
+Native Nifty/Sensex signals remain enabled. Channel calls are additional entry candidates under the same balance, session cutoff, position ownership and daily limits. GrowX and Tradewithsac are restricted to their verified channel IDs. Fresh calls expire after five minutes; reposts and activation/target replies do not refresh their entry age. GrowX NEAR LEVEL ranges and dash-separated targets, and Tradewithsac T1/T2/T3 activation targets are supported. Follow-up targets must match both source and contract.
+One-time setup: obtain your own API ID/hash at https://my.telegram.org > API development tools. Put TELEGRAM_API_ID and TELEGRAM_API_HASH in the existing ignored .env. Run installed Python with -B telegram_notifier.py --connect-telegram and enter your phone/code/2FA only in that local terminal. The existing .env receives TELEGRAM_SESSION_STRING; no separate session file is used and no secret is printed. Telethon 1.45 is installed. Keep TELEGRAM_CALLS_PAPER=true. Account connection failure is reported and blocks channel entries; native PAPER signals continue. GrowX is unavailable through public fallback. Never publish .env or session strings.
+
+
+29 October 2026 - channel execution corrections:
+Channel positions now track and persist executable peak/stop on every valid depth observation. At half the smaller of first-target distance and original risk, arm a fee/slippage-aware breakeven stop; at 80% protect half the modeled peak net. Stops never loosen. Only an executable bid reaching the numeric target books a target exit; a channel target-hit claim or candle high is not a fabricated fill. Held channel positions use a four-second held-contract quote/depth poll instead of full-chain requests; available bid levels are walked for the whole quantity. Native strategy analysis remains on full chains. Telegram displays observed LTP separately from executable bid and peak. All still-fresh calls for the index are evaluated newest-first until one is executable, rather than a newer untriggered alert hiding an older eligible call. Shared capital/position/daily limits and five-minute freshness remain. Partial depth is never used as a full-chain historical observation.

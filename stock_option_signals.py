@@ -134,8 +134,7 @@ def _completed_15m_bars(bars: List[dict]) -> List[dict]:
     return result
 
 
-def scanx_stock_membership(candles, quote, as_of_epoch, min_day_change_pct=2.0, ema_period=10,
-                          require_daily_volume=True):
+def scanx_stock_membership(candles, quote, as_of_epoch, min_day_change_pct=2.0, ema_period=10):
     """ScanX-style membership, separate from trade qualification.
 
     Unqualified Volume/Previous Volume are interpreted as current cumulative
@@ -143,8 +142,11 @@ def scanx_stock_membership(candles, quote, as_of_epoch, min_day_change_pct=2.0, 
     or incomplete 15-minute bucket can silently become a reference.
     """
     result={'allowed':False,'reason':'Scanner reference unavailable','profile':'SCANX_STYLE_DAILY_VOLUME_PREVIOUS_15M_EMA'}
-    if not require_daily_volume:result['profile']='SCREENSHOT_REFERENCE_CLOSED_BREAKOUT'
     try:
+        threshold=float(min_day_change_pct)
+        if not isfinite(threshold) or threshold<=0 or ema_period!=10:
+            result['reason']='Scanner requires a positive day-change threshold and 15-minute EMA(10)';return result
+        threshold=max(2.0,threshold)
         bars=_closed_bars(candles,as_of_epoch)
         if not bars:return result
         today=datetime.fromtimestamp(as_of_epoch,IST).date()
@@ -169,16 +171,54 @@ def scanx_stock_membership(candles, quote, as_of_epoch, min_day_change_pct=2.0, 
         if not all(isfinite(v) and v>0 for v in (price,close,volume,prior_volume)):return result
         ema=_ema([b['close'] for b in completed],ema_period)[-1]
         change=(price/close-1)*100
-        direction='CE' if change>=min_day_change_pct and price>ema else 'PE' if change<=-min_day_change_pct and price<ema else None
+        direction='CE' if change>=threshold and price>ema else 'PE' if change<=-threshold and price<ema else None
         result.update(price=price,previous_close=close,day_change_pct=change,
                       session_volume=volume,previous_session_volume=prior_volume,
                       previous_ema_15m=ema,ema_reference_epoch=completed[-1]['timestamp'],
                       previous_session_date=prior[0]['date'].isoformat(),quote_age_seconds=age)
-        if require_daily_volume and volume<=prior_volume:result['reason']='Session volume not above previous full-session volume'
+        if volume<=prior_volume:result['reason']='Session volume not above previous full-session volume'
         elif direction is None:result['reason']='Day change and previous 15-minute EMA do not match a scanner side'
         else:result.update(allowed=True,opt_type=direction,reason='Scanner filters passed')
         return result
     except (KeyError,TypeError,ValueError,OverflowError,IndexError):return result
+
+
+def confirmed_pullback_retest(today_bars, prior_high, prior_low, orb_high, orb_low, atr, bullish):
+    """Closed breakout, one to three contracting pullback bars, then renewed participation."""
+    if len(today_bars)<6 or atr<=0:return None
+    sign=1 if bullish else -1
+    latest=today_bars[-1]
+    buffer=max(0.05,0.05*atr)
+    for count in (1,2,3):
+        index=len(today_bars)-count-2
+        if index<3:continue
+        base=today_bars[:index];br=today_bars[index];pull=today_bars[index+1:-1]
+        sequence=[br]+pull+[latest]
+        if any(b['timestamp']!=a['timestamp']+BAR_SECONDS for a,b in zip(sequence,sequence[1:])):continue
+        level=(max(prior_high,orb_high,max(b['high'] for b in base)) if bullish else
+               min(prior_low,orb_low,min(b['low'] for b in base)))
+        width=br['high']-br['low']
+        baseline=sum(b['volume'] for b in base[-10:])/len(base[-10:])
+        if (width<=0 or baseline<=0 or br['volume']<1.2*baseline
+                or sign*(br['close']-level)<=buffer
+                or sign*(br['close']-br['open'])<0.60*width):continue
+        # Pullback must contract participation, hold the old level and actually retrace.
+        if any(b['volume']<=0 or b['volume']>0.8*br['volume'] or sign*(b['close']-level)<-buffer for b in pull):continue
+        extreme=min(b['low'] for b in pull) if bullish else max(b['high'] for b in pull)
+        distance=sign*(extreme-level)
+        if not -0.25*atr<=distance<=0.35*atr:continue
+        if not any(sign*(b['close']-br['close'])<0 for b in pull):continue
+        if sign*((latest['low'] if bullish else latest['high'])-level)<-0.25*atr:continue
+        confirmation_level=max(b['high'] for b in pull) if bullish else min(b['low'] for b in pull)
+        if (sign*(latest['close']-confirmation_level)<=buffer or sign*(latest['close']-level)<=buffer
+                or latest['volume']<1.2*max(b['volume'] for b in pull)
+                or sign*(latest['close']-level)>0.75*atr):continue
+        return {'setup':'PULLBACK_RETEST','trigger_level':level,'breakout_timestamp':br['timestamp'],
+                'pullback_bars':count,'pullback_extreme':extreme,
+                'pullback_volume_ratio':max(b['volume'] for b in pull)/br['volume'],
+                'reconfirmation_volume_ratio':latest['volume']/max(b['volume'] for b in pull),
+                'invalidation_level':extreme-sign*buffer}
+    return None
 
 
 def evaluate_stock_setup(
@@ -196,7 +236,8 @@ def evaluate_stock_setup(
     """Return a selective CE/PE setup, or None when any confirmation is absent.
 
     Scanner momentum, rising volume and price versus previous completed 15m
-    EMA require one directional confirmation close. ORB/retest adds rank only.
+    EMA require directional confirmation. Strict breakout entries accept a fresh
+    direct break or an explicitly confirmed low-volume pullback and retest.
     """
     def reject(reason):
         if reasons is not None:reasons.append(reason)
@@ -347,16 +388,25 @@ def evaluate_stock_setup(
                  min(prior_low,orb_low,min(b['low'] for b in today_bars[:-1])))
         sign=1 if bullish else -1
         buffer=max(0.05,0.05*atr_5m)
-        if sign*(latest['close']-trigger)<=buffer:
+        retest=confirmed_pullback_retest(today_bars,prior_high,prior_low,orb_high,orb_low,atr_5m,bullish)
+        direct=sign*(latest['close']-trigger)>buffer
+        if not direct and not retest:
             return reject('No fresh closed breakout beyond previous-day and session levels')
-        if body_ratio<0.60 or close_strength<0.75:
+        if retest:
+            trigger=retest['trigger_level']
+        elif sign*(latest['close']-trigger)>0.75*atr_5m:
+            return reject('Direct breakout is overextended; wait for controlled pullback and reconfirmation')
+        early_confirmation=datetime.fromtimestamp(latest['timestamp']+BAR_SECONDS,IST).time()<=time(9,45)
+        if body_ratio<0.60 or close_strength<(0.80 if early_confirmation else 0.75):
             return reject('Breakout confirmation body or closing strength insufficient')
-        if abs(latest['close']-ema_value)>3*atr_15m or candle_range>2*atr_5m:
+        if abs(latest['close']-ema_value)>3*atr_15m or candle_range>1.5*atr_5m:
             return reject('Breakout candle is overextended')
         breakout_confirmation={'trigger_level':trigger,'previous_day_high':prior_high,'previous_day_low':prior_low,
             'opening_high':orb_high,'opening_low':orb_low,'buffer':buffer,
             'body_fraction':body_ratio,'close_strength':close_strength,'closed_candle':True,
-            'relative_volume':relative_volume,'profile':'SCREENSHOT_REFERENCE_CLOSED_BREAKOUT'}
+            'relative_volume':relative_volume,'profile':'SCREENSHOT_REFERENCE_CLOSED_BREAKOUT',
+            'entry_path':'PULLBACK_RETEST' if retest else 'DIRECT_BREAKOUT',
+            'pullback':retest}
     # A scanner threshold can be crossed one candle after the opening-range
     # break. Admit that first confirmation, without exempting a whole trend
     # from the EMA-distance guard. All option quote/risk checks still follow.

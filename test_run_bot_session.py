@@ -137,6 +137,9 @@ class EngineMaintenanceTests(unittest.TestCase):
         chain={'22600.000000':{'ce':leg}}
         result,reason=engine.channel_entry_view(view,chain,call,'2026-10-27',119,120)
         self.assertIsNotNone(result)
+        opposite,_=engine.channel_entry_view({**view,'recommended_dir':'BUY_PE'},chain,call,'2026-10-27',119,120)
+        self.assertIsNotNone(opposite)
+        self.assertEqual(opposite['recommended_dir'],'BUY_CE')
         self.assertEqual(result['atm_ce_sec_id'],'123')
         self.assertEqual(result['market_structure']['telegram_call']['expiry_basis'],'CURRENT_CHAIN')
         self.assertNotIn('telegram_call',view['market_structure'])
@@ -165,13 +168,13 @@ class EngineMaintenanceTests(unittest.TestCase):
             self.assertFalse(engine.reserve_index_entry(saved,'2026-10-27',{'telegram_call_key':'one'},path))
             self.assertEqual(saved['daily_entry_counts']['2026-10-27'],1)
 
-    def test_channel_multilot_size_respects_wallet_depth_and_loss_feedback(self):
+    def test_channel_multilot_size_respects_wallet_depth_without_native_loss_downsize(self):
         import dhan_bot_engine as engine
         self.assertEqual(engine.channel_entry_lots(1,40000,156,65,650,650,0,False),2)
         self.assertEqual(engine.channel_entry_lots(1,40000,100,65,650,650,0,False),3)
         self.assertEqual(engine.channel_entry_lots(1,40000,100,65,65,650,0,False),1)
-        self.assertEqual(engine.channel_entry_lots(1,40000,100,65,650,650,1,False),1)
-        self.assertEqual(engine.channel_entry_lots(1,40000,100,65,650,650,0,True),1)
+        self.assertEqual(engine.channel_entry_lots(1,40000,100,65,650,650,1,False),3)
+        self.assertEqual(engine.channel_entry_lots(1,40000,100,65,650,650,0,True),3)
         self.assertEqual(engine.channel_entry_lots(1,1000,156,65,650,650,0,False),0)
 
     def test_stock_entry_and_exit_notifications_accept_stock_position_fields(self):
@@ -361,3 +364,134 @@ class DashboardMaintenanceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ChannelTargetUpdateTests(unittest.TestCase):
+    def test_targets_require_explicit_contract_and_numeric_prices(self):
+        from telegram_notifier import TelegramCallFeed
+        stamp='2026-10-28T04:00:00+00:00'
+        now=datetime.fromisoformat(stamp).timestamp()
+        def page(text):
+            return f'<div data-post="tradewith_sac/5"><div class="tgme_widget_message_text">{text}</div><time datetime="{stamp}"></time></div>'
+        updates=TelegramCallFeed.target_updates(page('NIFTY 22600 PE TARGET: 190 / 210 / 230'),now)
+        self.assertEqual(updates[0]['targets'],[190,210,230])
+        self.assertEqual(TelegramCallFeed.target_updates(page('NIFTY 22600 PE TARGET: Shared after activation'),now),[])
+        self.assertEqual(TelegramCallFeed.target_updates(page('TARGET: 190 / 210'),now),[])
+        feed=TelegramCallFeed.__new__(TelegramCallFeed)
+        import threading
+        feed._lock=threading.Lock();feed._target_updates=updates
+        call={'index':'NIFTY','strike':22600,'option_type':'PE','posted_epoch':now-10}
+        self.assertEqual(feed.targets_for(call,now),[190,210,230])
+        self.assertEqual(feed.targets_for({**call,'option_type':'CE'},now),[])
+        self.assertEqual(feed.targets_for({**call,'posted_epoch':now+1},now),[])
+
+
+class DualChannelFeedTests(unittest.TestCase):
+    def feed(self):
+        import threading,logging
+        from telegram_notifier import TelegramCallFeed
+        f=TelegramCallFeed.__new__(TelegramCallFeed)
+        f._lock=threading.Lock();f._calls=[];f._target_updates=[];f.logger=logging.getLogger('channel_test')
+        return f
+
+    def test_growx_range_targets_and_numbered_activation(self):
+        from telegram_notifier import TelegramCallFeed
+        now=datetime.fromisoformat('2026-10-28T03:46:00+00:00').timestamp()
+        call,update=TelegramCallFeed.parse_message('BUY NIFTY 22600 PE\nNEAR LEVEL -- 202-209\nTARGET -- 240-285-320\nSTOPLOSS -- PREMIUM',now-30,'https://t.me/c/2302217039/1',now,'GrowX')
+        self.assertEqual((call['buy_above'],call['entry_max'],call['entry_kind']),(202,209,'RANGE'))
+        self.assertEqual(call['targets'],[240,285,320])
+        call,update=TelegramCallFeed.parse_message('TRADE ACTIVATED SENSEX 72600 PE T1 : ₹325 T2 : ₹360 T3 : ₹420++',now,'test',now)
+        self.assertIsNone(call);self.assertEqual(update['targets'],[325,360,420])
+        self.assertEqual(TelegramCallFeed.parse_message('BUY NIFTY 22600 PE NEAR LEVEL -- 209-202',now,'test',now,'GrowX'),(None,None))
+        self.assertEqual(TelegramCallFeed.parse_message('NIFTY 22600 PE BUY ABOVE: 202',now,'test',now,'Unapproved'),(None,None))
+
+    def test_repost_never_refreshes_freshness_and_targets_cannot_cross_sources(self):
+        f=self.feed();now=datetime.fromisoformat('2026-10-28T03:46:00+00:00').timestamp()
+        original=f.ingest('NIFTY 22600 PE BUY ABOVE: 202',now-299,'one',now,'Tradewithsac')
+        f.ingest('NIFTY 22600 PE BUY ABOVE: 202',now,'two',now,'Tradewithsac')
+        self.assertEqual(f.candidate('NIFTY',now,[])['posted_epoch'],now-299)
+        self.assertIsNone(f.candidate('NIFTY',now+2,[]))
+        self.assertIsNone(f.candidate('NIFTY',now,[original['key']]))
+        f.ingest('NIFTY 22600 PE TARGET -- 240-285',now,'three',now,'GrowX')
+        self.assertEqual(f.targets_for(original,now),[])
+        f.ingest('TRADE ACTIVATED NIFTY 22600 PE T1: 220 T2: 240',now,'four',now,'Tradewithsac')
+        self.assertEqual(f.targets_for(original,now),[220,240])
+        self.assertEqual(len(f._calls),1)
+        f._authorized_mode=True;f.connection_status='UNAVAILABLE'
+        self.assertIsNone(f.candidate('NIFTY',now,[]))
+
+    def test_channel_entry_range_never_uses_two_percent_chase_allowance(self):
+        import dhan_bot_engine as engine
+        view={'index':'NIFTY','recommended_dir':'HOLD','market_structure':{}}
+        call={'key':'range','source':'GrowX','index':'NIFTY','strike':22600,'option_type':'PE',
+              'buy_above':202,'entry_max':209,'posted_epoch':100,'source_url':'test','targets':[240]}
+        leg={'security_id':53749,'last_price':208,'top_bid_price':208,'top_ask_price':208.5,
+             'top_bid_quantity':650,'top_ask_quantity':650,'greeks':{'delta':-.5,'theta':-8}}
+        chain={'22600':{'pe':leg}}
+        self.assertIsNotNone(engine.channel_entry_view(view,chain,call,'2026-11-03',119,120)[0])
+        leg['top_ask_price']=209.05
+        self.assertIsNone(engine.channel_entry_view(view,chain,call,'2026-11-03',119,120)[0])
+
+
+class ChannelExitRegressionTests(unittest.TestCase):
+    def position(self):
+        return {'index':'NIFTY','strike':22800.0,'option_type':'CE','security_id':'53794',
+                'entry_price':130.95,'qty':130,'lots':2,'initial_risk_points':10,
+                'current_sl':120.95,'highest_ltp':130.95,'ratchet_armed':False,
+                'market_structure':{'telegram_call':{'targets':[140,160,180]}}}
+
+    def test_observed_move_protects_profit_even_if_exact_target_touch_is_missed(self):
+        import dhan_bot_engine as engine
+        pos=self.position()
+        self.assertIsNone(engine.protect_channel_position(pos,134,1))
+        self.assertEqual(pos['current_sl'],120.95)
+        self.assertIsNone(engine.protect_channel_position(pos,136,2))
+        self.assertGreater(pos['current_sl'],pos['entry_price'])
+        self.assertEqual(pos['highest_ltp'],136)
+        self.assertIsNone(engine.protect_channel_position(pos,139.35,3))
+        self.assertGreater(pos['current_sl'],135)
+        floor=pos['current_sl']
+        self.assertEqual(engine.protect_channel_position(pos,134.75,4),'CHANNEL_PROFIT_PROTECTION')
+        self.assertEqual(pos['highest_ltp'],139.35)
+        self.assertEqual(pos['current_sl'],floor)
+        self.assertIn('exit_observation',pos['market_structure']['telegram_call'])
+
+    def test_target_requires_executable_bid_and_sensex_does_not_use_nifty_stop(self):
+        import dhan_bot_engine as engine
+        pos=self.position()
+        self.assertEqual(engine.protect_channel_position(pos,140,1),'TELEGRAM_CHANNEL_TARGET')
+        self.assertTrue(pos['channel_exit_observation']['target_observed'])
+        pos=self.position();pos.update(index='SENSEX',entry_price=305.35,highest_ltp=305.35,
+                                      current_sl=285.35,initial_risk_points=20,qty=60,lots=3)
+        pos['market_structure']['telegram_call']['targets']=[325,360,420]
+        self.assertIsNone(engine.protect_channel_position(pos,314,1))
+        self.assertEqual(pos['current_sl'],285.35)
+        self.assertIsNone(engine.protect_channel_position(pos,316,2))
+        self.assertGreater(pos['current_sl'],305.35)
+        self.assertEqual(engine.protect_channel_position(pos,280,3),'CHANNEL_PROFIT_PROTECTION')
+        self.assertFalse(pos['channel_exit_observation']['target_observed'])
+
+    def test_held_depth_uses_quote_endpoint_and_walks_depth_without_full_chain(self):
+        import dhan_bot_engine as engine
+        import logging
+        from unittest.mock import patch
+        client=engine.DhanV2RestClient('test','test',logging.getLogger('quote_test'))
+        quote={'data':{'NSE_FNO':{'53794':{'last_price':140.3,'depth':{
+            'buy':[{'price':140,'quantity':65},{'price':139.8,'quantity':65}],
+            'sell':[{'price':140.4,'quantity':130}]}}}}}
+        with patch.object(client,'_request',return_value=quote) as request:
+            response=client.fetch_held_channel_quote(self.position())
+        self.assertEqual(request.call_args.args[:2],('POST','/marketfeed/quote'))
+        node=response['oc']['22800.000000']['ce']
+        self.assertAlmostEqual(node['top_bid_price'],139.9)
+        self.assertEqual(node['top_bid_quantity'],130)
+        with patch.object(client,'_request',return_value={}),patch.object(engine.time,'sleep'):
+            self.assertIsNone(client.fetch_held_channel_quote(self.position()))
+
+    def test_all_fresh_calls_are_visible_when_newest_is_not_executable(self):
+        f=DualChannelFeedTests().feed()
+        now=datetime.fromisoformat('2026-10-29T03:49:00+00:00').timestamp()
+        older=f.ingest('BUY NIFTY 22650 CE NEAR LEVEL -- 189-193 TARGET -- 240-285',now-120,'grow',now,'GrowX')
+        newer=f.ingest('NIFTY 22650 PE BUY ABOVE: 170',now-60,'sac',now,'Tradewithsac')
+        self.assertEqual([c['key'] for c in f.candidates('NIFTY',now,[])],[newer['key'],older['key']])
+        self.assertEqual([c['key'] for c in f.candidates('NIFTY',now,[newer['key']])],[older['key']])

@@ -135,13 +135,13 @@ def reserve_index_entry(ledger, day, details, ledger_path="paper_trade_ledger.js
 
 
 def channel_entry_view(view, chain, call, current_expiry, received_epoch, now_epoch):
-    """Map a fresh public trigger to a verified contract; retain native strategy gates."""
+    """Follow fresh channel direction in PAPER, retaining executable-quote safeguards."""
     try:
         if not current_expiry:return None,'Current-expiry chain unavailable'
         if not 0<=now_epoch-call['posted_epoch']<=TelegramCallFeed.MAX_AGE:return None,'Channel call stale'
         if not 0<=now_epoch-received_epoch<=8:return None,'Channel contract quote stale'
-        if call['index']!=view['index'] or view['recommended_dir']!='BUY_'+call['option_type']:
-            return None,'Channel direction not confirmed by native analysis'
+        if call['index']!=view['index']:
+            return None,'Channel index does not match requested index'
         node=next((v for k,v in chain.items() if float(k)==call['strike']),{}).get(call['option_type'].lower(),{})
         bid=float(node['top_bid_price']);ask=float(node['top_ask_price'])
         ltp=float(node['last_price']);greeks=node.get('greeks') or {}
@@ -153,33 +153,66 @@ def channel_entry_view(view, chain, call, current_expiry, received_epoch, now_ep
         if not .25<=abs(delta)<=.70 or (delta>0)!=(call['option_type']=='CE'):
             return None,'Channel contract delta invalid'
         if bid<trigger:return None,'Channel buy-above trigger not executable yet'
-        if ask>trigger*1.02:return None,'Channel entry advanced more than 2% beyond trigger'
+        entry_cap=float(call.get('entry_max',trigger*1.02))
+        if ask>entry_cap:return None,'Channel entry above allowed trigger/range'
         security_id=node.get('security_id',node.get('securityId'))
         if not security_id or not str(security_id).isdigit():return None,'Channel contract security ID unavailable'
         result=dict(view)
         result['market_structure']=dict(view.get('market_structure') or {})
         result['market_structure']['telegram_call']={**call,'resolved_expiry':current_expiry,
             'expiry_basis':'CURRENT_CHAIN',
-            'stop_target_basis':'BOT_MANAGED_NOT_CHANNEL_PREMIUM_GROUP'}
+            'stop_target_basis':'CHANNEL_TARGET_USER_FIXED_PREMIUM_STOP'}
         side=call['option_type'].lower()
+        result['recommended_dir']='BUY_'+call['option_type']
         result.update({f'atm_{side}_strike':call['strike'],f'atm_{side}_sec_id':str(security_id),
                        f'atm_{side}_ltp':ltp,f'atm_{side}_delta':delta,f'atm_{side}_theta':theta})
         for field,source in (('bid','top_bid_price'),('ask','top_ask_price'),
                              ('bid_qty','top_bid_quantity'),('ask_qty','top_ask_quantity')):
             result[f'atm_{side}_{field}']=node[source]
-        return result,'Fresh channel candidate matched; native entry checks still required'
+        return result,'Fresh channel trigger matched; following channel direction'
     except (KeyError,TypeError,ValueError,OverflowError):
         return None,'Channel contract could not be verified'
 
 
 def channel_entry_lots(native_lots, wallet, entry_price, lot_size, bid_qty, ask_qty, losses, last_lot_loss):
-    """Funded, depth-supported scaling; learned loss sizing still applies."""
+    """Channel sizing: up to three funded lots, independent of native rule sizing."""
     try:
         values=[float(v) for v in (wallet,entry_price,lot_size,bid_qty,ask_qty)]
         if not all(math.isfinite(v) and v>0 for v in values) or native_lots<=0:return 0
         available=min(3,int(wallet*.60//(entry_price*lot_size+100)),int(min(bid_qty,ask_qty)//lot_size))
-        return max(0,min(native_lots,available) if losses or last_lot_loss else available)
+        return max(0,available)
     except (TypeError,ValueError,OverflowError,ZeroDivisionError):return 0
+
+
+def protect_channel_position(position, bid, now_epoch):
+    """Track executable peaks and protect channel trades without assuming target fills."""
+    call=(position.get('market_structure') or {}).get('telegram_call')
+    if not call:return None
+    entry=float(position['entry_price']);qty=int(position['qty'])
+    if not math.isfinite(bid) or bid<=0 or qty<=0:return None
+    position['highest_ltp']=max(float(position.get('highest_ltp',entry)),bid)
+    targets=sorted(float(v) for v in call.get('targets',[]) if math.isfinite(float(v)) and float(v)>entry)
+    fees=40+24.5*int(position['lots'])
+    peak=position['highest_ltp']
+    peak_fill=math.floor(peak*.999*20+1e-9)/20
+    peak_net=(peak_fill-entry)*qty-fees
+    distance=min(position['initial_risk_points'],targets[0]-entry) if targets else position['initial_risk_points']
+    gain=peak-entry
+    if gain>=0.5*distance and peak_net>0:
+        protected_net=max(0,0.5*peak_net) if gain>=0.8*distance else 0
+        needed=entry+(fees+protected_net)/qty
+        floor=math.ceil(needed/.999*20-1e-9)/20
+        position['current_sl']=max(position['current_sl'],floor)
+        position['ratchet_armed']=True
+    position['channel_exit_observation']={
+        'epoch':now_epoch,'executable_bid':bid,'peak_bid':peak,
+        'current_stop':position['current_sl'],'first_target':targets[0] if targets else None,
+        'target_observed':bool(targets and bid>=targets[0])}
+    call['exit_observation']=dict(position['channel_exit_observation'])
+    if targets and bid>=targets[0]:return 'TELEGRAM_CHANNEL_TARGET'
+    if bid<=position['current_sl']:
+        return 'CHANNEL_PROFIT_PROTECTION' if position['ratchet_armed'] else 'INITIAL_SL_HIT'
+    return None
 
 
 def setup_logger() -> logging.Logger:
@@ -283,6 +316,36 @@ class DhanV2RestClient:
         if elapsed < 3.2:
             time.sleep(3.2 - elapsed)
         self.last_hist_ts = time.time()
+
+    def fetch_held_channel_quote(self,position):
+        """Poll only held-contract depth; full-chain pacing cannot delay channel exits."""
+        elapsed=time.monotonic()-getattr(self,'last_held_quote_request',0)
+        if elapsed<4:time.sleep(4-elapsed)
+        self.last_held_quote_request=time.monotonic()
+        segment=INDICES_CONFIG[position['index']]['fno_segment']
+        sid=str(position['security_id'])
+        try:
+            result=self._request('POST','/marketfeed/quote',json={segment:[int(sid)]},timeout=(2,3))
+            quote=(result or {}).get('data',{}).get(segment,{}).get(sid,{})
+            levels=[(float(v['price']),int(v['quantity'])) for v in quote.get('depth',{}).get('buy',[])]
+            levels=sorted(((p,q) for p,q in levels if math.isfinite(p) and p>0 and q>0),reverse=True)
+            remaining=position['qty'];value=0.0
+            for price,quantity in levels:
+                take=min(remaining,quantity);value+=price*take;remaining-=take
+                if remaining==0:break
+            if remaining or not levels:
+                self.logger.warning('Held channel exit depth unavailable; no fill fabricated.')
+                return None
+            node={'last_price':quote.get('last_price'),'top_bid_price':value/position['qty'],
+                  'top_bid_quantity':position['qty'],'security_id':sid,
+                  'best_bid_price':levels[0][0],'depth_received_epoch':time.time()}
+            asks=quote.get('depth',{}).get('sell') or []
+            if asks:
+                node.update(top_ask_price=asks[0].get('price'),top_ask_quantity=asks[0].get('quantity'))
+            return {'oc':{f"{position['strike']:.6f}":{position['option_type'].lower():node}}}
+        except (requests.RequestException,TypeError,ValueError,KeyError,OverflowError):
+            self.logger.warning('Held channel quote request failed; exit awaiting fresh depth.')
+            return None
 
     def fetch_nearest_expiry(self, security_id: int, segment: str = "IDX_I") -> Optional[str]:
         if time.time()<getattr(self,"oc_retry_after",0):return None
@@ -1116,6 +1179,7 @@ class SelfLearningBrain:
         entry_price: float,
         net_wallet: float,
         consec_losses: int,
+        analysis: Optional[Dict[str, Any]] = None,
     ) -> int:
         cfg = INDICES_CONFIG[idx_name]
         cost_per_lot = entry_price * cfg["lot_size"]
@@ -1130,6 +1194,49 @@ class SelfLearningBrain:
         rule = self.rules.get(sig, {})
         if rule.get("last_lot_loss", False):
             return 1
+
+        if analysis is not None:
+            structure=analysis.get('market_structure') or {}
+            sizing={'basis':'One lot: current setup has not met scale-up checks',
+                    'lots':1,'risk_budget_rs':round(net_wallet*.05,2),
+                    'probability_estimated':False}
+            structure['lot_sizing']=sizing
+            analysis['market_structure']=structure
+            try:
+                side='ce' if analysis['recommended_dir']=='BUY_CE' else 'pe'
+                bid,ask=(float(analysis[f'atm_{side}_{key}']) for key in ('bid','ask'))
+                bid_qty,ask_qty=(float(analysis[f'atm_{side}_{key}_qty']) for key in ('bid','ask'))
+                delta=abs(float(analysis[f'atm_{side}_delta']))
+                room,rr,body,close,age,reference_age=(float(structure[key]) for key in (
+                    'room_points','structure_rr','confirmation_body_fraction',
+                    'confirmation_close_strength','confirmation_age_seconds','level_reference_age_seconds'))
+                risk_points=option_stop_points(idx_name,entry_price)
+                values=(bid,ask,bid_qty,ask_qty,delta,room,rr,body,close,age,reference_age,risk_points)
+                strong=(all(math.isfinite(v) for v in values)
+                    and analysis.get('index')==idx_name and analysis['recommended_dir'] in ('BUY_CE','BUY_PE')
+                    and structure.get('ready') and structure.get('allowed')
+                    and structure.get('strike_oi_confirmation')
+                    and rule.get('status') not in ('PRUNED','DAY_MUTED')
+                    and 0<=age<=120 and 270<=reference_age<=450
+                    and rr>=2 and room>=(25 if idx_name=='NIFTY' else 60)
+                    and body>=.60 and close>=.75 and .35<=delta<=.75
+                    and 0<bid<ask and (ask-bid)/ask<=.015
+                    and ask-bid<=.20*risk_points)
+                if strong:
+                    desired=3 if rr>=3 and body>=.70 and close>=.85 and room>=(40 if idx_name=='NIFTY' else 100) else 2
+                    for lots in range(min(desired,max_affordable),1,-1):
+                        qty=lots*cfg['lot_size']
+                        estimated_risk=(risk_points+max(0,entry_price-risk_points)*.001)*qty+40+24.5*lots
+                        if min(bid_qty,ask_qty)<qty or estimated_risk>net_wallet*.05:continue
+                        sizing.update(basis='Fresh confirmed price/strike-OI setup with room, depth and bounded risk',
+                                      lots=lots,estimated_stop_risk_rs=round(estimated_risk,2),
+                                      structure_rr=rr)
+                        return lots
+                # With current quote context, do not bypass failed scale-up
+                # checks through the historical-performance branch below.
+                return 1
+            except (KeyError,TypeError,ValueError,OverflowError,ZeroDivisionError):
+                return 1
 
         t_cnt = int(rule.get("trades_count", 0))
         w_cnt = int(rule.get("wins_count", 0))
@@ -1916,9 +2023,9 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
     last_entry_audit=None
     structure_candles=None
     last_oi_log=0.0
-    call_feed=(TelegramCallFeed(logger) if not live_mode
+    call_feed=(TelegramCallFeed(logger,env) if not live_mode
                and env.get('TELEGRAM_CALLS_PAPER','false').strip().lower()=='true' else None)
-    last_call_decision=None
+    last_call_decision={}
 
     while True:
         now = datetime.now()
@@ -1947,12 +2054,16 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
 
         idx_name = active_pos["index"] if active_pos else selected_indices[cycle % len(selected_indices)]
         cfg = INDICES_CONFIG[idx_name]
-        raw_oc = dhan.fetch_option_chain(cfg["security_id"], cfg["exchange_segment"], expiries[idx_name])
+        held_channel=bool(not live_mode and active_pos and
+                          (active_pos.get('market_structure') or {}).get('telegram_call'))
+        raw_oc = (dhan.fetch_held_channel_quote(active_pos) if held_channel else
+                  dhan.fetch_option_chain(cfg["security_id"], cfg["exchange_segment"], expiries[idx_name]))
         chain_received_epoch = time.time()
 
         if raw_oc:
-            view = analyzer.evaluate_chain(idx_name, raw_oc,expiry=expiries[idx_name])
-            if idx_name=="NIFTY":
+            view = (dict(telemetry_state['indices'].get(idx_name,{})) if held_channel else
+                    analyzer.evaluate_chain(idx_name, raw_oc,expiry=expiries[idx_name]))
+            if idx_name=="NIFTY" and not held_channel:
                 if time.time()-last_oi_log>=30:
                     oi=view["oi_analysis"]
                     logger.info("[NIFTY OI] %s",json.dumps({
@@ -1982,6 +2093,8 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
             now = datetime.now()
             telemetry_state["indices"][idx_name] = view
             telemetry_state["updated_at"] = now.strftime("%H:%M:%S")
+            telemetry_state['channel_feed']={'status':call_feed.connection_status if call_feed else 'DISABLED',
+                'sources':['GrowX','Tradewithsac'],'mode':'PAPER','native_signals_enabled':True}
             telemetry_state["api_poll_interval_sec"] = round(dhan.oc_poll_gap, 1)
 
             if active_pos and active_pos["index"] == idx_name:
@@ -1994,12 +2107,24 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         or float(node.get("top_bid_quantity",0) or 0) < active_pos["qty"]):
                     logger.warning("Exit quote unavailable or insufficient depth; position retained for reconciliation.")
                     continue
-                active_pos["current_ltp"] = curr_ltp
+                observed_ltp=float(node.get('last_price') or 0)
+                active_pos.update(current_ltp=observed_ltp if math.isfinite(observed_ltp) and observed_ltp>0 else None,
+                                  current_bid=curr_ltp,current_ask=node.get('top_ask_price'),
+                                  quote_received_epoch=chain_received_epoch)
                 # Restored older positions retain their original fixed stop distance.
                 position_risk = active_pos.get("initial_risk_points", cfg["sl_points"])
 
                 elapsed_min = (now - active_pos["entry_dt"]).total_seconds() / 60.0
                 exit_reason = None
+                channel_position=(active_pos.get('market_structure') or {}).get('telegram_call')
+                if channel_position and call_feed:
+                    targets=call_feed.targets_for(channel_position,time.time())
+                    if targets:channel_position['targets']=targets
+                if channel_position:
+                    exit_reason=protect_channel_position(active_pos,curr_ltp,time.time())
+                    # Persist peaks and protection even when no native ratchet runs.
+                    ledger['active_position']={k:v for k,v in active_pos.items() if k!='entry_dt'}
+                    atomic_write_json(ledger_path,ledger)
 
                 bid_for_protection=float(node.get('top_bid_price',0) or 0)
                 floor=index_profit_lock_bid(day_net_pnl,active_pos)
@@ -2013,25 +2138,30 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         atomic_write_json(ledger_path,ledger)
                         logger.info('Index daily profit protection armed at Rs.%.0f net; no further entries today.',INDEX_PROFIT_LOCK_RS)
 
-                if active_pos.get('profit_floor_armed') and floor is not None and 0<bid_for_protection<=floor:
+                if not exit_reason and active_pos.get('profit_floor_armed') and floor is not None and 0<bid_for_protection<=floor:
                     exit_reason='DAILY_PROFIT_PROTECTION'
                     curr_ltp=bid_for_protection
-                elif curr_ltp <= active_pos["current_sl"]:
+                elif not exit_reason and curr_ltp <= active_pos["current_sl"]:
                     exit_reason = (
                         "ASYMMETRIC_TRAIL_PROFIT"
                         if active_pos["ratchet_armed"] and curr_ltp > active_pos["entry_price"]
                         else "INITIAL_SL_HIT"
                     )
-                elif elapsed_min >= 18.0 and (active_pos["highest_ltp"] - active_pos["entry_price"]) < (0.55 * position_risk):
+                elif not exit_reason and elapsed_min >= 18.0 and (active_pos["highest_ltp"] - active_pos["entry_price"]) < (0.55 * position_risk):
                     exit_reason = "THETA_TIME_STOP"
-                elif elapsed_min >= float((active_pos.get("market_structure") or {}).get("max_hold_minutes",float("inf"))):
+                elif not exit_reason and elapsed_min >= float((active_pos.get("market_structure") or {}).get("max_hold_minutes",float("inf"))):
                     exit_reason = "MAX_HOLD_TIME"
-                elif now.time() >= EOD_SQUAREOFF_TIME:
+                elif not exit_reason and now.time() >= EOD_SQUAREOFF_TIME:
                     exit_reason = "EOD_SQUAREOFF"
 
                 executable_bid=float(node.get("top_bid_price",0) or 0)
+                if channel_position and not exit_reason:
+                    targets=[v for v in channel_position.get('targets',[]) if v>active_pos['entry_price']]
+                    if targets and executable_bid>=min(targets):
+                        exit_reason='TELEGRAM_CHANNEL_TARGET'
+                        curr_ltp=executable_bid
                 runner_hold=False
-                if not exit_reason and profit_protected and executable_bid>0:
+                if not channel_position and not exit_reason and profit_protected and executable_bid>0:
                     assessment=assess_index_runner(view,active_pos,node,now.timestamp(),day_net_pnl)
                     runner_hold=assessment['hold']
                     previous=(active_pos.get('runner_assessment') or {}).get('hold')
@@ -2044,11 +2174,11 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         exit_reason='PROFIT_BOOKED_NO_RUNNER'
                         curr_ltp=executable_bid
                 ref_exit_p = executable_bid if (executable_bid > 0 and not live_mode) else curr_ltp
-                if not exit_reason and not runner_hold and idx_name == "NIFTY" and (ref_exit_p - active_pos["entry_price"]) >= NIFTY_TARGET_POINTS:
+                if not channel_position and not exit_reason and not runner_hold and idx_name == "NIFTY" and (ref_exit_p - active_pos["entry_price"]) >= NIFTY_TARGET_POINTS:
                     exit_reason = "TARGET_2_20_POINTS"
                     if not live_mode and executable_bid > 0:
                         curr_ltp = executable_bid
-                elif not exit_reason and daily_target_reached(day_net_pnl,active_pos,executable_bid,
+                elif not channel_position and not exit_reason and daily_target_reached(day_net_pnl,active_pos,executable_bid,
                         INDEX_RUNNER_TARGET_RS if runner_hold else DAILY_PROFIT_TARGET_RS):
                     exit_reason="TARGET_2_20_POINTS" if curr_ltp-active_pos['entry_price']>=18.0 else "DAILY_NET_PROFIT_TARGET"
                     if not live_mode and executable_bid > 0:curr_ltp=executable_bid
@@ -2065,7 +2195,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         logger.info("[%s PARTIAL EXIT] NIFTY T1 +12 points | Qty %d @ %.2f | Remaining %d", "LIVE" if live_mode else "PAPER", active_pos["target_one_qty"],curr_ltp,active_pos["qty"])
                     if not runner_hold and curr_ltp >= active_pos["entry_price"]+22:
                         exit_reason = "TARGET_2_20_POINTS"
-                if not exit_reason and not staged and curr_ltp > active_pos["highest_ltp"]:
+                if not channel_position and not exit_reason and not staged and curr_ltp > active_pos["highest_ltp"]:
                     active_pos["highest_ltp"] = curr_ltp
                     new_sl, armed = update_ratchet_sl(
                         active_pos["entry_price"], active_pos["current_sl"],
@@ -2146,18 +2276,20 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
             ):
                 channel_call=None
                 if call_feed:
-                    candidate=call_feed.candidate(idx_name,time.time(),ledger.get('telegram_call_entries',[]))
-                    if candidate:
+                    for candidate in call_feed.candidates(idx_name,time.time(),ledger.get('telegram_call_entries',[])):
                         channel_view,reason=channel_entry_view(view,raw_oc.get('oc',{}),candidate,
                             expiries.get(idx_name),chain_received_epoch,time.time())
-                        key=(candidate['key'],reason)
-                        if key!=last_call_decision:
+                        if reason!=last_call_decision.get(candidate['key']):
                             logger.info('[TELEGRAM CALL] %s | %s',candidate['source_url'],reason)
-                            last_call_decision=key
+                            last_call_decision[candidate['key']]=reason
                         if channel_view is not None:
                             view=channel_view
                             channel_call=candidate
-                action_dir, sig = brain.select_action(view, consec_losses, bar_time=now.time())
+                            break
+                if channel_call:
+                    action_dir,sig='BUY_'+channel_call['option_type'],'TELEGRAM_CHANNEL '+channel_call['key']
+                else:
+                    action_dir, sig = brain.select_action(view, consec_losses, bar_time=now.time())
                 if action_dir in ("BUY_CE", "BUY_PE") and sig:
                     is_ce = action_dir == "BUY_CE"
                     opt_type = "CE" if is_ce else "PE"
@@ -2167,7 +2299,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
 
                     entry_p=math.ceil(entry_p*1.001*20-1e-9)/20
                     if channel_call and (not 0<=time.time()-channel_call['posted_epoch']<=TelegramCallFeed.MAX_AGE
-                                         or entry_p>channel_call['buy_above']*1.02):
+                                         or entry_p>float(channel_call.get('entry_max',channel_call['buy_above']*1.02))):
                         view['entry_decision']={'action':'HOLD','reason':'Channel call stale or modeled fill beyond trigger tolerance'}
                         continue
                     if entry_p >= cfg["min_option_premium"]:
@@ -2177,10 +2309,11 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             entry_p,
                             ledger["virtual_balance_net"],
                             consec_losses,
+                            analysis=view,
                         )
                         if channel_call:
                             side='ce' if is_ce else 'pe'
-                            lots=channel_entry_lots(lots,ledger['virtual_balance_net'],entry_p,cfg['lot_size'],
+                            lots=channel_entry_lots(max(1,lots),ledger['virtual_balance_net'],entry_p,cfg['lot_size'],
                                 float(view.get(f'atm_{side}_bid_qty') or 0),float(view.get(f'atm_{side}_ask_qty') or 0),
                                 consec_losses,brain.rules.get(sig,{}).get('last_lot_loss',False))
                         qty = lots * cfg["lot_size"]
@@ -2219,7 +2352,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             if not entry_order or entry_order=="None":
                                 logger.error("Entry submission unconfirmed; slot remains consumed. Reconcile before restarting.")
                                 break
-                        initial_risk = option_stop_points(idx_name, entry_p)
+                        initial_risk = (10.0 if idx_name=='NIFTY' else 20.0) if channel_call else option_stop_points(idx_name, entry_p)
                         init_sl = round(entry_p - initial_risk, 2)
                         active_pos = {
                             "index": idx_name,
@@ -2245,7 +2378,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             "market_structure":view.get("market_structure"),
                         }
                         split = nifty_target_quantities(idx_name,lots,cfg["lot_size"])
-                        if split:
+                        if split and not channel_call:
                             active_pos.update(original_qty=qty,target_one_qty=split[0],target_one_done=False,exit_fills=[])
                         ledger["mode"]="LIVE" if live_mode else "PAPER"
                         ledger["active_position"]={k:v for k,v in active_pos.items() if k!="entry_dt"}
@@ -2258,7 +2391,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             f"| 5m Spot: {view['d_spot_5m']:+.1f} | 3-Strike Diff = {view['diff_ce_minus_pe_lakhs']:+.2f}L"
                         )
 
-            if idx_name=="NIFTY":
+            if idx_name=="NIFTY" and not held_channel:
                 view["execution_context"]={"open_position":bool(active_pos),"closed_trades_today":day_trades,"entries_today":day_entries,"daily_entry_cap":MAX_TRADES_PER_DAY,
                     "consecutive_net_losses":consec_losses,"realized_net_today":day_net_pnl,
                     "cooldown_until":cooldown_until.isoformat() if cooldown_until else None}

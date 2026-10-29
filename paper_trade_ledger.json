@@ -1,13 +1,428 @@
 {
   "mode": "PAPER",
   "initial_capital": 40000.0,
-  "virtual_balance_gross": 40000.0,
-  "virtual_balance_net": 40000.0,
-  "profit_without_charges": 0.0,
-  "net_profit_after_charges": 0.0,
-  "total_trades": 0,
-  "avg_winning_value_rs": 0.0,
-  "avg_losing_value_rs": 0.0,
-  "win_to_loss_ratio": 0.0,
-  "trades": []
+  "virtual_balance_gross": 39743.25,
+  "virtual_balance_net": 39525.25,
+  "profit_without_charges": -256.75,
+  "net_profit_after_charges": -474.75,
+  "total_trades": 3,
+  "avg_winning_value_rs": 560.62,
+  "avg_losing_value_rs": 1378.0,
+  "win_to_loss_ratio": 0.41,
+  "trades": [
+    {
+      "timestamp": "2026-10-28 09:45:13",
+      "exit_timestamp": "2026-10-28 09:46:06",
+      "index": "NIFTY",
+      "contract": "22650_CE",
+      "lots": 1,
+      "qty": 65,
+      "spot_at_entry": 22610.9,
+      "oi_diff_lakhs": -10.04,
+      "entry_price": 180.9,
+      "exit_price": 189.4,
+      "gross_pnl": 552.5,
+      "net_pnl": 488.0,
+      "initial_risk_points": 12.5,
+      "r_multiple": 0.68,
+      "learning_r_multiple": 0.600615,
+      "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+      "state_vec": [
+        0.2008,
+        0.0785,
+        -0.1838,
+        0.6,
+        -0.8,
+        -1.5,
+        1.19,
+        -0.398,
+        0.0,
+        -0.7482
+      ],
+      "exit_reason": "ASYMMETRIC_TRAIL_PROFIT",
+      "rule_used": "LEVEL_V2 BREAKOUT_CONFIRMED & strike_oi=pe -> BUY_CE",
+      "data_health": "LIVE_CLEAN",
+      "market_structure": {
+        "allowed": true,
+        "ready": true,
+        "reason": "Confirmed level event with sufficient room",
+        "source": "INDEX_5M_OHLC",
+        "day_range_points": 150.79999999999927,
+        "min_body_fraction": 0.4,
+        "min_close_fraction": 0.6,
+        "confirm_window_sec": 600,
+        "confirmation_age_seconds": 13.277345895767212,
+        "levels": {
+          "previous_day_high": 22829.75,
+          "previous_day_low": 22636.85,
+          "day_high": 22691.5,
+          "day_low": 22540.7,
+          "opening_high": 22691.5,
+          "opening_low": 22551.9,
+          "range_high_before_confirmation": 22691.5,
+          "range_low_before_confirmation": 22540.7,
+          "range_high_before_breakout": 22691.5,
+          "range_low_before_breakout": 22540.7
+        },
+        "put_oi_wall": {
+          "strike": 22600.0,
+          "oi": 5595265.0,
+          "change_from_previous_close": 3499600.0
+        },
+        "call_oi_wall": {
+          "strike": 23000.0,
+          "oi": 8984495.0,
+          "change_from_previous_close": 3473080.0
+        },
+        "opening_trend": null,
+        "put_oi_buildup": {
+          "strike": 22600.0,
+          "oi": 5595265.0,
+          "change_from_previous_close": 3499600.0
+        },
+        "call_oi_buildup": {
+          "strike": 22600.0,
+          "oi": 8310705.0,
+          "change_from_previous_close": 7345715.0
+        },
+        "nearest_put_oi_level": {
+          "strike": 22600.0,
+          "oi": 5595265.0,
+          "change_from_previous_close": 3499600.0
+        },
+        "nearest_call_oi_level": {
+          "strike": 22650.0,
+          "oi": 2977455.0,
+          "change_from_previous_close": 2587650.0
+        },
+        "swing_levels": [
+          22540.7
+        ],
+        "confirmation_close": 22606.55,
+        "entry_levels": [
+          22540.7,
+          22551.9,
+          22600.0,
+          22636.85,
+          22691.5,
+          22829.75,
+          23000.0
+        ],
+        "invalidation_level": 22600.0,
+        "setup": "BREAKOUT_CONFIRMED",
+        "trigger_level": 22600.0,
+        "next_opposing_level": 22636.85,
+        "room_points": 25.94999999999709,
+        "structural_risk_points": 10.900000000001455,
+        "structure_rr": 2.3807339449535436,
+        "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V2",
+        "level_reference_age_seconds": 271.32,
+        "strike_oi_confirmation": [
+          {
+            "strike": 22600.0,
+            "side": "pe",
+            "oi": 5824975.0,
+            "change_from_previous_day": 3729310.0,
+            "change_over_5m": 229710.0,
+            "premium_change_over_5m": -24.19999999999999
+          }
+        ],
+        "oi_confirmation_strike": 22600.0,
+        "direction_checks": {
+          "BUY_CE": {
+            "allowed": true,
+            "reason": "Confirmed level event with sufficient room",
+            "trigger_level": 22600.0,
+            "setup": "BREAKOUT_CONFIRMED",
+            "room_points": 25.94999999999709,
+            "structure_rr": 2.3807339449535436,
+            "oi_confirmed_levels": [
+              22540.7,
+              22551.9,
+              22600.0
+            ]
+          },
+          "BUY_PE": {
+            "allowed": false,
+            "reason": "Price has not held directional confirmation",
+            "trigger_level": null,
+            "setup": null,
+            "room_points": null,
+            "structure_rr": null,
+            "oi_confirmed_levels": []
+          }
+        },
+        "theta_horizon_minutes": 20,
+        "max_hold_minutes": 20,
+        "modeled_holding_theta_points": 0.9060906666666666,
+        "entry_quote": {
+          "received_epoch": 1793160913.181453,
+          "decision_epoch": 1793160913.286022,
+          "modeled_entry_price_basis": "EXECUTABLE_ASK_PLUS_0.1PCT_SLIPPAGE",
+          "last_price": 180.8,
+          "top_bid_price": 180.2,
+          "top_ask_price": 180.7,
+          "top_bid_quantity": 650,
+          "top_ask_quantity": 715
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-29 09:26:05",
+      "exit_timestamp": "2026-10-29 09:30:40",
+      "index": "NIFTY",
+      "contract": "22800.0_CE",
+      "lots": 2,
+      "qty": 130,
+      "spot_at_entry": 22729.15,
+      "oi_diff_lakhs": -16.92,
+      "entry_price": 130.95,
+      "exit_price": 120.35,
+      "gross_pnl": -1378.0,
+      "net_pnl": -1467.0,
+      "initial_risk_points": 10.0,
+      "r_multiple": -1.06,
+      "learning_r_multiple": -1.128462,
+      "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+      "state_vec": [
+        0.3384,
+        0.1228,
+        -1.8093,
+        0.6,
+        -0.8,
+        -1.5,
+        0.696,
+        0.618,
+        1.0,
+        -0.9076
+      ],
+      "exit_reason": "INITIAL_SL_HIT",
+      "rule_used": "TELEGRAM_CHANNEL 2026-10-29:NIFTY:22800:CE:130:CURRENT",
+      "data_health": "LIVE_CLEAN",
+      "market_structure": {
+        "allowed": false,
+        "ready": false,
+        "reason": "Need prior-session data and four closed session candles",
+        "source": "INDEX_5M_OHLC",
+        "telegram_call": {
+          "index": "NIFTY",
+          "strike": 22800.0,
+          "option_type": "CE",
+          "posted_epoch": 1793245874.0,
+          "source": "Tradewithsac",
+          "source_url": "https://t.me/c/3882006811/1416",
+          "key": "2026-10-29:NIFTY:22800:CE:130:CURRENT",
+          "buy_above": 130.0,
+          "expiry": null,
+          "targets": [
+            140.0,
+            160.0,
+            180.0
+          ],
+          "entry_kind": "ABOVE",
+          "resolved_expiry": "2026-11-03",
+          "expiry_basis": "CURRENT_CHAIN",
+          "stop_target_basis": "CHANNEL_TARGET_USER_FIXED_PREMIUM_STOP"
+        },
+        "lot_sizing": {
+          "basis": "One lot: current setup has not met scale-up checks",
+          "lots": 1,
+          "risk_budget_rs": 2024.4,
+          "probability_estimated": false
+        },
+        "entry_quote": {
+          "received_epoch": 1793246165.9407568,
+          "decision_epoch": 1793246165.944989,
+          "modeled_entry_price_basis": "EXECUTABLE_ASK_PLUS_0.1PCT_SLIPPAGE",
+          "last_price": 130.5,
+          "top_bid_price": 130.5,
+          "top_ask_price": 130.8,
+          "top_bid_quantity": 1235,
+          "top_ask_quantity": 1040
+        }
+      }
+    },
+    {
+      "timestamp": "2026-10-29 10:30:09",
+      "exit_timestamp": "2026-10-29 10:31:18",
+      "index": "NIFTY",
+      "contract": "22900_CE",
+      "lots": 1,
+      "qty": 65,
+      "spot_at_entry": 22851.3,
+      "oi_diff_lakhs": 5.27,
+      "entry_price": 141.3,
+      "exit_price": 150.05,
+      "gross_pnl": 568.75,
+      "net_pnl": 504.25,
+      "initial_risk_points": 12.01,
+      "r_multiple": 0.73,
+      "learning_r_multiple": 0.645936,
+      "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+      "state_vec": [
+        -0.1054,
+        -0.0377,
+        1.7055,
+        1.0,
+        -0.8,
+        -1.5,
+        1.386,
+        2.0,
+        0.0,
+        -0.3738
+      ],
+      "exit_reason": "ASYMMETRIC_TRAIL_PROFIT",
+      "rule_used": "LEVEL_V2 BREAKOUT_CONFIRMED & strike_oi=ce,pe -> BUY_CE",
+      "data_health": "LIVE_CLEAN",
+      "market_structure": {
+        "allowed": true,
+        "ready": true,
+        "reason": "Confirmed level event with sufficient room",
+        "source": "INDEX_5M_OHLC",
+        "day_range_points": 195.84999999999854,
+        "min_body_fraction": 0.4,
+        "min_close_fraction": 0.6,
+        "confirm_window_sec": 600,
+        "confirmation_age_seconds": 9.667089223861694,
+        "levels": {
+          "previous_day_high": 22778.05,
+          "previous_day_low": 22497.7,
+          "day_high": 22852.6,
+          "day_low": 22656.75,
+          "opening_high": 22745.75,
+          "opening_low": 22656.75,
+          "range_high_before_confirmation": 22822.65,
+          "range_low_before_confirmation": 22656.75,
+          "range_high_before_breakout": 22819.8,
+          "range_low_before_breakout": 22656.75
+        },
+        "put_oi_wall": {
+          "strike": 22700.0,
+          "oi": 9899825.0,
+          "change_from_previous_close": 4799795.0
+        },
+        "call_oi_wall": {
+          "strike": 23000.0,
+          "oi": 8262345.0,
+          "change_from_previous_close": 544505.0
+        },
+        "opening_trend": null,
+        "put_oi_buildup": {
+          "strike": 22700.0,
+          "oi": 9899825.0,
+          "change_from_previous_close": 4799795.0
+        },
+        "call_oi_buildup": {
+          "strike": 22800.0,
+          "oi": 7099105.0,
+          "change_from_previous_close": 1470950.0
+        },
+        "nearest_put_oi_level": {
+          "strike": 22850.0,
+          "oi": 1240655.0,
+          "change_from_previous_close": 977600.0
+        },
+        "nearest_call_oi_level": {
+          "strike": 22900.0,
+          "oi": 3930940.0,
+          "change_from_previous_close": 844155.0
+        },
+        "swing_levels": [
+          22714.95,
+          22769.7
+        ],
+        "confirmation_close": 22849.05,
+        "confirmation_body_fraction": 0.7049399198931874,
+        "confirmation_close_strength": 0.9052069425901322,
+        "entry_levels": [
+          22497.7,
+          22656.75,
+          22700.0,
+          22714.95,
+          22745.75,
+          22769.7,
+          22778.05,
+          22800.0,
+          22819.8,
+          23000.0
+        ],
+        "invalidation_level": 22819.8,
+        "setup": "BREAKOUT_CONFIRMED",
+        "trigger_level": 22819.8,
+        "next_opposing_level": 23000.0,
+        "room_points": 148.70000000000073,
+        "structural_risk_points": 31.5,
+        "structure_rr": 4.720634920634944,
+        "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V2",
+        "level_reference_age_seconds": 274.38,
+        "strike_oi_confirmation": [
+          {
+            "strike": 22800.0,
+            "side": "ce",
+            "oi": 6762145.0,
+            "change_from_previous_day": 1133990.0,
+            "change_over_5m": -336960.0,
+            "premium_change_over_5m": 23.05000000000001
+          },
+          {
+            "strike": 22800.0,
+            "side": "pe",
+            "oi": 7296185.0,
+            "change_from_previous_day": 4614935.0,
+            "change_over_5m": 312455.0,
+            "premium_change_over_5m": -16.85000000000001
+          }
+        ],
+        "oi_confirmation_strike": 22800.0,
+        "direction_checks": {
+          "BUY_CE": {
+            "allowed": true,
+            "reason": "Confirmed level event with sufficient room",
+            "trigger_level": 22819.8,
+            "setup": "BREAKOUT_CONFIRMED",
+            "room_points": 148.70000000000073,
+            "structure_rr": 4.720634920634944,
+            "oi_confirmed_levels": [
+              22700.0,
+              22714.95,
+              22745.75,
+              22769.7,
+              22778.05,
+              22800.0,
+              22819.8
+            ]
+          },
+          "BUY_PE": {
+            "allowed": false,
+            "reason": "Price has not held directional confirmation",
+            "trigger_level": null,
+            "setup": null,
+            "room_points": null,
+            "structure_rr": null,
+            "oi_confirmed_levels": []
+          }
+        },
+        "theta_horizon_minutes": 20,
+        "max_hold_minutes": 20,
+        "modeled_holding_theta_points": 0.8869557333333333,
+        "entry_quote": {
+          "received_epoch": 1793250009.606692,
+          "decision_epoch": 1793250009.6778378,
+          "modeled_entry_price_basis": "EXECUTABLE_ASK_PLUS_0.1PCT_SLIPPAGE",
+          "last_price": 141.15,
+          "top_bid_price": 140.85,
+          "top_ask_price": 141.15,
+          "top_bid_quantity": 260,
+          "top_ask_quantity": 130
+        }
+      }
+    }
+  ],
+  "daily_entry_counts": {
+    "2026-10-28": 1,
+    "2026-10-29": 2
+  },
+  "telegram_call_entries": [
+    "2026-10-29:NIFTY:22800:CE:130:CURRENT"
+  ]
 }

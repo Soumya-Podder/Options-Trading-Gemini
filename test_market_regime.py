@@ -78,15 +78,18 @@ class OpeningRegimeTests(unittest.TestCase):
         fixture.rows[0]['change_over_5m']=0
         self.assertFalse(apply_nifty_level_entry(fixture.analysis,fixture.data,{},now,enable_opening_trend=True)['allowed'])
 
-    def test_rupee_target_extension_uses_one_lot_without_raising_risk(self):
+    def test_rupee_target_extension_requires_realistic_move_and_funded_size(self):
         kwargs=dict(target_pct=10,stop_pct=5,min_net_rr=1.2,rupee_target=2000,max_lots=3,rupee_max_risk=1000)
         self.assertIsNone(premium_plan(5.4,1825,stock.compute_fno_option_charges,**kwargs))
         plan=premium_plan(5.4,1825,stock.compute_fno_option_charges,**kwargs,extend_rupee_target=True)
-        self.assertEqual(plan['lots'],1)
-        self.assertLessEqual(plan['expected_net_risk'],1000)
+        self.assertIsNone(plan)
+        kwargs['rupee_max_risk']=2000
+        plan=premium_plan(5.4,1825,stock.compute_fno_option_charges,**kwargs,extend_rupee_target=True)
+        self.assertEqual(plan['lots'],2)
+        self.assertLessEqual(plan['expected_net_risk'],2000)
         self.assertGreaterEqual(plan['expected_net_reward'],2000)
         self.assertEqual(plan['hard_target_price'],plan['rupee_target_price'])
-        self.assertLessEqual(plan['hard_target_price'],10.8)
+        self.assertLessEqual(plan['hard_target_price'],5.4*1.18)
         self.assertGreater(plan['rupee_target_price'],5.4*1.1)
 
     def test_extended_target_cannot_override_invalid_input_or_risk_limit(self):
@@ -98,7 +101,8 @@ class OpeningRegimeTests(unittest.TestCase):
     def test_cash_target_selects_smallest_feasible_size_within_move_estimate(self):
         plan=premium_plan(10,500,lambda *_:40,target_pct=10,stop_pct=1,min_net_rr=1.2,
             rupee_target=2000,max_lots=3,rupee_max_risk=1000,extend_rupee_target=True,max_target_price=12.5)
-        self.assertEqual(plan['lots'],2)
+        self.assertEqual(plan['lots'],3)
+        self.assertLessEqual(plan['rupee_target_price'],11.8)
         self.assertLessEqual(plan['rupee_target_price'],12.5)
         self.assertLessEqual(plan['expected_net_risk'],1000)
         self.assertGreaterEqual(plan['expected_net_reward'],2000)
@@ -119,3 +123,59 @@ class OpeningRegimeTests(unittest.TestCase):
 
 
 if __name__=='__main__':unittest.main()
+
+
+class PullbackRetestTests(unittest.TestCase):
+    def sequence(self):
+        values=[(99.7,100,99.5,99.8,1000)]*3+[(99.9,101.1,99.8,101,3000),
+                (101,101.05,100.1,100.3,1000),(100.3,101.25,100.2,101.2,2000)]
+        return [dict(timestamp=i*300,open=o,high=h,low=l,close=c,volume=v)
+                for i,(o,h,l,c,v) in enumerate(values)]
+
+    def detect(self,bars,bullish=True):
+        from stock_option_signals import confirmed_pullback_retest
+        return confirmed_pullback_retest(bars,100,100,100,100,2,bullish)
+
+    def test_closed_retest_and_bearish_symmetry(self):
+        bars=self.sequence();result=self.detect(bars)
+        self.assertEqual(result['setup'],'PULLBACK_RETEST')
+        self.assertEqual(result['trigger_level'],100)
+        self.assertEqual(result['pullback_bars'],1)
+        mirror=copy.deepcopy(bars)
+        for a,b in zip(bars,mirror):
+            b.update(open=200-a['open'],high=200-a['low'],low=200-a['high'],close=200-a['close'])
+        self.assertIsNotNone(self.detect(mirror,False))
+
+    def test_distribution_level_failure_weak_rebound_chase_and_missing_bar_rejected(self):
+        mutations=[lambda b:b[-2].update(volume=2900),
+                   lambda b:b[-2].update(close=99.7,low=99.5),
+                   lambda b:b[-2].update(low=99.4),
+                   lambda b:b[-1].update(volume=1100),
+                   lambda b:b[-1].update(close=101.0),
+                   lambda b:b[-1].update(close=102,high=102.1),
+                   lambda b:b[-1].update(timestamp=2000),
+                   lambda b:b[3].update(volume=1000),
+                   lambda b:b[-2].update(volume=0)]
+        for mutate in mutations:
+            with self.subTest(mutation=mutate):
+                bars=self.sequence();mutate(bars);self.assertIsNone(self.detect(bars))
+
+
+    def test_full_setup_accepts_retest_without_new_session_high_and_ignores_forming_bar(self):
+        from unittest.mock import patch
+        start=datetime(2026,10,28,9,15,tzinfo=IST)
+        data={k:[] for k in ('timestamp','open','high','low','close','volume')}
+        rows=[(95,96,94,95,1000)]*75
+        rows += [(b['open'],b['high'],b['low'],b['close'],b['volume']) for b in self.sequence()]
+        for i,row in enumerate(rows):
+            stamp=((start-timedelta(days=1)+timedelta(minutes=5*i)) if i<75
+                   else start+timedelta(minutes=5*(i-75)))
+            for k,v in zip(data,(stamp.timestamp(),*row)):data[k].append(v)
+        now=data['timestamp'][-1]+300
+        with patch('stock_option_signals._atr',return_value=[2]),patch('stock_option_signals._ema',return_value=[99,99.8]):
+            result=evaluate_stock_setup(data,now,require_breakout=True)
+            self.assertIsNotNone(result)
+            self.assertEqual(result['breakout_confirmation']['entry_path'],'PULLBACK_RETEST')
+            self.assertEqual(result['breakout_confirmation']['trigger_level'],100)
+            for k,v in zip(data,(now,105,107,100,106,100000)):data[k].append(v)
+            self.assertEqual(evaluate_stock_setup(data,now+60,require_breakout=True),result)

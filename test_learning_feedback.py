@@ -18,6 +18,52 @@ def rule():
 
 
 class LearningFeedbackTests(unittest.TestCase):
+    def sizing_brain_and_view(self,index='NIFTY'):
+        brain=bot.SelfLearningBrain.__new__(bot.SelfLearningBrain)
+        brain.rules={'fresh':rule()}
+        view={'index':index,'recommended_dir':'BUY_CE','atm_ce_bid':179.8,'atm_ce_ask':180,
+              'atm_ce_bid_qty':650,'atm_ce_ask_qty':650,'atm_ce_delta':.5,
+              'market_structure':{'ready':True,'allowed':True,'room_points':70 if index=='SENSEX' else 30,
+                  'structure_rr':2.4,'confirmation_body_fraction':.8,'confirmation_close_strength':.85,
+                  'confirmation_age_seconds':15,'level_reference_age_seconds':300,
+                  'strike_oi_confirmation':[{'strike':22600,'side':'pe','change_over_5m':10000}]}}
+        return brain,view
+
+    def test_fresh_confirmed_setup_can_size_two_lots_without_learning_history(self):
+        brain,view=self.sizing_brain_and_view()
+        self.assertEqual(brain.compute_lots('NIFTY','fresh',180.9,40000,0,analysis=view),2)
+        sizing=view['market_structure']['lot_sizing']
+        self.assertLessEqual(sizing['estimated_stop_risk_rs'],2000)
+        self.assertFalse(sizing['probability_estimated'])
+
+    def test_exceptional_setup_can_size_three_but_depth_and_risk_cap_bind(self):
+        brain,view=self.sizing_brain_and_view()
+        view.update(atm_ce_bid=99.8,atm_ce_ask=100)
+        view['market_structure'].update(room_points=50,structure_rr=3.2,confirmation_close_strength=.9)
+        self.assertEqual(brain.compute_lots('NIFTY','fresh',100.1,40000,0,analysis=view),3)
+        view['atm_ce_bid_qty']=130
+        self.assertEqual(brain.compute_lots('NIFTY','fresh',100.1,40000,0,analysis=view),2)
+        brain,view=self.sizing_brain_and_view('SENSEX')
+        view.update(atm_ce_bid=99.8,atm_ce_ask=100)
+        self.assertEqual(brain.compute_lots('SENSEX','fresh',100.1,10000,0,analysis=view),1)
+
+    def test_size_up_fails_closed_on_weak_stale_missing_or_losing_context(self):
+        mutations=(lambda v:v['market_structure'].update(confirmation_body_fraction=.4),
+            lambda v:v['market_structure'].update(confirmation_age_seconds=121),
+            lambda v:v['market_structure'].update(strike_oi_confirmation=[]),
+            lambda v:v['market_structure'].pop('confirmation_close_strength'),
+            lambda v:v.update(atm_ce_ask=float('nan')),
+            lambda v:v.update(atm_ce_bid_qty=65),
+            lambda v:v['market_structure'].update(room_points=10),
+            lambda v:v.update(atm_ce_bid=176))
+        for mutate in mutations:
+            brain,view=self.sizing_brain_and_view();mutate(view)
+            self.assertEqual(brain.compute_lots('NIFTY','fresh',180.9,40000,0,analysis=view),1)
+        brain,view=self.sizing_brain_and_view()
+        self.assertEqual(brain.compute_lots('NIFTY','fresh',180.9,40000,1,analysis=view),1)
+        brain.rules['fresh']['last_lot_loss']=True
+        self.assertEqual(brain.compute_lots('NIFTY','fresh',180.9,40000,0,analysis=view),1)
+
     def test_explicit_entry_risk_is_used_for_net_learning_on_flat_exit(self):
         ledger=dict(initial_capital=30000,virtual_balance_gross=30000,
                     virtual_balance_net=30000,trades=[])

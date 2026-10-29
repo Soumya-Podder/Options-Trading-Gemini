@@ -218,7 +218,7 @@ def premium_plan(entry, qty, charge_fn, target_pct=3.0, stop_pct=0.5,
         # not force extra lots or veto an achievable cash target. Still bound
         # target search to at most a doubling of premium; executable Greeks and
         # underlying move feasibility are checked during qualification.
-        ceiling_pct=max(target_pct,100.) if extend_rupee_target and rupee_target else target_pct
+        ceiling_pct=min(25.0,max(target_pct,18.0)) if extend_rupee_target and rupee_target else target_pct
         plan = _percentage_plan(entry, units, charge_fn, ceiling_pct, stop_pct,
                                 min_net_rr, slippage_pct, cash_loss_limit)
         if not plan or plan["expected_net_reward"] < rupee_target or plan["expected_net_risk"] > risk_budget:

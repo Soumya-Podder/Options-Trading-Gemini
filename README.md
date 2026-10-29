@@ -285,3 +285,8 @@ Confirmed breakout quality, volume, execution room, planned RR and bounded close
 net-learning feedback drive priority; the largest daily mover is not automatically
 selected. Every chosen entry gets a fresh final recheck. Comparison reasons are
 stored in the existing trade diagnostics, with no extra selection report files.
+
+
+Channel PAPER execution update (28 October 2026): fresh @tradewith_sac index calls use channel direction without native directional confirmation. Nifty premium SL is 10 points; Sensex premium SL is 20 points. Stops are triggers, not guaranteed fills. Five-minute freshness, current expiry, executable trigger/depth/cash checks and session/daily limits remain. Contract-labelled numeric TARGET/TGT posts can update the open channel trade; the first target above entry closes it. Native ordinary trailing and fixed targets do not apply; session profit protection and time exits remain. Unlabelled/private targets cannot be inferred. Worker restart required; PAPER only.
+
+Channel lot sizing: use up to three lots within 60% of available virtual balance and displayed bid/ask quantity. Native learned-rule loss downsizing does not reduce channel sizing; daily/session risk controls still apply. If only one funded liquid lot fits, size remains one.

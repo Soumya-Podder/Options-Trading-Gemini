@@ -295,3 +295,27 @@ LEVEL_V1 quality/alignment checks; no additional retest ban was specified by
 the correction. No production learning reset or live restart was performed.
 122 index/structure/learning checks pass, including rejection of strong trend
 signals without structure, sub-50-lakh actual imbalances and unverified OI.
+
+
+2026-10-28: current-setup index lot sizing
+
+Normal PAPER index entries now pass current analysis into compute_lots. This
+allows two lots without six days of learning when structure is ready/allowed,
+matching-strike OI confirms, confirmation age is at most 120 seconds and the
+OI reference is 270-450 seconds old. Scale-up also requires structural RR >=2,
+room >=25 Nifty points or 60 Sensex points, body >=60%, directional close >=75%,
+real absolute delta 0.35-0.75, spread <=1.5% and <=20% of option stop distance,
+and displayed bid/ask depth covering the entire position.
+
+Three lots additionally require RR >=3, body >=70%, close strength >=85% and
+room >=40 Nifty points or 100 Sensex points. Both sizes remain capped by 60%
+wallet allocation, three lots overall and modeled stop loss plus estimated
+costs <=5% of the net virtual wallet. Gaps can exceed that modeled risk.
+A consecutive loss or the setup's last-lot loss still restricts sizing to one.
+Missing or weak current evidence uses one lot rather than overriding entry
+filters. The historical-only sizing path remains conservative when decision-time
+quote/candle evidence is unavailable; it does not validate the new live sizing.
+Telegram-derived entries cannot enlarge size beyond this current-setup decision.
+Selection diagnostics are retained under market_structure.lot_sizing. These
+are evidence thresholds, not calibrated win probabilities or profit guarantees.
+Stock option sizing and daily index trade/profit caps are unchanged.

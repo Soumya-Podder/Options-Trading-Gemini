@@ -1,5 +1,7 @@
 """Background Telegram alerts; never performs broker operations."""
 import atexit
+import asyncio
+import json
 import html
 import re
 import os
@@ -48,59 +50,165 @@ class _PublicChannelHTML(HTMLParser):
 class TelegramCallFeed:
     """Public channel candidates only. Broker decisions remain in the PAPER engine."""
     CHANNEL='tradewith_sac'
+    SOURCES={-1003882006811:'Tradewithsac',-1002302217039:'GrowX'}
     MAX_AGE=300
 
-    def __init__(self, logger):
+    def __init__(self, logger, env=None):
+        self.env=dict(env or {})
+        self.connection_status='STARTING'
+        self._authorized_mode=bool(self.env.get('TELEGRAM_SESSION_STRING'))
         self.logger=logger
         self._lock=threading.Lock()
         self._calls=[]
+        self._target_updates=[]
         self._closing=threading.Event()
         self._thread=threading.Thread(target=self._run,name='public-telegram-calls',daemon=True)
         self._thread.start()
         atexit.register(self.close)
 
+    @staticmethod
+    def numeric_targets(text):
+        text=text.upper()
+        numbered=re.findall(r'\bT[1-9]\s*:\s*(?:₹|RS\.?|INR)?\s*(\d+(?:\.\d+)?)',text)
+        match=re.search(r'\b(?:TARGETS?|TGTS?)\s*(?::|--+)\s*((?:(?:₹|RS\.?|INR)?\s*\d+(?:\.\d+)?\s*[/,\-+ ]*\s*)+)',text)
+        values=numbered or (re.findall(r'\d+(?:\.\d+)?',match[1]) if match else [])
+        prices=sorted(set(float(v) for v in values))
+        return prices if all(math.isfinite(v) and v>0 for v in prices) else []
+
     @classmethod
-    def parse(cls, page, now_epoch):
-        parser=_PublicChannelHTML()
-        parser.feed(page)
-        calls={}
-        ist=timezone(timedelta(hours=5,minutes=30))
-        today=datetime.fromtimestamp(now_epoch,ist).date()
+    def parse_message(cls,text,posted_epoch,source_url,now_epoch,source='Tradewithsac'):
+        if source not in cls.SOURCES.values():return None,None
+        try:
+            text=text.upper();posted_epoch=float(posted_epoch)
+            ist=timezone(timedelta(hours=5,minutes=30))
+            day=datetime.fromtimestamp(posted_epoch,ist).date()
+            if day!=datetime.fromtimestamp(now_epoch,ist).date() or not 0<=now_epoch-posted_epoch<=86400:return None,None
+            contract=re.search(r'\b(NIFTY|SENSEX)\s+(\d+(?:\.\d+)?)\s+(CE|PE)\b',text)
+            if not contract:return None,None
+            common={'index':contract[1],'strike':float(contract[2]),'option_type':contract[3],
+                    'posted_epoch':posted_epoch,'source':source,'source_url':source_url}
+            if common['strike']<=0:return None,None
+            targets=cls.numeric_targets(text)
+            update={**common,'targets':targets} if targets else None
+            entry=re.search(r'\bBUY\s+ABOVE\s*:\s*(?:₹|RS\.?|INR)?\s*(\d+(?:\.\d+)?)',text)
+            zone=re.search(r'\bNEAR\s+LEVEL\s*--+\s*(\d+(?:\.\d+)?)(?:\s*-\s*(\d+(?:\.\d+)?))?',text)
+            if re.search(r'\b(?:ACTIVATED|HIT|CANCELLED|CANCELED)\b',text):return None,update
+            if not entry and not (source=='GrowX' and zone):return None,update
+            price=float(entry[1] if entry else zone[1])
+            upper=float(zone[2] or zone[1]) if not entry else None
+            if not math.isfinite(price) or price<=0 or (upper is not None and (not math.isfinite(upper) or upper<price)):return None,update
+            key=f"{day}:{common['index']}:{common['strike']:g}:{common['option_type']}:{price:g}:CURRENT"
+            call={**common,'key':key,'buy_above':price,'expiry':None,'targets':targets,
+                  'entry_kind':'ABOVE' if entry else 'RANGE'}
+            if upper is not None:call['entry_max']=upper
+            return call,update
+        except (TypeError,ValueError,OverflowError,OSError):return None,None
+
+    @classmethod
+    def parse(cls,page,now_epoch):
+        parser=_PublicChannelHTML();parser.feed(page);calls={}
         for post in parser.posts:
             try:
                 if not re.fullmatch(cls.CHANNEL+r'/\d+',post['post']):continue
-                text=post['text'].upper()
-                contract=re.search(r'\b(NIFTY|SENSEX)\s+(\d+(?:\.\d+)?)\s+(CE|PE)\b',text)
-                entry=re.search(r'\bBUY\s+ABOVE\s*:\s*(?:₹|RS\.?|INR)?\s*(\d+(?:\.\d+)?)',text)
-                if not contract or not entry:continue
-                posted=datetime.fromisoformat(post['timestamp'].replace('Z','+00:00'))
-                if posted.tzinfo is None or posted.astimezone(ist).date()!=today:continue
-                price=float(entry[1]);strike=float(contract[2])
-                if not all(math.isfinite(v) and v>0 for v in (price,strike)):continue
-                # Channel calls use current expiry; posts cannot choose upcoming contracts.
-                expiry=None
-                key=f'{today}:{contract[1]}:{strike:g}:{contract[3]}:{price:g}:CURRENT'
-                call={'key':key,'index':contract[1],'strike':strike,'option_type':contract[3],
-                      'buy_above':price,'posted_epoch':posted.timestamp(),'expiry':expiry,
-                      'source_url':'https://t.me/'+post['post']}
-                if key not in calls or call['posted_epoch']<calls[key]['posted_epoch']:calls[key]=call
-            except (TypeError,ValueError,AttributeError,OverflowError):continue
+                posted=datetime.fromisoformat(post['timestamp'].replace('Z','+00:00')).timestamp()
+                call,_=cls.parse_message(post['text'],posted,'https://t.me/'+post['post'],now_epoch)
+                if call and (call['key'] not in calls or posted<calls[call['key']]['posted_epoch']):calls[call['key']]=call
+            except (TypeError,ValueError,KeyError):continue
         return [c for c in calls.values() if 0<=now_epoch-c['posted_epoch']<=cls.MAX_AGE]
 
-    def candidate(self, index, now_epoch, consumed):
+    @classmethod
+    def target_updates(cls,page,now_epoch):
+        parser=_PublicChannelHTML();parser.feed(page);updates=[]
+        for post in parser.posts:
+            try:
+                if not re.fullmatch(cls.CHANNEL+r'/\d+',post['post']):continue
+                posted=datetime.fromisoformat(post['timestamp'].replace('Z','+00:00')).timestamp()
+                _,update=cls.parse_message(post['text'],posted,'https://t.me/'+post['post'],now_epoch)
+                if update:updates.append(update)
+            except (TypeError,ValueError,KeyError):continue
+        return updates
+
+    def ingest(self,text,posted_epoch,source_url,now_epoch,source):
+        call,update=self.parse_message(text,posted_epoch,source_url,now_epoch,source)
+        with self._lock:
+            if call:
+                old=next((c for c in self._calls if c['key']==call['key']),None)
+                if old is None:self._calls.append(call)
+                elif call['posted_epoch']<old['posted_epoch']:
+                    self._calls.remove(old);self._calls.append(call)
+            if update:
+                self._target_updates=[u for u in self._target_updates if u.get('source_url')!=source_url]+[update]
+            self._calls=[c for c in self._calls if 0<=now_epoch-c['posted_epoch']<=86400][-256:]
+            self._target_updates=[u for u in self._target_updates if 0<=now_epoch-u['posted_epoch']<=86400][-256:]
+        if call and old is None:
+            self.logger.info('[CHANNEL CALL RECEIVED] %s | %s',source,json.dumps(call,ensure_ascii=True))
+        return call
+
+    def targets_for(self,call,now_epoch):
+        with self._lock:
+            matches=[u for u in self._target_updates if all(u[k]==call[k] for k in ('index','strike','option_type'))
+                     and u.get('source','Tradewithsac')==call.get('source','Tradewithsac')
+                     and u['posted_epoch']>=call['posted_epoch'] and 0<=now_epoch-u['posted_epoch']<=86400]
+        return max(matches,key=lambda u:u['posted_epoch'])['targets'] if matches else []
+
+    def candidates(self, index, now_epoch, consumed):
+        if getattr(self,'_authorized_mode',False) and self.connection_status!='CONNECTED':return []
         with self._lock:
             matches=[dict(c) for c in self._calls if c['index']==index and c['key'] not in consumed
                      and 0<=now_epoch-c['posted_epoch']<=self.MAX_AGE]
-        return max(matches,key=lambda c:c['posted_epoch'],default=None)
+        return sorted(matches,key=lambda c:c['posted_epoch'],reverse=True)
+
+    def candidate(self, index, now_epoch, consumed):
+        return next(iter(self.candidates(index,now_epoch,consumed)),None)
+
+    async def _account_feed(self):
+        from telethon import TelegramClient,events
+        from telethon.sessions import StringSession
+        client=TelegramClient(StringSession(self.env['TELEGRAM_SESSION_STRING']),
+                              int(self.env['TELEGRAM_API_ID']),self.env['TELEGRAM_API_HASH'])
+        try:
+            await client.connect()
+            if not await client.is_user_authorized():raise RuntimeError('Telegram sign-in required')
+            entities={d.id:d.entity async for d in client.iter_dialogs(limit=200) if d.id in self.SOURCES}
+            missing=set(self.SOURCES)-set(entities)
+            if missing:raise RuntimeError('One or more approved channels unavailable to this account')
+            def accept(message,channel_id):
+                if channel_id not in self.SOURCES or not message.date:return
+                url=f'https://t.me/c/{str(abs(channel_id))[3:]}/{message.id}'
+                self.ingest(message.raw_text or '',message.date.timestamp(),url,time.time(),self.SOURCES[channel_id])
+            async def receive(event):accept(event.message,event.chat_id)
+            client.add_event_handler(receive,events.NewMessage(chats=list(entities.values())))
+            client.add_event_handler(receive,events.MessageEdited(chats=list(entities.values())))
+            for channel_id,entity in entities.items():
+                messages=await client.get_messages(entity,limit=100)
+                for message in reversed(messages):accept(message,channel_id)
+            self.connection_status='CONNECTED'
+            self.logger.info('[CHANNEL FEED READY] Authorised account: GrowX and Tradewithsac; PAPER only')
+            while not self._closing.is_set():
+                if not client.is_connected():raise RuntimeError('Telegram account feed disconnected')
+                await asyncio.sleep(1)
+        finally:
+            self.connection_status='DISCONNECTED'
+            await client.disconnect()
 
     def _run(self):
+        if self._authorized_mode:
+            try:asyncio.run(self._account_feed())
+            except Exception as error:
+                self.connection_status='UNAVAILABLE'
+                self.logger.error('[CHANNEL FEED UNAVAILABLE] %s; native PAPER signals remain enabled',type(error).__name__)
+            return
+        self.connection_status='PUBLIC_ONLY'
+        self.logger.warning('[CHANNEL SETUP REQUIRED] GrowX account feed not connected. Native PAPER signals remain enabled.')
         previous=None
         while not self._closing.is_set():
             try:
                 response=requests.get('https://t.me/s/'+self.CHANNEL,timeout=(3,4))
                 response.raise_for_status()
                 calls=self.parse(response.text,time.time())
-                with self._lock:self._calls=calls
+                with self._lock:
+                    self._calls=calls
+                    self._target_updates=self.target_updates(response.text,time.time())
                 keys=tuple(c['key'] for c in calls)
                 if keys!=previous:
                     self.logger.info('[TELEGRAM CALLS] %d fresh public candidates; PAPER checks required',len(calls))
@@ -162,7 +270,8 @@ class TelegramNotifier:
         pnl_text=(f"{chr(0x1F7E2) if pnl>0 else chr(0x1F534)} Rs.{pnl:+,.2f}" if pnl is not None else 'unavailable')
         expiry=f"\nExpiry: {p['expiry']}" if p.get('expiry') else ''
         source=((p.get('market_structure') or {}).get('telegram_call') or {}).get('source_url')
-        source_text=f'\nSource: Telegram @tradewith_sac\nAlert: {source}\nExit plan: Bot managed' if source else ''
+        source_name=((p.get('market_structure') or {}).get('telegram_call') or {}).get('source','Tradewithsac')
+        source_text=f'\nSource: Telegram {source_name}\nAlert: {source}\nExit plan: Channel target; fixed premium SL' if source else ''
         partial_text=(f"\nOriginal quantity: {p['original_qty']}\nBooked quantity: {p['original_qty']-p['qty']}"
                       f"\nBooked net: {chr(0x1F7E2) if p.get('partial_net',0)>0 else chr(0x1F534)} Rs.{p.get('partial_net',0):+,.2f}"
                       if p.get('partial_booked') else '')
@@ -259,3 +368,25 @@ class TelegramNotifier:
         self._closing.set()
         if self._thread:
             self._thread.join(timeout=8)
+
+
+if __name__=='__main__':
+    import argparse
+    parser=argparse.ArgumentParser(description='One-time Telegram channel account sign-in')
+    parser.add_argument('--connect-telegram',action='store_true')
+    args=parser.parse_args()
+    if args.connect_telegram:
+        from pathlib import Path
+        from telethon.sync import TelegramClient
+        from telethon.sessions import StringSession
+        from dhan_dynamic_fno_stock_bot import load_dotenv_file
+        path=Path(__file__).resolve().parent/'.env'
+        env=load_dotenv_file(str(path))
+        if not env.get('TELEGRAM_API_ID') or not env.get('TELEGRAM_API_HASH'):
+            raise SystemExit('Add TELEGRAM_API_ID and TELEGRAM_API_HASH to the existing .env first.')
+        with TelegramClient(StringSession(),int(env['TELEGRAM_API_ID']),env['TELEGRAM_API_HASH']) as client:
+            session=client.session.save()
+            raw=path.read_bytes()
+            raw=re.sub(rb'(?m)^TELEGRAM_SESSION_STRING=.*(?:\r?\n|$)',b'',raw)
+            with path.open('wb') as stream:stream.write(raw.rstrip(b'\r\n')+b'\r\nTELEGRAM_SESSION_STRING='+session.encode('ascii')+b'\r\n')
+        print('Telegram sign-in saved to the existing local .env. No session secret was printed.')
