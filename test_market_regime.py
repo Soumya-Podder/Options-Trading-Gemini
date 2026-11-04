@@ -125,6 +125,77 @@ class OpeningRegimeTests(unittest.TestCase):
 if __name__=='__main__':unittest.main()
 
 
+class ConsolidationBreakoutTests(unittest.TestCase):
+    def sequence(self):
+        rows=[(100,100.5,99.5,100,5000)]*3+[
+            (102.1,102.6,101.9,102.3,1000),
+            (102.3,102.6,102.0,102.4,900),
+            (102.4,102.6,102.1,102.5,800),
+            (102.5,103.15,102.45,103.1,1500)]
+        return [dict(timestamp=i*300,open=o,high=h,low=l,close=c,volume=v)
+                for i,(o,h,l,c,v) in enumerate(rows)]
+
+    def test_quiet_base_expansion_and_bearish_symmetry(self):
+        from stock_option_signals import confirmed_consolidation_breakout as detect
+        bars=self.sequence()
+        result=detect(bars,2,True)
+        self.assertEqual(result['base_bars'],3)
+        self.assertAlmostEqual(result['trigger_level'],102.6)
+        self.assertGreater(result['breakout_volume_ratio'],1.2)
+        mirror=copy.deepcopy(bars)
+        for a,b in zip(bars,mirror):
+            b.update(open=200-a['open'],high=200-a['low'],low=200-a['high'],close=200-a['close'])
+        self.assertIsNotNone(detect(mirror,2,False))
+
+    def test_chase_weak_volume_distribution_gap_and_nearby_obstacle_rejected(self):
+        from stock_option_signals import confirmed_consolidation_breakout as detect
+        changes=[lambda b:b[-1].update(volume=700),
+                 lambda b:b[-1].update(close=104,high=104.1),
+                 lambda b:b[-1].update(close=102.55),
+                 lambda b:b[-2].update(volume=3000),
+                 lambda b:b[-2].update(low=100),
+                 lambda b:b[-1].update(timestamp=9999),
+                 lambda b:b[0].update(high=103.5)]
+        for change in changes:
+            with self.subTest(change=change):
+                bars=self.sequence();change(bars)
+                self.assertIsNone(detect(bars,2,True))
+
+    def test_full_signal_uses_base_volume_and_ignores_forming_bar(self):
+        from unittest.mock import patch
+        start=datetime(2026,10,28,9,15,tzinfo=IST)
+        data={k:[] for k in ('timestamp','open','high','low','close','volume')}
+        rows=[(95,96,94,95,1000)]*75
+        bars=self.sequence()
+        # A prior high remains ahead, but there is more than one ATR of room.
+        bars.insert(3,dict(open=101,high=106,low=101,close=102,volume=4000))
+        rows += [(b['open'],b['high'],b['low'],b['close'],b['volume']) for b in bars]
+        for i,row in enumerate(rows):
+            stamp=(start-timedelta(days=1)+timedelta(minutes=5*i) if i<75
+                   else start+timedelta(minutes=5*(i-75)))
+            for k,v in zip(data,(stamp.timestamp(),*row)):data[k].append(v)
+        now=data['timestamp'][-1]+300
+        with patch('stock_option_signals._atr',return_value=[2]),patch('stock_option_signals._ema',return_value=[100,100.2]):
+            signal=evaluate_stock_setup(data,now,require_breakout=True)
+            self.assertIsNotNone(signal)
+            self.assertEqual(signal['breakout_confirmation']['entry_path'],'CONSOLIDATION_BREAKOUT')
+            self.assertEqual(signal['volume_confirmation'],'CONSOLIDATION_VOLUME_EXPANSION')
+            blocked=evaluate_stock_setup(data,now,require_breakout=True,
+                previous_session={'date':'2026-10-27','high':104,'low':94})
+            self.assertIsNone(blocked)
+            # Compare at the same decision time, before any future bar exists.
+            mirrored=copy.deepcopy(data)
+            for field,other in (('open','open'),('high','low'),('low','high'),('close','close')):
+                mirrored[field]=[200-v for v in data[other]]
+            with patch('stock_option_signals._ema',return_value=[100,99.8]):
+                bearish=evaluate_stock_setup(mirrored,now,require_breakout=True)
+            self.assertIsNotNone(bearish)
+            self.assertEqual(bearish['breakout_confirmation']['entry_path'],'CONSOLIDATION_BREAKOUT')
+            self.assertEqual(bearish['opt_type'],'PE')
+            for k,v in zip(data,(now,103,110,100,109,100000)):data[k].append(v)
+            self.assertEqual(evaluate_stock_setup(data,now+30,require_breakout=True),signal)
+
+
 class PullbackRetestTests(unittest.TestCase):
     def sequence(self):
         values=[(99.7,100,99.5,99.8,1000)]*3+[(99.9,101.1,99.8,101,3000),

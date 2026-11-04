@@ -15,6 +15,14 @@ from contextlib import contextmanager
 from time import time as request_clock, sleep as request_sleep
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
+
+
+def session_open_wait_seconds(now, opening_time):
+    """Shorten the last pre-open sleep to the remaining wall-clock interval."""
+    opening=now.replace(hour=opening_time.hour,minute=opening_time.minute,
+                        second=opening_time.second,microsecond=0)
+    return min(1.0,max(0.0,(opening-now).total_seconds()))
+
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional
 
@@ -333,6 +341,79 @@ def selection_analysis(candidate):
             'basis':'CONFIRMED_SETUP_VOLUME_CLOSE_EXECUTION_AND_CLOSED_NET_FEEDBACK'}
 
 
+def adaptive_setup_feedback(candidate, closed_trades, as_of):
+    """Walk-forward PAPER feedback across symbols, with chronological validation.
+
+    No code/threshold rewriting: only bounded ranking, temporary setup pauses
+    and earlier fee-aware profit protection. Insufficient evidence is neutral.
+    """
+    def key(record):
+        diagnostics=record.get('entry_diagnostics') or record
+        structure=record.get('market_structure') or {}
+        call=structure.get('telegram_call') or {}
+        if record.get('index') in ('NIFTY','SENSEX'):
+            if not call.get('source') and not structure.get('setup'):return None
+            family=('CHANNEL:'+str(call['source']) if call.get('source') else
+                    'NATIVE:'+str(structure.get('setup','UNKNOWN')))
+            side=record.get('option_type')
+            if not side:
+                suffix=str(record.get('contract','')).rsplit('_',1)[-1]
+                side=suffix if suffix in ('CE','PE') else None
+            if side not in ('CE','PE'):return None
+            return (record['index'],family,side)
+        family=(diagnostics.get('breakout_confirmation') or {}).get('entry_path')
+        if not family:family=record.get('scanner')
+        return ('STOCK',family,record.get('opt_type')) if family and record.get('opt_type') in ('CE','PE') else None
+    result={'basis':'CLOSED_PAPER_SETUP_WALK_FORWARD','setup_key':key(candidate),
+            'closed_trades':0,'independent_days':0,'quality_adjustment':0.0,'paused':False,
+            'exit_policy':'STANDARD','reason':'Insufficient independent closed outcomes'}
+    wanted=result['setup_key']
+    if wanted is None:return result
+    cutoff=datetime.fromtimestamp(as_of,timezone.utc);samples=[];seen=set()
+    for trade in closed_trades:
+        try:
+            if key(trade)!=wanted:continue
+            origin=str(trade.get('data_source',trade.get('data_health',''))).upper()
+            if any(s in origin for s in ('BACKTEST','HISTOR','ROLLING')) or trade.get('mode','PAPER')!='PAPER':continue
+            exited=datetime.fromisoformat(trade['exit_timestamp'])
+            if exited.tzinfo is None:exited=exited.replace(tzinfo=timezone(timedelta(hours=5,minutes=30)))
+            if not timedelta(0)<=cutoff-exited<=timedelta(days=60):continue
+            identity=trade.get('entry_id') or (trade.get('timestamp'),trade.get('symbol',trade.get('index')),trade.get('contract'))
+            if identity in seen:continue
+            risk=float(trade.get('learning_risk_rs',0) or 0)
+            if risk<=0:risk=float(trade.get('initial_risk_points',0))*float(trade.get('qty',0))
+            net=float(trade['net_pnl'])
+            if risk<=0 or not all(math.isfinite(v) for v in (net,risk)):continue
+            reward=max(-3.0,min(3.0,net/risk))
+            diag=trade.get('exit_diagnostics') or {}
+            peak=diag.get('peak_executable_vwap',(((trade.get('market_structure') or {}).get('telegram_call') or {}).get('exit_observation') or {}).get('peak_bid'));giveback=None
+            if peak is not None and len(trade.get('exit_fills') or [])<=1:
+                peak_net=(float(peak)-float(trade['entry_price']))*float(trade['qty'])-(float(trade['gross_pnl'])-net)
+                if math.isfinite(peak_net) and peak_net>=0.5*risk:
+                    giveback=net<0.5*peak_net
+            seen.add(identity);samples.append((exited,reward,giveback))
+        except (KeyError,TypeError,ValueError,OverflowError):continue
+    samples=sorted(samples,key=lambda x:x[0])[-40:]
+    days=len({s[0].astimezone(timezone(timedelta(hours=5,minutes=30))).date() for s in samples})
+    result.update(closed_trades=len(samples),independent_days=days)
+    if len(samples)<8 or days<3:return result
+    split=max(5,len(samples)*2//3);train=samples[:split];validation=samples[split:]
+    if len(validation)<3:return result
+    train_r=sum(s[1] for s in train)/len(train);valid_r=sum(s[1] for s in validation)/len(validation)
+    same_direction=train_r*valid_r>0
+    adjustment=max(-5.0,min(5.0,5*valid_r*len(samples)/(len(samples)+10))) if same_direction else 0.0
+    paused=(len(samples)>=12 and train_r<-.25 and valid_r<-.15
+            and all(s[1]<0 for s in samples[-3:]) and cutoff-samples[-1][0]<timedelta(days=1))
+    givebacks=[s[2] for s in validation if s[2] is not None]
+    protect=(len(givebacks)>=3 and sum(givebacks)/len(givebacks)>=.5 and valid_r<train_r)
+    result.update(training_trades=len(train),validation_trades=len(validation),
+                  training_net_r=round(train_r,4),validation_net_r=round(valid_r,4),
+                  quality_adjustment=round(adjustment,4),paused=paused,
+                  exit_policy='PROTECT_EARNED_PROFIT' if protect else 'STANDARD',
+                  reason='Chronological validation supports adaptation' if same_direction or protect else 'Validation disagrees; retain standard policy')
+    return result
+
+
 def rank_candidates(candidates: Iterable[Dict[str, Any]], closed_trades=(), as_of=None) -> list[Dict[str, Any]]:
     """Rank quality with bounded feedback from this symbol/setup's closed net outcomes.
 
@@ -340,6 +421,7 @@ def rank_candidates(candidates: Iterable[Dict[str, Any]], closed_trades=(), as_o
     at decision time, including during replay. Unknown/legacy risk is not invented.
     """
     candidates=[dict(c) for c in candidates]
+    closed_trades=list(closed_trades)
     if as_of is not None:
         cutoff=datetime.fromtimestamp(as_of,timezone.utc)
         for candidate in candidates:
@@ -363,6 +445,10 @@ def rank_candidates(candidates: Iterable[Dict[str, Any]], closed_trades=(), as_o
                     and cutoff-outcomes[-1][0]<timedelta(days=5))
             candidate['learning_feedback']={'closed_trades':count,'net_expectancy_r':round(expectancy,4),
                 'quality_adjustment':round(adjustment,4),'paused':paused,'basis':'CLOSED_NET_PNL_SAME_SYMBOL_SCANNER_SIDE'}
+            pooled=adaptive_setup_feedback(candidate,closed_trades,as_of)
+            candidate['adaptive_feedback']=pooled
+            candidate['learning_feedback']['quality_adjustment']=max(-10.0,min(10.0,adjustment+pooled['quality_adjustment']))
+            candidate['learning_feedback']['paused']=paused or pooled['paused']
         candidates=[c for c in candidates if not c['learning_feedback']['paused']]
         for candidate in candidates:candidate['selection_analysis']=selection_analysis(candidate)
     return sorted(

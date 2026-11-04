@@ -168,13 +168,14 @@ class EngineMaintenanceTests(unittest.TestCase):
             self.assertFalse(engine.reserve_index_entry(saved,'2026-10-27',{'telegram_call_key':'one'},path))
             self.assertEqual(saved['daily_entry_counts']['2026-10-27'],1)
 
-    def test_channel_multilot_size_respects_wallet_depth_without_native_loss_downsize(self):
+    def test_channel_size_stays_within_native_risk_and_loss_limits(self):
         import dhan_bot_engine as engine
-        self.assertEqual(engine.channel_entry_lots(1,40000,156,65,650,650,0,False),2)
-        self.assertEqual(engine.channel_entry_lots(1,40000,100,65,650,650,0,False),3)
+        self.assertEqual(engine.channel_entry_lots(1,40000,156,65,650,650,0,False),1)
+        self.assertEqual(engine.channel_entry_lots(3,40000,100,65,650,650,0,False),3)
         self.assertEqual(engine.channel_entry_lots(1,40000,100,65,65,650,0,False),1)
-        self.assertEqual(engine.channel_entry_lots(1,40000,100,65,650,650,1,False),3)
-        self.assertEqual(engine.channel_entry_lots(1,40000,100,65,650,650,0,True),3)
+        self.assertEqual(engine.channel_entry_lots(3,40000,100,65,650,650,1,False),1)
+        self.assertEqual(engine.channel_entry_lots(3,40000,100,65,650,650,0,True),1)
+        self.assertEqual(engine.channel_entry_lots(0,40000,100,65,650,650,0,False),0)
         self.assertEqual(engine.channel_entry_lots(1,1000,156,65,650,650,0,False),0)
 
     def test_stock_entry_and_exit_notifications_accept_stock_position_fields(self):
@@ -387,6 +388,51 @@ class ChannelTargetUpdateTests(unittest.TestCase):
 
 
 class DualChannelFeedTests(unittest.TestCase):
+    def test_prompt_pending_alert_reopens_only_on_matching_fresh_activation(self):
+        from telegram_notifier import TelegramCallFeed
+        f=self.feed();now=datetime.fromisoformat('2026-11-02T09:18:46+05:30').timestamp()
+        call=f.ingest('NIFTY 23200 CE BUY ABOVE: 150',now,'alert',now+8,'Tradewithsac')
+        activated=now+1221
+        self.assertEqual(f.candidates('NIFTY',now+301,[]),[])
+        f.ingest('TRADE ACTIVATED NIFTY 23200 CE T1: 160 T2: 175',activated,'activation',activated+2,'Tradewithsac')
+        candidate=f.candidate('NIFTY',activated+3,[])
+        self.assertEqual(candidate['posted_epoch'],now)
+        self.assertEqual(candidate['activation_epoch'],activated)
+        self.assertTrue(TelegramCallFeed.entry_is_fresh(candidate,activated+299))
+        self.assertFalse(TelegramCallFeed.entry_is_fresh(candidate,activated+301))
+        self.assertEqual(f.candidates('NIFTY',activated+3,[call['key']]),[])
+        self.assertEqual(f.targets_for(candidate,activated+3),[160,175])
+
+    def test_late_retrieval_wrong_source_and_targets_do_not_rearm(self):
+        now=datetime.fromisoformat('2026-11-02T09:18:46+05:30').timestamp()
+        for kind in ('late_original','late_activation','wrong_source','wrong_side','targets_only','too_old'):
+            with self.subTest(kind=kind):
+                f=self.feed()
+                f.ingest('NIFTY 23200 CE BUY ABOVE: 150',now,'alert',now+(400 if kind=='late_original' else 8),'Tradewithsac')
+                posted=now+(1900 if kind=='too_old' else 1200)
+                text='NIFTY 23200 CE TARGET: 160' if kind=='targets_only' else 'TRADE ACTIVATED NIFTY 23200 '+('PE' if kind=='wrong_side' else 'CE')+' T1: 160'
+                received=posted+(400 if kind=='late_activation' else 2)
+                f.ingest(text,posted,'update',received,'GrowX' if kind=='wrong_source' else 'Tradewithsac')
+                candidates=f.candidates('NIFTY',received,[])
+                if kind in ('late_original','too_old'):
+                    self.assertEqual(candidates,[])
+                else:
+                    self.assertEqual(candidates,[])
+                    self.assertNotIn('activation_epoch',f._calls[0])
+                    self.assertEqual(f.candidates('NIFTY',now+1801,[]),[])
+
+    def test_pending_restore_cancellation_and_repeated_activation_preserve_lifecycle(self):
+        now=datetime.fromisoformat('2026-11-02T09:18:46+05:30').timestamp()
+        f=self.feed();f.ingest('NIFTY 23200 CE BUY ABOVE: 150',now,'alert',now+8,'Tradewithsac')
+        saved=f.pending_snapshot(now+600)
+        restarted=self.feed();restarted.restore_pending(saved,now+601)
+        restarted.ingest('TRADE ACTIVATED NIFTY 23200 CE T1: 160',now+1200,'activation',now+1202,'Tradewithsac')
+        self.assertIsNotNone(restarted.candidate('NIFTY',now+1203,[]))
+        restarted.ingest('TRADE ACTIVATED NIFTY 23200 CE T1: 160',now+1600,'repost',now+1601,'Tradewithsac')
+        self.assertIsNone(restarted.candidate('NIFTY',now+1602,[]))
+        restarted.ingest('NIFTY 23200 CE CANCELLED',now+1603,'cancel',now+1604,'Tradewithsac')
+        self.assertEqual(restarted.pending_snapshot(now+1604),[])
+
     def feed(self):
         import threading,logging
         from telegram_notifier import TelegramCallFeed
@@ -409,8 +455,9 @@ class DualChannelFeedTests(unittest.TestCase):
         f=self.feed();now=datetime.fromisoformat('2026-10-28T03:46:00+00:00').timestamp()
         original=f.ingest('NIFTY 22600 PE BUY ABOVE: 202',now-299,'one',now,'Tradewithsac')
         f.ingest('NIFTY 22600 PE BUY ABOVE: 202',now,'two',now,'Tradewithsac')
-        self.assertEqual(f.candidate('NIFTY',now,[])['posted_epoch'],now-299)
+        self.assertEqual(f._calls[0]['posted_epoch'],now-299)
         self.assertIsNone(f.candidate('NIFTY',now+2,[]))
+        self.assertIsNone(f.candidate('NIFTY',now+1801,[]))
         self.assertIsNone(f.candidate('NIFTY',now,[original['key']]))
         f.ingest('NIFTY 22600 PE TARGET -- 240-285',now,'three',now,'GrowX')
         self.assertEqual(f.targets_for(original,now),[])
@@ -434,6 +481,67 @@ class DualChannelFeedTests(unittest.TestCase):
 
 
 class ChannelExitRegressionTests(unittest.TestCase):
+    def test_multi_lot_channel_books_t1_once_and_remaining_lot_reaches_t2(self):
+        import dhan_bot_engine as engine
+        p=self.position();p.update(entry_price=150,highest_ltp=150,current_sl=140,
+            original_qty=130,target_one_qty=65,target_one_done=False,exit_fills=[])
+        p['market_structure']['telegram_call']['targets']=[160,175,190]
+        self.assertEqual(engine.protect_channel_position(p,160,1),'TELEGRAM_CHANNEL_PARTIAL_TARGET')
+        ledger={'initial_capital':40000,'virtual_balance_gross':40000,'virtual_balance_net':40000,'trades':[]}
+        with patch.object(engine,'atomic_write_json'):
+            engine.book_target_one(ledger,p,159.8,'2026-11-02 09:40:00',reason='TELEGRAM_CHANNEL_TARGET_1')
+            balance=ledger['virtual_balance_net']
+            engine.book_target_one(ledger,p,165,'2026-11-02 09:41:00')
+        self.assertEqual(p['qty'],65)
+        self.assertEqual(len(p['exit_fills']),1)
+        self.assertEqual(ledger['virtual_balance_net'],balance)
+        self.assertIsNone(engine.protect_channel_position(p,164,2))
+        self.assertGreater(p['current_sl'],150)
+        self.assertEqual(engine.protect_channel_position(p,175,3),'TELEGRAM_CHANNEL_TARGET_2')
+        self.assertEqual(engine.protect_channel_position(p,150,4),'CHANNEL_PROFIT_PROTECTION')
+        fills=p['exit_fills']+[{'qty':65,'price':174.8,'timestamp':'2026-11-02 09:45:00','reason':'TELEGRAM_CHANNEL_TARGET_2'}]
+        weighted=sum(f['qty']*f['price'] for f in fills)/130
+        with patch.object(engine,'atomic_write_json'):
+            engine.record_closed_trade(ledger,MagicMock(),'2026-11-02','2026-11-02 09:38:00',
+                '2026-11-02 09:45:00','NIFTY',23200,'CE',2,130,23000,0,150,weighted,0,
+                'TELEGRAM_CHANNEL_TARGET_2','rule',[0]*10,'PAPER',exit_fills=fills,
+                booked_gross=p['partial_gross'],booked_net=p['partial_net'],initial_risk_points=10)
+        expected_gross=(159.8-150)*65+(174.8-150)*65
+        self.assertAlmostEqual(ledger['virtual_balance_net'],40000+expected_gross-109,places=2)
+        self.assertEqual(ledger['trades'][0]['qty'],130)
+        self.assertEqual(len(ledger['trades'][0]['exit_fills']),2)
+
+    def test_sac_waits_for_activation_then_enters_without_chasing(self):
+        import dhan_bot_engine as engine
+        f=DualChannelFeedTests().feed()
+        posted=datetime.fromisoformat('2026-11-02T09:18:46+05:30').timestamp()
+        f.ingest('NIFTY 23200 CE BUY ABOVE: 150',posted,'alert',posted+8,'Tradewithsac')
+        now=posted+1100
+        self.assertIsNone(f.candidate('NIFTY',now,[]))
+        f.ingest('TRADE ACTIVATED NIFTY 23200 CE T1: 160 T2: 175',now,'activation',now,'Tradewithsac')
+        call=f.candidate('NIFTY',now,[])
+        self.assertIsNotNone(call)
+        leg={'security_id':'123','last_price':150,'top_bid_price':150,'top_ask_price':150.1,
+             'top_bid_quantity':130,'top_ask_quantity':130,'greeks':{'delta':.5,'theta':-2}}
+        view={'index':'NIFTY','market_structure':{}}
+        self.assertIsNotNone(engine.channel_entry_view(view,{'23200':{'ce':leg}},call,'2026-11-03',now,now)[0])
+        self.assertIsNone(engine.channel_entry_view(view,{'23200':{'ce':{**leg,'top_ask_price':155}}},call,'2026-11-03',now,now)[0])
+
+    def test_fresh_channel_signal_does_not_inherit_native_loss_cooldown(self):
+        import dhan_bot_engine as engine
+        now=datetime.fromisoformat('2026-10-30T09:22:40+05:30')
+        cooldown=datetime.fromisoformat('2026-10-30T09:37:33+05:30')
+        brain=MagicMock();view={}
+        call={'option_type':'CE','key':'2026-10-30:NIFTY:22950:CE:140:CURRENT'}
+        self.assertEqual(engine.index_entry_signal(brain,view,1,now,cooldown,call),
+                         ('BUY_CE','TELEGRAM_CHANNEL '+call['key']))
+        brain.select_action.assert_not_called()
+        self.assertEqual(engine.index_entry_signal(brain,view,1,now,cooldown),('HOLD',None))
+        brain.select_action.assert_not_called()
+        brain.select_action.return_value=('BUY_PE','native')
+        self.assertEqual(engine.index_entry_signal(brain,view,1,cooldown,cooldown),('BUY_PE','native'))
+        brain.select_action.assert_called_once()
+
     def position(self):
         return {'index':'NIFTY','strike':22800.0,'option_type':'CE','security_id':'53794',
                 'entry_price':130.95,'qty':130,'lots':2,'initial_risk_points':10,
@@ -493,5 +601,144 @@ class ChannelExitRegressionTests(unittest.TestCase):
         now=datetime.fromisoformat('2026-10-29T03:49:00+00:00').timestamp()
         older=f.ingest('BUY NIFTY 22650 CE NEAR LEVEL -- 189-193 TARGET -- 240-285',now-120,'grow',now,'GrowX')
         newer=f.ingest('NIFTY 22650 PE BUY ABOVE: 170',now-60,'sac',now,'Tradewithsac')
+        f.ingest('TRADE ACTIVATED NIFTY 22650 PE T1: 180',now-30,'activated',now,'Tradewithsac')
         self.assertEqual([c['key'] for c in f.candidates('NIFTY',now,[])],[newer['key'],older['key']])
         self.assertEqual([c['key'] for c in f.candidates('NIFTY',now,[newer['key']])],[older['key']])
+
+
+class ChannelNovemberThirdRegressionTests(unittest.TestCase):
+    def test_buy_near_alert_matches_activation_and_preserves_targets(self):
+        from telegram_notifier import TelegramCallFeed
+        feed=DualChannelFeedTests().feed()
+        posted=datetime.fromisoformat('2026-11-03T09:19:35+05:30').timestamp()
+        for wording in ('BUY NEAR : ₹125','BUY NEAR: Rs.125','BUY NEAR 125'):
+            call,_=TelegramCallFeed.parse_message('NIFTY 23450 CE '+wording,posted,'sac',posted+2)
+            self.assertEqual(call['entry_kind'],'NEAR')
+            self.assertEqual(TelegramCallFeed.entry_bounds(call),(123.75,126.25))
+        feed.ingest('NIFTY 23450 CE BUY NEAR : ₹125',posted,'sac',posted+2,'Tradewithsac')
+        feed.ingest('TRADE ACTIVATED NIFTY 23450 CE T1: ₹135 T2: ₹150 T3: ₹170++',posted+97,'activation',posted+99,'Tradewithsac')
+        candidate=feed.candidate('NIFTY',posted+100,[])
+        self.assertEqual(candidate['activation_epoch'],posted+97)
+        self.assertEqual(feed.targets_for(candidate,posted+100),[135,150,170])
+        self.assertEqual(feed.candidates('NIFTY',posted+100,[candidate['key']]),[])
+
+    def test_single_near_quote_and_modeled_fill_have_real_execution_room(self):
+        import math
+        import dhan_bot_engine as engine
+        from telegram_notifier import TelegramCallFeed
+        now=datetime.fromisoformat('2026-11-03T09:15:31+05:30').timestamp()
+        call,_=TelegramCallFeed.parse_message('BUY NIFTY 23300 CE NEAR LEVEL -- 170 TARGET -- 240-285',now-10,'growx',now,'GrowX')
+        self.assertEqual(call['entry_kind'],'NEAR')
+        floor,cap=TelegramCallFeed.entry_bounds(call)
+        self.assertAlmostEqual(floor,168.3);self.assertAlmostEqual(cap,171.7)
+        leg={'security_id':'123','last_price':170,'top_bid_price':169.9,'top_ask_price':170.2,
+             'top_bid_quantity':650,'top_ask_quantity':650,'greeks':{'delta':.94,'theta':-2}}
+        view={'index':'NIFTY','market_structure':{}}
+        check=lambda node:engine.channel_entry_view(view,{'23300':{'ce':node}},call,'2026-11-03',now,now)
+        self.assertIsNotNone(check(leg)[0])
+        self.assertLessEqual(math.ceil(leg['top_ask_price']*1.001*20-1e-9)/20,cap)
+        self.assertIsNone(check({**leg,'top_bid_price':168.25,'top_ask_price':168.4})[0])
+        self.assertIsNone(check({**leg,'top_bid_price':172,'top_ask_price':172.1})[0])
+        for delta in (0,-.8,1.01,float('nan')):
+            with self.subTest(delta=delta):
+                self.assertIsNone(check({**leg,'greeks':{'delta':delta,'theta':-2}})[0])
+        for delta in (.12,.8,1):
+            self.assertIsNotNone(check({**leg,'greeks':{'delta':delta,'theta':-2}})[0])
+        self.assertIsNone(check({**leg,'greeks':{'theta':-2}})[0])
+
+    def test_explicit_range_is_never_widened_and_near_still_expires(self):
+        from telegram_notifier import TelegramCallFeed
+        now=datetime.fromisoformat('2026-11-03T09:15:31+05:30').timestamp()
+        for source,text in [('GrowX','BUY NIFTY 23300 CE NEAR LEVEL -- 170-173'),
+                            ('Tradewithsac','NIFTY 23300 CE BUY NEAR: 170-173')]:
+            call,_=TelegramCallFeed.parse_message(text,now,'test',now,source)
+            self.assertEqual(TelegramCallFeed.entry_bounds(call),(170,173))
+            self.assertFalse(TelegramCallFeed.entry_is_fresh(call,now+1801))
+        self.assertEqual(TelegramCallFeed.entry_bounds({'buy_above':1000,'index':'SENSEX','entry_kind':'NEAR'}),(996,1004))
+
+    def test_unsupported_contract_entry_is_visible_in_logs(self):
+        feed=DualChannelFeedTests().feed()
+        now=datetime.fromisoformat('2026-11-03T09:15:31+05:30').timestamp()
+        with self.assertLogs(feed.logger,level='WARNING') as logs:
+            feed.ingest('NIFTY 23300 CE BUY AROUND 170',now,'unsupported',now,'GrowX')
+        self.assertIn('CHANNEL FORMAT REJECT',logs.output[0])
+        self.assertEqual(feed.candidates('NIFTY',now,[]),[])
+
+
+class MarketOpeningTimingTests(unittest.TestCase):
+    def test_preopen_wait_never_sleeps_past_open(self):
+        from datetime import time,timezone,timedelta
+        from stock_option_policy import session_open_wait_seconds
+        for zone in (None,timezone(timedelta(hours=5,minutes=30))):
+            for moment,expected in ((datetime(2026,11,5,9,10),1.0),
+                                    (datetime(2026,11,5,9,14,59,950000),.05),
+                                    (datetime(2026,11,5,9,15),0.0),
+                                    (datetime(2026,11,5,9,16),0.0)):
+                self.assertAlmostEqual(session_open_wait_seconds(moment.replace(tzinfo=zone),time(9,15)),expected)
+
+
+class ChannelLifecycleAuditTests(unittest.TestCase):
+    def test_november_fourth_wait_activation_does_not_consume_early(self):
+        import dhan_bot_engine as engine
+        feed=DualChannelFeedTests().feed()
+        posted=datetime.fromisoformat('2026-11-04T09:59:54+05:30').timestamp()
+        call=feed.ingest('NIFTY 23800 PE BUY ABOVE: 152',posted,'alert',posted+39,'Tradewithsac')
+        feed.ingest('Wait for trigger',posted+4,'wait',posted+39,'Tradewithsac')
+        early=posted+61
+        leg={'security_id':'123','last_price':153.7,'top_bid_price':153.6,'top_ask_price':153.75,
+             'top_bid_quantity':650,'top_ask_quantity':650,'greeks':{'delta':-.5,'theta':-2}}
+        self.assertIsNone(feed.candidate('NIFTY',early,[]))
+        self.assertEqual(feed.decision_statuses('NIFTY',early,[])[0]['state'],'WAITING_FOR_ACTIVATION')
+        self.assertIsNone(engine.channel_entry_view({'index':'NIFTY'}, {'23800':{'pe':leg}},call,'2026-11-09',early,early)[0])
+        activated=posted+1052
+        feed.ingest('TRADE ACTIVATED NIFTY 23800 PE T1: 162 T2: 180 T3: 200',activated,'activation',activated+7,'Tradewithsac')
+        ready=feed.candidate('NIFTY',activated+8,[])
+        self.assertIsNotNone(ready)
+        self.assertEqual(feed.targets_for(ready,activated+8),[162,180,200])
+        self.assertIsNotNone(engine.channel_entry_view({'index':'NIFTY'}, {'23800':{'pe':leg}},ready,'2026-11-09',activated+8,activated+8)[0])
+        self.assertEqual(feed.decision_statuses('NIFTY',activated+8,[call['key']])[0]['state'],'ALREADY_EXECUTED')
+        self.assertIsNone(feed.candidate('NIFTY',activated+8,[call['key']]))
+
+    def test_growx_needs_no_activation_but_catchup_never_renews_age(self):
+        feed=DualChannelFeedTests().feed()
+        posted=datetime.fromisoformat('2026-11-04T09:15:55+05:30').timestamp()
+        text='BUY NIFTY 23750 CE NEAR LEVEL -- 170 TARGET -- 195-240'
+        call=feed.ingest(text,posted,'growx',posted+1,'GrowX')
+        self.assertIsNotNone(feed.candidate('NIFTY',posted+2,[]))
+        for age in (5,10,100,301):feed.ingest(text,posted,'growx',posted+age,'GrowX')
+        self.assertEqual(feed._calls[0]['first_received_epoch'],posted+1)
+        self.assertEqual(feed.decision_statuses('NIFTY',posted+301,[])[0]['state'],'EXPIRED')
+        self.assertIsNone(feed.candidate('NIFTY',posted+301,[]))
+
+    def test_restored_legacy_sac_alert_waits_and_old_formats_do_not_warn(self):
+        feed=DualChannelFeedTests().feed()
+        posted=datetime.fromisoformat('2026-11-04T09:59:54+05:30').timestamp()
+        call=feed.ingest('NIFTY 23800 PE BUY ABOVE: 152',posted,'alert',posted+1,'Tradewithsac')
+        saved=feed.pending_snapshot(posted+2);saved[0].pop('requires_activation')
+        restored=DualChannelFeedTests().feed();restored.restore_pending(saved,posted+3)
+        self.assertIsNone(restored.candidate('NIFTY',posted+4,[]))
+        with patch.object(restored.logger,'warning') as warn:
+            restored.ingest('NIFTY 23800 PE BUY AROUND 152',posted-86400,'old',posted,'Tradewithsac')
+        warn.assert_not_called()
+
+    def test_account_feed_failure_retries_without_enabling_candidates(self):
+        import threading
+        feed=DualChannelFeedTests().feed();feed._authorized_mode=True;feed._closing=MagicMock()
+        feed._closing.is_set.return_value=False
+        feed._closing.wait.side_effect=[False,True]
+        with patch.object(feed,'_account_feed',new=MagicMock(return_value=None)),patch('telegram_notifier.asyncio.run',side_effect=ConnectionError):
+            feed._run()
+        self.assertEqual(feed._closing.wait.call_count,2)
+        self.assertEqual(feed.connection_status,'UNAVAILABLE')
+        self.assertEqual(feed.candidates('NIFTY',0,[]),[])
+
+
+class PersistenceFailureAuditTests(unittest.TestCase):
+    def test_exhausted_file_replacements_are_reported_not_silently_successful(self):
+        from unittest.mock import mock_open
+        import dhan_bot_engine as index,dhan_dynamic_fno_stock_bot as stock
+        for module in (index,stock):
+            with self.subTest(module=module.__name__),patch('builtins.open',mock_open()),patch.object(module.os,'replace',side_effect=PermissionError) as replace,patch.object(module.time,'sleep'):
+                with self.assertRaisesRegex(OSError,'Could not persist JSON'):
+                    module.atomic_write_json('audit-ledger.json',{'value':1})
+                self.assertEqual(replace.call_count,10)

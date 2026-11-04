@@ -371,4 +371,87 @@ class GeminiReviewTests(unittest.TestCase):
         self.assertEqual(error.exception.code,2)
         run.assert_not_called()
 
+class AdaptiveSetupFeedbackTests(unittest.TestCase):
+    def setUp(self):
+        self.now=datetime(2026,10,30,18,tzinfo=bot.IST)
+        self.candidate={'symbol':'NEW_STOCK','scanner':'CONFIRMED_BREAKOUT_CE','opt_type':'CE',
+                        'signal_quality':70,'expected_net_rr':1.5,
+                        'breakout_confirmation':{'entry_path':'DIRECT_BREAKOUT'}}
+
+    def trades(self,rewards):
+        result=[]
+        for i,reward in enumerate(rewards):
+            stamp=self.now-timedelta(days=3-i//3,minutes=30-i%3)
+            result.append({'symbol':'STOCK_'+str(i),'scanner':'CONFIRMED_BREAKOUT_CE','opt_type':'CE',
+                'entry_id':'trade_'+str(i),'timestamp':(stamp-timedelta(minutes=5)).isoformat(),
+                'exit_timestamp':stamp.isoformat(),'net_pnl':reward*1000,'gross_pnl':reward*1000+100,
+                'learning_risk_rs':1000,'entry_price':100,'qty':100,
+                'data_source':'PAPER_BID_ASK','exit_diagnostics':{'peak_executable_vwap':116},
+                'entry_diagnostics':{'breakout_confirmation':{'entry_path':'DIRECT_BREAKOUT'}}})
+        return result
+
+    def feedback(self,trades,at=None,candidate=None):
+        from stock_option_policy import adaptive_setup_feedback
+        return adaptive_setup_feedback(candidate or self.candidate,trades,(at or self.now).timestamp())
+
+    def test_shared_evidence_transfers_to_new_symbol_and_poor_setups_pause_then_recover(self):
+        trades=self.trades([-.8]*12)
+        feedback=self.feedback(trades)
+        self.assertTrue(feedback['paused'])
+        self.assertLess(feedback['quality_adjustment'],0)
+        self.assertEqual(rank_candidates([self.candidate],trades,self.now.timestamp()),[])
+        self.assertFalse(self.feedback(trades,self.now+timedelta(days=2))['paused'])
+        winners=self.trades([1]*12)
+        ranked=rank_candidates([self.candidate],winners,self.now.timestamp())
+        self.assertGreater(ranked[0]['learning_feedback']['quality_adjustment'],0)
+        self.assertEqual(ranked[0]['expected_net_rr'],1.5)
+
+    def test_small_samples_single_day_future_duplicates_and_bad_origin_cannot_train(self):
+        self.assertEqual(self.feedback(self.trades([1]*7))['quality_adjustment'],0)
+        rows=self.trades([1]*12)
+        for row in rows:row['exit_timestamp']=self.now.isoformat()
+        self.assertEqual(self.feedback(rows)['quality_adjustment'],0)
+        self.assertEqual(self.feedback(self.trades([1]*12),self.now-timedelta(days=5))['closed_trades'],0)
+        rows=self.trades([1]*12)
+        self.assertEqual(self.feedback(rows+rows)['closed_trades'],12)
+        for row in rows:row['data_source']='DHAN_REAL_HISTORICAL'
+        self.assertEqual(self.feedback(rows)['closed_trades'],0)
+        rows=self.trades([1]*12)
+        for row in rows:row['learning_risk_rs']=0
+        self.assertEqual(self.feedback(rows)['closed_trades'],0)
+
+    def test_validation_disagreement_does_not_promote_and_giveback_tightens_protection(self):
+        feedback=self.feedback(self.trades([1]*8+[-.5]*4))
+        self.assertEqual(feedback['quality_adjustment'],0)
+        self.assertEqual(feedback['exit_policy'],'PROTECT_EARNED_PROFIT')
+        self.assertFalse(feedback['paused'])
+
+    def test_stock_protection_uses_frozen_entry_feedback_without_changing_risk(self):
+        import argparse
+        import dhan_dynamic_fno_stock_bot as stock
+        cfg=stock.DynamicStrategyConfig({},argparse.Namespace())
+        when=self.now.replace(hour=12)
+        base={'entry_price':100,'qty':100,'lots':1,'entry_epoch':when.timestamp()-30,
+              'peak_bid':100,'current_sl':90,'initial_sl':90,'opt_1r':10,'trail_jump':5,
+              'rupee_target_price':130,'adaptive_feedback':{'exit_policy':'PROTECT_EARNED_PROFIT'}}
+        quote={'received_epoch':when.timestamp(),'depth':{'buy':[{'price':106.5,'quantity':100}]}}
+        protected=copy.deepcopy(base);standard=copy.deepcopy(base);standard['adaptive_feedback']={}
+        self.assertIsNone(stock.paper_exit(protected,quote,when,cfg))
+        self.assertIsNone(stock.paper_exit(standard,quote,when,cfg))
+        self.assertGreater(protected['current_sl'],100)
+        self.assertEqual(standard['current_sl'],90)
+        self.assertEqual(protected['initial_sl'],90)
+
+    def test_channel_feedback_is_source_specific_and_entry_pause_is_enforced(self):
+        rows=self.trades([-.8]*12)
+        for row in rows:
+            row.update(index='NIFTY',option_type='CE',market_structure={'telegram_call':{'source':'GrowX'}})
+        call={'option_type':'CE','source':'GrowX','key':'fresh-call'}
+        view={'index':'NIFTY'}
+        result=bot.index_entry_signal(MagicMock(),view,0,self.now,None,call,rows)
+        self.assertEqual(result,('HOLD',None))
+        other={**call,'source':'Tradewithsac'}
+        self.assertEqual(bot.index_entry_signal(MagicMock(),{'index':'NIFTY'},0,self.now,None,other,rows)[0],'BUY_CE')
+
+
 if __name__=='__main__':unittest.main()

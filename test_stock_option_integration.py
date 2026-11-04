@@ -34,7 +34,7 @@ class IntegrationTests(unittest.TestCase):
         evaluate.assert_not_called()
         client.fetch_option_chain.assert_not_called()
 
-    def test_single_lot_base_target_locks_stop_then_allows_runner_or_protective_exit(self):
+    def test_single_lot_books_base_target_unless_fresh_runner_supports_holding(self):
         cfg=bot.DynamicStrategyConfig({'STOCK_OPT_RUPEE_TARGET':'1200','STOCK_OPT_RUNNER_TARGET':'5500',
             'STOCK_OPT_STOP_PCT':'4','STOCK_OPT_TARGET_PCT':'16','STOCK_OPT_MIN_NET_RR':'1.5',
             'STOCK_OPT_EXTEND_RUPEE_TARGET':'true'},argparse.Namespace())
@@ -44,6 +44,8 @@ class IntegrationTests(unittest.TestCase):
              'current_sl':plan['initial_sl'],'runner_assessment':{'hold':False}}
         def quote(bid):
             return {'received_epoch':self.now.timestamp(),'depth':{'buy':[{'price':bid,'quantity':500}]}}
+        self.assertEqual(bot.paper_exit(copy.deepcopy(pos),quote(plan['rupee_target_price']),self.now,cfg)[1],'RUPEE_TARGET')
+        pos['runner_assessment']={'hold':True,'assessed_epoch':self.now.timestamp()}
         self.assertIsNone(bot.paper_exit(pos,quote(plan['rupee_target_price']),self.now,cfg))
         self.assertTrue(pos['base_target_locked'])
         self.assertGreater(pos['current_sl'],50)
@@ -291,7 +293,7 @@ class IntegrationTests(unittest.TestCase):
              'sell':[{'price':16.4,'quantity':1575}]}}
         reasons=[]
         self.assertIsNone(bot.qualify_quote(sig,quote,cfg,50000,self.now.timestamp(),reasons))
-        self.assertEqual(reasons,['Spread consumes over 40% of effective stop distance'])
+        self.assertEqual(reasons,['Spread consumes over 25% of effective stop distance'])
         quote['depth']['buy'][0]['price']=16.25
         self.assertIsNotNone(bot.qualify_quote(sig,quote,cfg,50000,self.now.timestamp()))
 
@@ -524,8 +526,8 @@ class IntegrationTests(unittest.TestCase):
         quote=copy.deepcopy(self.quote);quote['depth']['buy'][0]['price']=96
         reasons=[]
         self.assertIsNone(bot.qualify_quote(sig,quote,cfg,60000,self.now.timestamp(),reasons))
-        self.assertEqual(reasons,['Spread consumes over 40% of effective stop distance'])
-        quote['depth']['buy'][0]['price']=98.5
+        self.assertEqual(reasons,['Spread consumes over 25% of effective stop distance'])
+        quote['depth']['buy'][0]['price']=98.9
         good=bot.qualify_quote(sig,quote,cfg,60000,self.now.timestamp())
         self.assertIsNotNone(good)
         self.assertEqual(good['spread_limit_pct'],4.5)
@@ -703,9 +705,8 @@ class IntegrationTests(unittest.TestCase):
         q=copy.deepcopy(self.quote)
         q.update(last_trade_time="21/10/2026 10:00:00",received_epoch=self.now.timestamp())
         q["depth"]["buy"][0]["price"]=106
-        self.assertIsNone(bot.paper_exit(pos,q,self.now,self.cfg))
-        self.assertTrue(pos['base_target_locked'])
-        self.assertGreater(pos['current_sl'],pos['entry_price'])
+        self.assertEqual(bot.paper_exit(pos,q,self.now,self.cfg)[1],'RUPEE_TARGET')
+        self.assertEqual(pos['current_sl'],99)
         q["received_epoch"]-=31
         self.assertIsNone(bot.paper_exit(pos,q,self.now,self.cfg))
 
@@ -725,9 +726,8 @@ class IntegrationTests(unittest.TestCase):
             return q
         pos = position()
         result = bot.paper_exit(pos,quote(106),self.now,self.cfg)
-        self.assertIsNone(result)
-        self.assertTrue(pos['base_target_locked'])
-        self.assertGreater(pos['current_sl'],100)
+        self.assertEqual(result[1],'RUPEE_TARGET')
+        self.assertGreaterEqual(bot.stock_position_value(pos,result[0])['net'],plan['net_profit_target'])
         pos = position()
         self.assertIsNone(bot.paper_exit(pos,quote(100+2.2*plan['trail_jump']+0.05),self.now,self.cfg))
         self.assertGreater(pos["current_sl"],pos["initial_sl"])
@@ -1327,6 +1327,45 @@ if __name__ == "__main__":
 
 
 class StockExitProtectionTests(unittest.TestCase):
+    def test_reliance_entry_rejected_when_premium_stop_precedes_structural_invalidation(self):
+        signal={'opt_type':'CE','spot_ltp':1251.1,'atr_5m':7.0416267040517,'delta':0.56326,
+            'breakout_confirmation':{'trigger_level':1246.4,'buffer':0.3520813352,'entry_path':'DIRECT_BREAKOUT'}}
+        plan={'initial_sl':27.5,'cash_loss_stop_price':26.5}
+        result=bot.stock_entry_structure_check(signal,plan,29.7,29.6)
+        self.assertFalse(result['allowed'])
+        self.assertIn('inside estimated structural risk',result['reason'])
+        self.assertAlmostEqual(result['delta_scenario_risk_points'],2.9456353,places=5)
+        self.assertEqual(plan['initial_sl'],27.5)
+        # A new near-level entry fits the existing stop; the stop is not widened.
+        earlier={**signal,'spot_ltp':1247.1}
+        self.assertTrue(bot.stock_entry_structure_check(earlier,plan,29.7,29.6)['allowed'])
+        mirrored={**signal,'opt_type':'PE','spot_ltp':2500-signal['spot_ltp'],'delta':-signal['delta'],
+            'breakout_confirmation':{**signal['breakout_confirmation'],'trigger_level':2500-1246.4}}
+        self.assertFalse(bot.stock_entry_structure_check(mirrored,plan,29.7,29.6)['allowed'])
+
+    def test_structural_entry_uses_retest_invalidation_and_rejects_chase_or_bad_data(self):
+        signal={'opt_type':'CE','spot_ltp':101,'atr_5m':2,'delta':.5,
+            'breakout_confirmation':{'trigger_level':100,'buffer':.1,'entry_path':'PULLBACK_RETEST',
+                'pullback':{'invalidation_level':98}}}
+        plan={'initial_sl':9,'cash_loss_stop_price':8.5}
+        self.assertFalse(bot.stock_entry_structure_check(signal,plan,10,9.95)['allowed'])
+        signal['breakout_confirmation']['pullback']['invalidation_level']=99.5
+        self.assertTrue(bot.stock_entry_structure_check(signal,plan,10,9.95)['allowed'])
+        self.assertFalse(bot.stock_entry_structure_check({**signal,'spot_ltp':102},plan,10,9.95)['allowed'])
+        self.assertFalse(bot.stock_entry_structure_check({**signal,'delta':float('nan')},plan,10,9.95)['allowed'])
+
+    def test_urgent_pass_never_decides_from_old_runner_or_no_progress_assessment(self):
+        cfg,pos,now=self.setup_position()
+        pos['entry_epoch']=now.timestamp()-cfg.no_progress_bars*300-1
+        self.assertIsNone(bot.paper_exit(pos,self.quote(pos['entry_price'],now),now,cfg,urgent_only=True))
+        self.assertEqual(bot.paper_exit(pos,self.quote(pos['entry_price'],now),now,cfg)[1],'NO_PROGRESS')
+        cfg,pos,now=self.setup_position()
+        pos['breakout_failure']={'failed':True,'assessed_epoch':now.timestamp()}
+        self.assertIsNone(bot.paper_exit(pos,self.quote(pos['entry_price'],now),now,cfg,urgent_only=True))
+        self.assertEqual(bot.paper_exit(pos,self.quote(pos['entry_price'],now),now,cfg)[1],'UNDERLYING_BREAKOUT_FAILED')
+        cfg,pos,now=self.setup_position()
+        self.assertEqual(bot.paper_exit(pos,self.quote(20,now),now,cfg,urgent_only=True)[1],'CASH_LOSS_LIMIT')
+
     def setup_position(self):
         cfg=bot.DynamicStrategyConfig({'STOCK_OPT_STOP_PCT':'7.5','STOCK_OPT_RUPEE_TARGET':'1200',
             'STOCK_OPT_RUPEE_MAX_RISK':'1800','STOCK_OPT_MIN_NET_RR':'1.5',
@@ -1403,3 +1442,23 @@ class StockExitProtectionTests(unittest.TestCase):
         self.assertEqual(pos['exit_monitor']['unusable_checks'],2)
         for i in range(30):bot.paper_exit(pos,self.quote(24.8,now),now,cfg)
         self.assertEqual(len(pos['exit_monitor']['recent_quotes']),24)
+
+
+class CashRiskProfitProtectionRegressionTests(unittest.TestCase):
+    def test_dixon_recorded_profit_arms_fee_aware_floor_before_old_trigger(self):
+        cfg=bot.DynamicStrategyConfig({'STOCK_OPT_RUPEE_MAX_RISK':'1800','STOCK_OPT_SLIPPAGE_PCT':'0.05'},argparse.Namespace())
+        now=datetime(2026,11,2,12,20,tzinfo=IST)
+        pos={'entry_price':506.25,'entry_epoch':now.timestamp()-100,'qty':50,'lots':1,
+             'initial_sl':468.3,'current_sl':468.3,'peak_bid':503.55,'initial_bid':503.55,
+             'trail_jump':14.15,'opt_1r':37.95,'expected_net_risk':1800,'net_profit_target':2700,
+             'rupee_target_price':562.8,'hard_target_price':600}
+        quote=lambda bid:{'received_epoch':now.timestamp(),'depth':{'buy':[{'price':bid,'quantity':50}]}}
+        self.assertLess(531.7-506.25,max(1.5*14.15,.75*37.95))
+        self.assertIsNone(bot.paper_exit(pos,quote(531.7),now,cfg))
+        self.assertGreater(pos['current_sl'],pos['entry_price'])
+        self.assertGreater(pos['peak_net_pnl'],900)
+        floor=pos['current_sl']
+        decision=bot.paper_exit(pos,quote(floor),now,cfg)
+        self.assertEqual(decision[1],'TRAIL_STOP')
+        self.assertGreaterEqual(bot.stock_position_value(pos,decision[0])['net'],0)
+        self.assertEqual(pos['current_sl'],floor)

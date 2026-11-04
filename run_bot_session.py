@@ -41,7 +41,7 @@ def main():
     dashboard_process = None
     reported_exits = set()
     restarts={"Index bot":0,"Stock-options bot":0}
-    child_env={**os.environ,"DHAN_BOT_MODE":"PAPER","PAPER_MODE":"true"}
+    child_env={**os.environ,"DHAN_BOT_MODE":"PAPER","PAPER_MODE":"true","PYTHONIOENCODING":"utf-8","PYTHONDONTWRITEBYTECODE":"1"}
 
     try:
         # 1. Launch the Real-Data Self-Learning Options Bot Engine

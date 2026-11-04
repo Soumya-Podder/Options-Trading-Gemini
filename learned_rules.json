@@ -218,20 +218,21 @@
     "rule_id": "RULE_010",
     "condition_signature": "LEVEL_V2 BREAKOUT_CONFIRMED & strike_oi=ce,pe -> BUY_CE",
     "status": "CANDIDATE",
-    "trades_count": 1,
-    "wins_count": 1,
+    "trades_count": 2,
+    "wins_count": 2,
     "losses_count": 0,
     "unique_days_traded": [
-      "2026-10-29"
+      "2026-10-29",
+      "2026-11-02"
     ],
-    "total_win_r": 0.645936,
+    "total_win_r": 2.022421,
     "total_loss_r": 0.0,
-    "avg_win_r": 0.65,
+    "avg_win_r": 1.01,
     "avg_loss_r": 0.0,
-    "expectancy_r": 0.65,
+    "expectancy_r": 1.01,
     "intraday_losses": 0,
     "last_lot_loss": false,
     "muted_on_day": "",
-    "last_trade_day": "2026-10-29"
+    "last_trade_day": "2026-11-02"
   }
 }

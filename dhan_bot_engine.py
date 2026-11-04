@@ -34,7 +34,7 @@ from typing import Dict, Any, List, Optional, Tuple, Set, Deque
 
 from contextlib import nullcontext
 from itertools import islice
-from stock_option_policy import option_chain_request_slot, single_bot_session
+from stock_option_policy import option_chain_request_slot, single_bot_session, adaptive_setup_feedback, session_open_wait_seconds
 import requests
 
 from telegram_notifier import TelegramNotifier, TelegramCallFeed
@@ -138,7 +138,7 @@ def channel_entry_view(view, chain, call, current_expiry, received_epoch, now_ep
     """Follow fresh channel direction in PAPER, retaining executable-quote safeguards."""
     try:
         if not current_expiry:return None,'Current-expiry chain unavailable'
-        if not 0<=now_epoch-call['posted_epoch']<=TelegramCallFeed.MAX_AGE:return None,'Channel call stale'
+        if not TelegramCallFeed.entry_is_fresh(call,now_epoch):return None,'Channel call stale'
         if not 0<=now_epoch-received_epoch<=8:return None,'Channel contract quote stale'
         if call['index']!=view['index']:
             return None,'Channel index does not match requested index'
@@ -150,11 +150,11 @@ def channel_entry_view(view, chain, call, current_expiry, received_epoch, now_ep
         trigger=float(call['buy_above'])
         if not all(math.isfinite(v) for v in (bid,ask,ltp,delta,theta,trigger)) or not 0<bid<=ask:
             return None,'Channel contract quote or Greeks invalid'
-        if not .25<=abs(delta)<=.70 or (delta>0)!=(call['option_type']=='CE'):
-            return None,'Channel contract delta invalid'
-        if bid<trigger:return None,'Channel buy-above trigger not executable yet'
-        entry_cap=float(call.get('entry_max',trigger*1.02))
-        if ask>entry_cap:return None,'Channel entry above allowed trigger/range'
+        if not 0<abs(delta)<=1 or (delta>0)!=(call['option_type']=='CE'):
+            return None,f'Channel contract delta invalid: delta={delta:g}, side={call["option_type"]}; require correctly signed 0 < abs(delta) <= 1'
+        entry_floor,entry_cap=TelegramCallFeed.entry_bounds(call)
+        if bid<entry_floor:return None,f'Channel entry not executable yet: bid={bid:.2f}, minimum={entry_floor:.2f}'
+        if ask>entry_cap:return None,f'Channel entry above allowed zone: ask={ask:.2f}, maximum={entry_cap:.2f}'
         security_id=node.get('security_id',node.get('securityId'))
         if not security_id or not str(security_id).isdigit():return None,'Channel contract security ID unavailable'
         result=dict(view)
@@ -174,12 +174,43 @@ def channel_entry_view(view, chain, call, current_expiry, received_epoch, now_ep
         return None,'Channel contract could not be verified'
 
 
+def index_entry_signal(brain, view, losses, now, cooldown_until, channel_call=None, closed_trades=()):
+    """Fresh executable channel alerts are independent of native signal cooldown.
+
+    The caller retains the shared position, session, entry and loss gates;
+    channel freshness, quotes and duplicate consumption are checked separately.
+    """
+    if channel_call:
+        action,sig='BUY_'+channel_call['option_type'], 'TELEGRAM_CHANNEL '+channel_call['key']
+    else:
+        if cooldown_until is not None and now<cooldown_until:
+            view['entry_decision']={'action':'HOLD','reason':'Native signal cooldown active'}
+            return 'HOLD',None
+        action,sig=brain.select_action(view,losses,bar_time=now.time())
+    if action not in ('BUY_CE','BUY_PE') or not sig:return action,sig
+    context={**view,'option_type':action[4:]}
+    if channel_call:
+        context['market_structure']={**(view.get('market_structure') or {}),'telegram_call':channel_call}
+    feedback=adaptive_setup_feedback(context,closed_trades,now.timestamp())
+    view.setdefault('market_structure',{})['adaptive_feedback']=feedback
+    if feedback['paused']:
+        view['entry_decision']={'action':'HOLD','reason':'Validated negative setup feedback; temporary pause','rule':sig}
+        return 'HOLD',None
+    return action,sig
+
+
 def channel_entry_lots(native_lots, wallet, entry_price, lot_size, bid_qty, ask_qty, losses, last_lot_loss):
-    """Channel sizing: up to three funded lots, independent of native rule sizing."""
+    """Keep channel size within native risk sizing, wallet, depth and loss limits."""
     try:
         values=[float(v) for v in (wallet,entry_price,lot_size,bid_qty,ask_qty)]
-        if not all(math.isfinite(v) and v>0 for v in values) or native_lots<=0:return 0
-        available=min(3,int(wallet*.60//(entry_price*lot_size+100)),int(min(bid_qty,ask_qty)//lot_size))
+        if (not all(math.isfinite(v) and v>0 for v in values)
+                or isinstance(native_lots,bool) or not isinstance(native_lots,int) or native_lots<=0
+                or isinstance(losses,bool) or not isinstance(losses,int) or losses<0
+                or not isinstance(last_lot_loss,bool)):
+            return 0
+        risk_lots=min(native_lots,1 if losses>=1 or last_lot_loss else 3)
+        available=min(risk_lots,int(wallet*.60//(entry_price*lot_size+100)),
+                      int(min(bid_qty,ask_qty)//lot_size))
         return max(0,available)
     except (TypeError,ValueError,OverflowError,ZeroDivisionError):return 0
 
@@ -195,12 +226,16 @@ def protect_channel_position(position, bid, now_epoch):
     fees=40+24.5*int(position['lots'])
     peak=position['highest_ltp']
     peak_fill=math.floor(peak*.999*20+1e-9)/20
-    peak_net=(peak_fill-entry)*qty-fees
+    booked=sum((f['price']-entry)*f['qty'] for f in position.get('exit_fills',[]))
+    fees+=20*len(position.get('exit_fills',[]))
+    peak_net=booked+(peak_fill-entry)*qty-fees
     distance=min(position['initial_risk_points'],targets[0]-entry) if targets else position['initial_risk_points']
     gain=peak-entry
-    if gain>=0.5*distance and peak_net>0:
-        protected_net=max(0,0.5*peak_net) if gain>=0.8*distance else 0
-        needed=entry+(fees+protected_net)/qty
+    learned_protection=((position.get('market_structure') or {}).get('adaptive_feedback') or {}).get('exit_policy')=='PROTECT_EARNED_PROFIT'
+    break_even_at,lock_at=(0.4,0.7) if learned_protection else (0.5,0.8)
+    if gain>=break_even_at*distance and peak_net>0:
+        protected_net=max(0,0.5*peak_net) if gain>=lock_at*distance else 0
+        needed=entry+(fees+protected_net-booked)/qty
         floor=math.ceil(needed/.999*20-1e-9)/20
         position['current_sl']=max(position['current_sl'],floor)
         position['ratchet_armed']=True
@@ -209,7 +244,12 @@ def protect_channel_position(position, bid, now_epoch):
         'current_stop':position['current_sl'],'first_target':targets[0] if targets else None,
         'target_observed':bool(targets and bid>=targets[0])}
     call['exit_observation']=dict(position['channel_exit_observation'])
-    if targets and bid>=targets[0]:return 'TELEGRAM_CHANNEL_TARGET'
+    if targets:
+        if position.get('target_one_done'):
+            if len(targets)>1 and bid>=targets[1]:return 'TELEGRAM_CHANNEL_TARGET_2'
+        elif bid>=targets[0]:
+            return ('TELEGRAM_CHANNEL_PARTIAL_TARGET' if len(targets)>1 and position.get('target_one_qty')
+                    else 'TELEGRAM_CHANNEL_TARGET')
     if bid<=position['current_sl']:
         return 'CHANNEL_PROFIT_PROTECTION' if position['ratchet_armed'] else 'INITIAL_SL_HIT'
     return None
@@ -251,6 +291,8 @@ def atomic_write_json(filepath: str, data: Any) -> None:
             break
         except (PermissionError, OSError):
             time.sleep(0.05)
+    else:
+        raise OSError(f'Could not persist JSON after 10 replacement attempts: {filepath}')
 
 
 def cosine_similarity(a: List[float], b: List[float]) -> float:
@@ -1416,7 +1458,7 @@ def nifty_target_quantities(index, lots, lot_size):
     return first, lots * lot_size - first
 
 
-def book_target_one(ledger, position, price, timestamp):
+def book_target_one(ledger, position, price, timestamp, reason='TARGET_1_12_POINTS'):
     """Realize T1 once; final trade accounting reconciles this booked amount."""
     if position.get("target_one_done"):
         return
@@ -1425,7 +1467,7 @@ def book_target_one(ledger, position, price, timestamp):
     fees = round(20 + (20 + position["lots"]*24.5)*qty/position["original_qty"], 2)
     position.update(target_one_done=True, qty=position["qty"]-qty,
                     partial_gross=gross, partial_net=round(gross-fees,2))
-    position["exit_fills"] = [{"qty":qty,"price":price,"timestamp":timestamp,"reason":"TARGET_1_12_POINTS"}]
+    position["exit_fills"] = [{"qty":qty,"price":price,"timestamp":timestamp,"reason":reason}]
     ledger["virtual_balance_gross"] = round(ledger["virtual_balance_gross"]+gross,2)
     ledger["virtual_balance_net"] = round(ledger["virtual_balance_net"]+gross-fees,2)
     ledger["profit_without_charges"] = round(ledger["virtual_balance_gross"]-ledger["initial_capital"],2)
@@ -1502,6 +1544,7 @@ def record_closed_trade(
         "initial_risk_points": round(risk_budget/qty, 4),
         "r_multiple": r_mult,
         "learning_r_multiple":learning_r,
+        "learning_risk_rs":round(risk_budget,4),
         "learning_reward_basis":"NET_AFTER_MODELED_CHARGES",
         "state_vec":list(state_vec),
         "exit_reason": exit_reason,
@@ -2023,9 +2066,10 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
     last_entry_audit=None
     structure_candles=None
     last_oi_log=0.0
-    call_feed=(TelegramCallFeed(logger,env) if not live_mode
+    call_feed=(TelegramCallFeed(logger,env,pending_calls=ledger.get('pending_channel_calls',[])) if not live_mode
                and env.get('TELEGRAM_CALLS_PAPER','false').strip().lower()=='true' else None)
     last_call_decision={}
+    opening_responses=set()
 
     while True:
         now = datetime.now()
@@ -2033,7 +2077,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
             logger.info("02:45 PM IST cutoff reached. Session complete.")
             break
         if now.time() < SESSION_START_TIME:
-            time.sleep(10)
+            time.sleep(session_open_wait_seconds(now,SESSION_START_TIME))
             continue
 
         # Immediately stop API polling once daily trade cap, consecutive loss breaker,
@@ -2056,9 +2100,14 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
         cfg = INDICES_CONFIG[idx_name]
         held_channel=bool(not live_mode and active_pos and
                           (active_pos.get('market_structure') or {}).get('telegram_call'))
+        opening_request=idx_name not in opening_responses
+        if opening_request:logger.info('[OPENING DATA REQUEST] %s | %s',idx_name,datetime.now().isoformat(timespec='milliseconds'))
         raw_oc = (dhan.fetch_held_channel_quote(active_pos) if held_channel else
                   dhan.fetch_option_chain(cfg["security_id"], cfg["exchange_segment"], expiries[idx_name]))
         chain_received_epoch = time.time()
+        if opening_request and raw_oc:
+            opening_responses.add(idx_name)
+            logger.info('[OPENING DATA RESPONSE] %s | %s',idx_name,datetime.now().isoformat(timespec='milliseconds'))
 
         if raw_oc:
             view = (dict(telemetry_state['indices'].get(idx_name,{})) if held_channel else
@@ -2091,6 +2140,11 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
             # HTTP waits may cross the cutoff. Use receipt-time wall clock for
             # entries and exits instead of the time captured before fetching.
             now = datetime.now()
+            if call_feed:
+                pending=call_feed.pending_snapshot(time.time(),ledger.get('telegram_call_entries',[]))
+                if pending!=ledger.get('pending_channel_calls',[]):
+                    ledger['pending_channel_calls']=pending
+                    atomic_write_json(ledger_path,ledger)
             telemetry_state["indices"][idx_name] = view
             telemetry_state["updated_at"] = now.strftime("%H:%M:%S")
             telemetry_state['channel_feed']={'status':call_feed.connection_status if call_feed else 'DISABLED',
@@ -2122,6 +2176,16 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     if targets:channel_position['targets']=targets
                 if channel_position:
                     exit_reason=protect_channel_position(active_pos,curr_ltp,time.time())
+                    if exit_reason=='TELEGRAM_CHANNEL_PARTIAL_TARGET':
+                        fill_price=math.floor(curr_ltp*.999*20+1e-9)/20
+                        sold=active_pos['target_one_qty']
+                        book_target_one(ledger,active_pos,fill_price,now.strftime('%Y-%m-%d %H:%M:%S'),reason='TELEGRAM_CHANNEL_TARGET_1')
+                        active_pos['current_sl']=max(active_pos['current_sl'],
+                            math.ceil(active_pos['entry_price']/.999*20-1e-9)/20)
+                        telegram.partial({**active_pos,'lots':active_pos['qty']//cfg['lot_size']},
+                            {'qty':sold,'price':fill_price,'booked_net':active_pos['partial_net']})
+                        logger.info('[PAPER CHANNEL PARTIAL] %s T1 | sold %d @ %.2f | remaining %d',idx_name,sold,fill_price,active_pos['qty'])
+                        exit_reason=protect_channel_position(active_pos,curr_ltp,time.time())
                     # Persist peaks and protection even when no native ratchet runs.
                     ledger['active_position']={k:v for k,v in active_pos.items() if k!='entry_dt'}
                     atomic_write_json(ledger_path,ledger)
@@ -2155,11 +2219,6 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     exit_reason = "EOD_SQUAREOFF"
 
                 executable_bid=float(node.get("top_bid_price",0) or 0)
-                if channel_position and not exit_reason:
-                    targets=[v for v in channel_position.get('targets',[]) if v>active_pos['entry_price']]
-                    if targets and executable_bid>=min(targets):
-                        exit_reason='TELEGRAM_CHANNEL_TARGET'
-                        curr_ltp=executable_bid
                 runner_hold=False
                 if not channel_position and not exit_reason and profit_protected and executable_bid>0:
                     assessment=assess_index_runner(view,active_pos,node,now.timestamp(),day_net_pnl)
@@ -2184,7 +2243,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     if not live_mode and executable_bid > 0:curr_ltp=executable_bid
 
                 staged = "target_one_qty" in active_pos
-                if not exit_reason and staged:
+                if not channel_position and not exit_reason and staged:
                     if not active_pos["target_one_done"] and curr_ltp >= active_pos["entry_price"]+12:
                         if live_mode:
                             oid = dhan.place_market_order(active_pos["security_id"],cfg["fno_segment"],"SELL",active_pos["target_one_qty"],tag="NIFTY_T1")
@@ -2272,11 +2331,27 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                 and day_net_pnl < INDEX_PROFIT_LOCK_RS and not profit_protected
                 and day_entries < MAX_TRADES_PER_DAY
                 and consec_losses < MAX_CONSECUTIVE_LOSSES_PER_DAY
-                and (cooldown_until is None or now >= cooldown_until)
             ):
                 channel_call=None
                 if call_feed:
-                    for candidate in call_feed.candidates(idx_name,time.time(),ledger.get('telegram_call_entries',[])):
+                    channel_states=call_feed.decision_statuses(idx_name,time.time(),ledger.get('telegram_call_entries',[]))
+                    telemetry_state.setdefault('channel_feed',{})['decisions']=channel_states
+                    for state in channel_states:
+                        if state['state']!='ELIGIBLE_FOR_QUOTE_CHECK' and last_call_decision.get(state['key'])!=state['state']:
+                            logger.info('[CHANNEL ENTRY STATE] %s | %s',state['source_url'],state['state'])
+                            last_call_decision[state['key']]=state['state']
+                    channel_candidates=call_feed.candidates(idx_name,time.time(),ledger.get('telegram_call_entries',[]))
+                    def channel_feedback(call):
+                        return adaptive_setup_feedback({'index':idx_name,'option_type':call['option_type'],
+                            'market_structure':{'telegram_call':call}},ledger['trades'],time.time())
+                    channel_candidates.sort(key=lambda c:(channel_feedback(c)['quality_adjustment'],c['posted_epoch']),reverse=True)
+                    for candidate in channel_candidates:
+                        if channel_feedback(candidate)['paused']:
+                            reason='Validated negative channel setup feedback; temporary pause'
+                            if last_call_decision.get(candidate['key'])!=reason:
+                                logger.info('[TELEGRAM CALL] %s | %s',candidate['source_url'],reason)
+                                last_call_decision[candidate['key']]=reason
+                            continue
                         channel_view,reason=channel_entry_view(view,raw_oc.get('oc',{}),candidate,
                             expiries.get(idx_name),chain_received_epoch,time.time())
                         if reason!=last_call_decision.get(candidate['key']):
@@ -2286,10 +2361,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             view=channel_view
                             channel_call=candidate
                             break
-                if channel_call:
-                    action_dir,sig='BUY_'+channel_call['option_type'],'TELEGRAM_CHANNEL '+channel_call['key']
-                else:
-                    action_dir, sig = brain.select_action(view, consec_losses, bar_time=now.time())
+                action_dir,sig=index_entry_signal(brain,view,consec_losses,now,cooldown_until,channel_call,ledger['trades'])
                 if action_dir in ("BUY_CE", "BUY_PE") and sig:
                     is_ce = action_dir == "BUY_CE"
                     opt_type = "CE" if is_ce else "PE"
@@ -2298,9 +2370,19 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     sec_id = view["atm_ce_sec_id"] if is_ce else view["atm_pe_sec_id"]
 
                     entry_p=math.ceil(entry_p*1.001*20-1e-9)/20
-                    if channel_call and (not 0<=time.time()-channel_call['posted_epoch']<=TelegramCallFeed.MAX_AGE
-                                         or entry_p>float(channel_call.get('entry_max',channel_call['buy_above']*1.02))):
-                        view['entry_decision']={'action':'HOLD','reason':'Channel call stale or modeled fill beyond trigger tolerance'}
+                    if channel_call:
+                        side='ce' if channel_call['option_type']=='CE' else 'pe'
+                        spread=float(view.get(f'atm_{side}_ask') or 0)-float(view.get(f'atm_{side}_bid') or 0)
+                        if spread>0.20*(10 if idx_name=='NIFTY' else 20):
+                            view['entry_decision']={'action':'HOLD','reason':'Channel spread consumes more than 20% of initial stop distance'}
+                            continue
+                    if channel_call and (not TelegramCallFeed.entry_is_fresh(channel_call,time.time())
+                                         or entry_p>TelegramCallFeed.entry_bounds(channel_call)[1]):
+                        reason=f'Channel stale or modeled fill outside zone: fill={entry_p:.2f}, maximum={TelegramCallFeed.entry_bounds(channel_call)[1]:.2f}'
+                        view['entry_decision']={'action':'HOLD','reason':reason}
+                        if last_call_decision.get(channel_call['key'])!=reason:
+                            logger.info('[TELEGRAM CALL] %s | %s',channel_call['source_url'],reason)
+                            last_call_decision[channel_call['key']]=reason
                         continue
                     if entry_p >= cfg["min_option_premium"]:
                         lots = brain.compute_lots(
@@ -2313,7 +2395,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         )
                         if channel_call:
                             side='ce' if is_ce else 'pe'
-                            lots=channel_entry_lots(max(1,lots),ledger['virtual_balance_net'],entry_p,cfg['lot_size'],
+                            lots=channel_entry_lots(lots,ledger['virtual_balance_net'],entry_p,cfg['lot_size'],
                                 float(view.get(f'atm_{side}_bid_qty') or 0),float(view.get(f'atm_{side}_ask_qty') or 0),
                                 consec_losses,brain.rules.get(sig,{}).get('last_lot_loss',False))
                         qty = lots * cfg["lot_size"]
@@ -2336,7 +2418,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         if live_mode and not sec_id:
                             logger.error("Missing option security ID; no entry submitted.")
                             continue
-                        if channel_call and not 0<=time.time()-channel_call['posted_epoch']<=TelegramCallFeed.MAX_AGE:
+                        if channel_call and not TelegramCallFeed.entry_is_fresh(channel_call,time.time()):
                             continue
                         if not reserve_index_entry(ledger,today_str,{"index":idx_name,"security_id":sec_id,"option_type":opt_type,"qty":qty,"entry_ts":now.strftime("%Y-%m-%d %H:%M:%S"),
                             **({'telegram_call_key':channel_call['key']} if channel_call else {})},ledger_path):
@@ -2378,7 +2460,9 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             "market_structure":view.get("market_structure"),
                         }
                         split = nifty_target_quantities(idx_name,lots,cfg["lot_size"])
-                        if split and not channel_call:
+                        if channel_call and lots>=2:
+                            active_pos.update(original_qty=qty,target_one_qty=(lots//2)*cfg['lot_size'],target_one_done=False,exit_fills=[])
+                        elif split:
                             active_pos.update(original_qty=qty,target_one_qty=split[0],target_one_done=False,exit_fills=[])
                         ledger["mode"]="LIVE" if live_mode else "PAPER"
                         ledger["active_position"]={k:v for k,v in active_pos.items() if k!="entry_dt"}

@@ -52,8 +52,9 @@ class TelegramCallFeed:
     CHANNEL='tradewith_sac'
     SOURCES={-1003882006811:'Tradewithsac',-1002302217039:'GrowX'}
     MAX_AGE=300
+    MAX_PENDING_AGE=1800
 
-    def __init__(self, logger, env=None):
+    def __init__(self, logger, env=None, pending_calls=()):
         self.env=dict(env or {})
         self.connection_status='STARTING'
         self._authorized_mode=bool(self.env.get('TELEGRAM_SESSION_STRING'))
@@ -62,6 +63,7 @@ class TelegramCallFeed:
         self._calls=[]
         self._target_updates=[]
         self._closing=threading.Event()
+        self.restore_pending(pending_calls,time.time())
         self._thread=threading.Thread(target=self._run,name='public-telegram-calls',daemon=True)
         self._thread.start()
         atexit.register(self.close)
@@ -89,20 +91,35 @@ class TelegramCallFeed:
                     'posted_epoch':posted_epoch,'source':source,'source_url':source_url}
             if common['strike']<=0:return None,None
             targets=cls.numeric_targets(text)
-            update={**common,'targets':targets} if targets else None
-            entry=re.search(r'\bBUY\s+ABOVE\s*:\s*(?:₹|RS\.?|INR)?\s*(\d+(?:\.\d+)?)',text)
+            activated=bool(re.search(r'\bTRADE\s+ACTIVATED\b',text))
+            cancelled=bool(re.search(r'\bCANCELLED|\bCANCELED',text))
+            update={**common,'targets':targets,'activated':activated,'cancelled':cancelled} if targets or activated or cancelled else None
+            entry=re.search(r'\bBUY\s+ABOVE\s*[:\-]*\s*(?:₹|RS\.?|INR)?\s*(\d+(?:\.\d+)?)',text)
+            near=re.search(r'\bBUY\s+NEAR\s*[:\-]*\s*(?:₹|RS\.?|INR)?\s*(\d+(?:\.\d+)?)(?:\s*[-–]\s*(\d+(?:\.\d+)?))?',text)
             zone=re.search(r'\bNEAR\s+LEVEL\s*--+\s*(\d+(?:\.\d+)?)(?:\s*-\s*(\d+(?:\.\d+)?))?',text)
             if re.search(r'\b(?:ACTIVATED|HIT|CANCELLED|CANCELED)\b',text):return None,update
-            if not entry and not (source=='GrowX' and zone):return None,update
-            price=float(entry[1] if entry else zone[1])
-            upper=float(zone[2] or zone[1]) if not entry else None
+            if not entry and not near and not (source=='GrowX' and zone):return None,update
+            location=near or zone
+            price=float(entry[1] if entry else location[1])
+            upper=float(location[2]) if not entry and location[2] else None
             if not math.isfinite(price) or price<=0 or (upper is not None and (not math.isfinite(upper) or upper<price)):return None,update
             key=f"{day}:{common['index']}:{common['strike']:g}:{common['option_type']}:{price:g}:CURRENT"
             call={**common,'key':key,'buy_above':price,'expiry':None,'targets':targets,
-                  'entry_kind':'ABOVE' if entry else 'RANGE'}
+                  'entry_kind':'ABOVE' if entry else ('RANGE' if upper is not None else 'NEAR'),
+                  'requires_activation':source=='Tradewithsac'}
             if upper is not None:call['entry_max']=upper
             return call,update
         except (TypeError,ValueError,OverflowError,OSError):return None,None
+
+    @staticmethod
+    def entry_bounds(call):
+        """One bounded zone shared by quote validation and modeled-fill validation."""
+        price=float(call['buy_above'])
+        if call.get('entry_kind')=='NEAR':
+            # One percent around the posted level, capped at 20% of fixed SL.
+            tolerance=min(price*0.01,2.0 if call['index']=='NIFTY' else 4.0)
+            return max(0.05,price-tolerance),price+tolerance
+        return price,float(call.get('entry_max',price*1.02))
 
     @classmethod
     def parse(cls,page,now_epoch):
@@ -130,33 +147,93 @@ class TelegramCallFeed:
 
     def ingest(self,text,posted_epoch,source_url,now_epoch,source):
         call,update=self.parse_message(text,posted_epoch,source_url,now_epoch,source)
+        if 0<=now_epoch-posted_epoch<=self.MAX_AGE and call is None and update is None and re.search(r'\b(?:NIFTY|SENSEX)\s+\d+(?:\.\d+)?\s+(?:CE|PE)\b',text.upper()) and re.search(r'\bBUY\b',text.upper()):
+            self.logger.warning('[CHANNEL FORMAT REJECT] %s | %s | Unrecognised entry format; no candidate created',source,source_url)
         with self._lock:
             if call:
+                call['first_received_epoch']=now_epoch
                 old=next((c for c in self._calls if c['key']==call['key']),None)
                 if old is None:self._calls.append(call)
                 elif call['posted_epoch']<old['posted_epoch']:
                     self._calls.remove(old);self._calls.append(call)
             if update:
                 self._target_updates=[u for u in self._target_updates if u.get('source_url')!=source_url]+[update]
+                matching=[c for c in self._calls if all(c[k]==update[k] for k in ('source','index','strike','option_type'))
+                          and 0<=update['posted_epoch']-c['posted_epoch']<=self.MAX_PENDING_AGE]
+                if matching:
+                    pending=max(matching,key=lambda c:c['posted_epoch'])
+                    if update.get('cancelled'):pending['cancelled']=True
+                    if (update.get('activated') and not pending.get('activation_epoch')
+                            and 0<=pending.get('first_received_epoch',float('inf'))-pending['posted_epoch']<=self.MAX_AGE
+                            and 0<=now_epoch-update['posted_epoch']<=self.MAX_AGE):
+                        pending.update(activation_epoch=update['posted_epoch'],activation_received_epoch=now_epoch,
+                                       activation_source_url=source_url)
+                        self.logger.info('[CHANNEL ACTIVATION] %s | original alert received promptly; fresh activation entry window',source_url)
             self._calls=[c for c in self._calls if 0<=now_epoch-c['posted_epoch']<=86400][-256:]
             self._target_updates=[u for u in self._target_updates if 0<=now_epoch-u['posted_epoch']<=86400][-256:]
         if call and old is None:
-            self.logger.info('[CHANNEL CALL RECEIVED] %s | %s',source,json.dumps(call,ensure_ascii=True))
+            self.logger.info('[CHANNEL CALL RECEIVED] %s | %s',source,json.dumps({**call,'receipt_latency_seconds':round(now_epoch-posted_epoch,3)},ensure_ascii=True))
         return call
 
     def targets_for(self,call,now_epoch):
         with self._lock:
-            matches=[u for u in self._target_updates if all(u[k]==call[k] for k in ('index','strike','option_type'))
+            matches=[u for u in self._target_updates if u.get('targets') and all(u[k]==call[k] for k in ('index','strike','option_type'))
                      and u.get('source','Tradewithsac')==call.get('source','Tradewithsac')
                      and u['posted_epoch']>=call['posted_epoch'] and 0<=now_epoch-u['posted_epoch']<=86400]
         return max(matches,key=lambda u:u['posted_epoch'])['targets'] if matches else []
+
+    @classmethod
+    def entry_is_fresh(cls,call,now_epoch):
+        if call.get('cancelled'):return False
+        # SAC announces pending alerts before publishing matching activation.
+        if call.get('requires_activation',call.get('source')=='Tradewithsac') and 'activation_epoch' not in call:return False
+        if 'activation_epoch' not in call and 0<=call.get('first_received_epoch',float('inf'))-call['posted_epoch']<=cls.MAX_AGE:
+            return 0<=now_epoch-call['posted_epoch']<=cls.MAX_AGE
+        epoch=call.get('activation_epoch',call['posted_epoch'])
+        if 'activation_epoch' in call:
+            if not (0<=call.get('first_received_epoch',float('inf'))-call['posted_epoch']<=cls.MAX_AGE
+                    and 0<=epoch-call['posted_epoch']<=cls.MAX_PENDING_AGE
+                    and 0<=call.get('activation_received_epoch',float('inf'))-epoch<=cls.MAX_AGE):return False
+        return 0<=now_epoch-epoch<=cls.MAX_AGE
+
+    def restore_pending(self,calls,now_epoch):
+        day=datetime.fromtimestamp(now_epoch,timezone(timedelta(hours=5,minutes=30))).date()
+        for call in calls:
+            try:
+                if (call.get('source') not in self.SOURCES.values() or call.get('cancelled')
+                        or not 0<=now_epoch-call['posted_epoch']<=self.MAX_PENDING_AGE
+                        or not 0<=call['first_received_epoch']-call['posted_epoch']<=self.MAX_AGE
+                        or datetime.fromtimestamp(call['posted_epoch'],timezone(timedelta(hours=5,minutes=30))).date()!=day):continue
+                self._calls.append(dict(call))
+            except (KeyError,TypeError,ValueError,OverflowError):continue
+
+    def pending_snapshot(self,now_epoch,consumed=()):
+        with self._lock:
+            return [dict(c) for c in self._calls if c['key'] not in consumed and not c.get('cancelled')
+                    and 0<=now_epoch-c['posted_epoch']<=self.MAX_PENDING_AGE
+                    and 0<=c.get('first_received_epoch',float('inf'))-c['posted_epoch']<=self.MAX_AGE]
 
     def candidates(self, index, now_epoch, consumed):
         if getattr(self,'_authorized_mode',False) and self.connection_status!='CONNECTED':return []
         with self._lock:
             matches=[dict(c) for c in self._calls if c['index']==index and c['key'] not in consumed
-                     and 0<=now_epoch-c['posted_epoch']<=self.MAX_AGE]
+                     and self.entry_is_fresh(c,now_epoch)]
         return sorted(matches,key=lambda c:c['posted_epoch'],reverse=True)
+
+    def decision_statuses(self,index,now_epoch,consumed):
+        with self._lock:
+            calls=[dict(c) for c in self._calls if c['index']==index and 0<=now_epoch-c['posted_epoch']<=self.MAX_PENDING_AGE]
+        results=[]
+        for call in calls:
+            if call['key'] in consumed:state='ALREADY_EXECUTED'
+            elif call.get('cancelled'):state='CANCELLED'
+            elif not 0<=call.get('first_received_epoch',float('inf'))-call['posted_epoch']<=self.MAX_AGE:state='RECEIVED_TOO_LATE'
+            elif call.get('requires_activation',call.get('source')=='Tradewithsac') and 'activation_epoch' not in call:state='WAITING_FOR_ACTIVATION'
+            elif not self.entry_is_fresh(call,now_epoch):state='EXPIRED'
+            else:state='ELIGIBLE_FOR_QUOTE_CHECK'
+            results.append({'key':call['key'],'source':call['source'],'source_url':call['source_url'],
+                            'state':state,'posted_epoch':call['posted_epoch'],'activation_epoch':call.get('activation_epoch')})
+        return results
 
     def candidate(self, index, now_epoch, consumed):
         return next(iter(self.candidates(index,now_epoch,consumed)),None)
@@ -184,19 +261,32 @@ class TelegramCallFeed:
                 for message in reversed(messages):accept(message,channel_id)
             self.connection_status='CONNECTED'
             self.logger.info('[CHANNEL FEED READY] Authorised account: GrowX and Tradewithsac; PAPER only')
+            next_catchup=time.monotonic()+5
             while not self._closing.is_set():
                 if not client.is_connected():raise RuntimeError('Telegram account feed disconnected')
-                await asyncio.sleep(1)
+                if time.monotonic()>=next_catchup:
+                    # Events provide low latency; polling recovers missed/delayed updates.
+                    for channel_id,entity in entities.items():
+                        messages=await client.get_messages(entity,limit=20)
+                        for message in reversed(messages):accept(message,channel_id)
+                    next_catchup=time.monotonic()+5
+                await asyncio.sleep(0.5)
         finally:
             self.connection_status='DISCONNECTED'
             await client.disconnect()
 
     def _run(self):
         if self._authorized_mode:
-            try:asyncio.run(self._account_feed())
-            except Exception as error:
-                self.connection_status='UNAVAILABLE'
-                self.logger.error('[CHANNEL FEED UNAVAILABLE] %s; native PAPER signals remain enabled',type(error).__name__)
+            delay=5
+            while not self._closing.is_set():
+                try:
+                    asyncio.run(self._account_feed())
+                    if self._closing.is_set():break
+                except Exception as error:
+                    self.connection_status='UNAVAILABLE'
+                    self.logger.error('[CHANNEL FEED UNAVAILABLE] %s; retry in %ss; channel entries blocked, native PAPER signals enabled',type(error).__name__,delay)
+                if self._closing.wait(delay):break
+                delay=min(60,delay*2)
             return
         self.connection_status='PUBLIC_ONLY'
         self.logger.warning('[CHANNEL SETUP REQUIRED] GrowX account feed not connected. Native PAPER signals remain enabled.')

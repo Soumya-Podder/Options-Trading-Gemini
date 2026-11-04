@@ -221,6 +221,47 @@ def confirmed_pullback_retest(today_bars, prior_high, prior_low, orb_high, orb_l
     return None
 
 
+def confirmed_consolidation_breakout(today_bars, atr, bullish):
+    """A closed break from a compact, quiet base; no forming-bar prediction."""
+    if len(today_bars)<7 or atr<=0:return None
+    sign=1 if bullish else -1
+    latest=today_bars[-1];buffer=max(0.05,0.05*atr)
+    width=latest['high']-latest['low']
+    if (width<=0 or width>1.5*atr or sign*(latest['close']-latest['open'])<0.60*width
+            or sign*(latest['close']-(latest['low'] if bullish else latest['high']))<0.75*width):return None
+    for count in range(6,2,-1):
+        base=today_bars[-count-1:-1];earlier=today_bars[:-count-1]
+        if len(base)!=count or len(earlier)<3:continue
+        if any(b['timestamp']!=a['timestamp']+BAR_SECONDS for a,b in zip(base+[latest],(base+[latest])[1:])):continue
+        if any(b['volume']<=0 for b in base):continue
+        high=max(b['high'] for b in base);low=min(b['low'] for b in base)
+        if not 0<high-low<=1.5*atr:continue
+        middle=max(1,count//2)
+        head=base[:middle];tail=base[-middle:]
+        head_range=median([b['high']-b['low'] for b in head])
+        if head_range<=0 or median([b['high']-b['low'] for b in tail])>1.15*head_range:continue
+        if median([b['volume'] for b in tail])>1.10*median([b['volume'] for b in head]):continue
+        pressure_key='low' if bullish else 'high'
+        if any(sign*(b[pressure_key]-a[pressure_key]) < -0.10*atr for a,b in zip(base[-3:],base[-2:])):continue
+        if sign*(base[-1]['close']-base[0]['close']) < -0.10*atr:continue
+        trigger=high if bullish else low
+        if not buffer<sign*(latest['close']-trigger)<=0.50*atr:continue
+        baseline=median([b['volume'] for b in base])
+        required=max(1.2*baseline,1.05*base[-1]['volume'])
+        if latest['volume']<required:continue
+        # A local break below a known high/above a known low needs room.
+        obstacles=[max(b['high'] for b in earlier) if bullish else min(b['low'] for b in earlier)]
+        room=min((sign*(v-latest['close']) for v in obstacles if sign*(v-latest['close'])>0),default=None)
+        if room is not None and room<atr:continue
+        return {'setup':'CONSOLIDATION_BREAKOUT','trigger_level':trigger,
+                'base_start_timestamp':base[0]['timestamp'],'base_bars':count,
+                'base_high':high,'base_low':low,'base_width_atr':(high-low)/atr,
+                'base_volume_median':baseline,'required_volume':required,
+                'breakout_volume_ratio':latest['volume']/baseline,'room_to_prior_extreme':room,
+                'invalidation_level':(low-buffer if bullish else high+buffer)}
+    return None
+
+
 def evaluate_stock_setup(
     candles: dict,
     as_of_epoch: float,
@@ -307,6 +348,7 @@ def evaluate_stock_setup(
     buy_close=(latest['close']-latest['low'])/candle_range
     sell_close=(latest['high']-latest['close'])/candle_range
     volume_rising=latest['volume']>previous['volume']
+    prepared=confirmed_consolidation_breakout(today_bars,atr_5m,day_change_pct>0) if require_breakout else None
     # A previous spike is not an ever-increasing volume hurdle. A lower-volume
     # continuation needs a fresh price break, strong close and EMA slope instead.
     buy_continuation=(latest['close']>previous['high'] and body_fraction>=0.60
@@ -343,7 +385,7 @@ def evaluate_stock_setup(
                         and latest['volume']>=1.2*early_baseline and volume_rising
                         and (buy_continuation if day_change_pct>0 else sell_continuation)):
                     adjusted_volume=True;baseline=early_baseline;adjusted_required=1.2*baseline
-        if not adjusted_volume:
+        if not adjusted_volume and not prepared:
             return reject('Confirmation volume below 1.2 times recent average')
     bullish = (day_change_pct >= min_day_change_pct
                and (volume_rising or buy_continuation)
@@ -389,10 +431,18 @@ def evaluate_stock_setup(
         sign=1 if bullish else -1
         buffer=max(0.05,0.05*atr_5m)
         retest=confirmed_pullback_retest(today_bars,prior_high,prior_low,orb_high,orb_low,atr_5m,bullish)
+        # Local bases only qualify on the already-broken side of prior-day and
+        # opening levels. Basic scanner membership is still enforced upstream.
+        if prepared and sign*(latest['close']-(max(prior_high,orb_high) if bullish else min(prior_low,orb_low)))<=buffer:
+            prepared=None
+            if not regular_volume and not adjusted_volume:
+                return reject('Consolidation break has not cleared previous-day and opening levels')
         direct=sign*(latest['close']-trigger)>buffer
-        if not direct and not retest:
+        if not direct and not retest and not prepared:
             return reject('No fresh closed breakout beyond previous-day and session levels')
-        if retest:
+        if prepared:
+            trigger=prepared['trigger_level']
+        elif retest:
             trigger=retest['trigger_level']
         elif sign*(latest['close']-trigger)>0.75*atr_5m:
             return reject('Direct breakout is overextended; wait for controlled pullback and reconfirmation')
@@ -405,8 +455,8 @@ def evaluate_stock_setup(
             'opening_high':orb_high,'opening_low':orb_low,'buffer':buffer,
             'body_fraction':body_ratio,'close_strength':close_strength,'closed_candle':True,
             'relative_volume':relative_volume,'profile':'SCREENSHOT_REFERENCE_CLOSED_BREAKOUT',
-            'entry_path':'PULLBACK_RETEST' if retest else 'DIRECT_BREAKOUT',
-            'pullback':retest}
+            'entry_path':'CONSOLIDATION_BREAKOUT' if prepared else ('PULLBACK_RETEST' if retest else 'DIRECT_BREAKOUT'),
+            'pullback':retest,'pre_breakout':prepared}
     # A scanner threshold can be crossed one candle after the opening-range
     # break. Admit that first confirmation, without exempting a whole trend
     # from the EMA-distance guard. All option quote/risk checks still follow.
@@ -436,7 +486,8 @@ def evaluate_stock_setup(
         return reject('EMA distance exceeds 1.25 ATR without a confirmed opening-trend break or bounded breakout continuation')
     # This is a ranking heuristic among already-qualified setups, not a win
     # probability. Capping the volume term prevents one spike dominating rank.
-    quality_volume_ratio=latest['volume']/baseline if require_breakout and adjusted_volume and baseline>0 else relative_volume
+    quality_volume_ratio=(prepared['breakout_volume_ratio'] if prepared else
+                          latest['volume']/baseline if require_breakout and adjusted_volume and baseline>0 else relative_volume)
     signal_quality = (40.0 * min(quality_volume_ratio / 3.0, 1.0)
                       + 30.0 * body_ratio + 20.0 * close_strength + 10.0 * orb_bonus)
     return {
@@ -447,12 +498,12 @@ def evaluate_stock_setup(
                                   "local_consolidation_break":local_break,
                                   "distance_atr":sign*(latest['close']-level)/atr_5m} if continuation else None,
         "cash_price_pressure":"BULLISH_CONFIRMED" if bullish else "BEARISH_CONFIRMED",
-        "volume_confirmation":("OPENING_SPIKE_ADJUSTED_STRONG_CONTINUATION" if adjusted_volume else
+        "volume_confirmation":("CONSOLIDATION_VOLUME_EXPANSION" if prepared else "OPENING_SPIKE_ADJUSTED_STRONG_CONTINUATION" if adjusted_volume else
                                "RISING_CANDLE_VOLUME" if volume_rising else "ABOVE_AVERAGE_STRONG_PRICE_CONTINUATION"),
         "volume_context":{"confirmation_volume":latest['volume'],"regular_average":average_volume,
                           "regular_ratio":latest['volume']/average_volume,
                           "post_opening_median":baseline if adjusted_volume else None,
-                          "required_volume":adjusted_required if adjusted_volume else 1.2*average_volume,
+                          "required_volume":prepared['required_volume'] if prepared else adjusted_required if adjusted_volume else 1.2*average_volume,
                           "opening_peak":opening_peak,"opening_adjustment_used":adjusted_volume},
         "market_regime":regime,
         "spot_ltp": latest["close"],
