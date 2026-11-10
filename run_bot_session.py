@@ -4,7 +4,7 @@ DhanHQ v4.5 Automated Session Manager & Clean Shutdown Controller
 =================================================================
 Launches the index and stock-options bots and live terminal dashboard,
 monitors their runtime,
-and triggers a clean shutdown at 02:46 PM IST.
+and triggers a clean shutdown at 03:16 PM IST.
 """
 
 import os
@@ -68,7 +68,7 @@ def main():
         print(f"[{datetime.now()}] Launching bot_dashboard.py...")
         dashboard_process = subprocess.Popen([PYTHON_EXEC, "bot_dashboard.py", "--refresh", "2.0"],cwd=PROJECT_DIR,env=child_env)
 
-        # 3. Monitor loop until 02:46 PM IST or manual termination
+        # 3. Supervise both engines through their respective cutoffs.
         while True:
             time.sleep(10)
             
@@ -83,10 +83,11 @@ def main():
             if "Stock-options bot" not in reported_exits and stock_done:
                 reported_exits.add("Stock-options bot")
                 print(f"[{datetime.now()}] Stock engine finished (code {stock_process.returncode}); index continues.")
-            for name,proc,command in (("Index bot",index_process,index_cmd),("Stock-options bot",stock_process,stock_cmd)):
+            for name,proc,command,cutoff in (("Index bot",index_process,index_cmd,"14:45"),
+                                             ("Stock-options bot",stock_process,stock_cmd,"15:15")):
                 if proc.returncode is not None and isinstance(proc.returncode,int) and proc.returncode!=0:
                     now=datetime.now()
-                    if now.weekday()<5 and now.time()<datetime.strptime("14:45","%H:%M").time() and restarts[name]<2:
+                    if now.weekday()<5 and now.time()<datetime.strptime(cutoff,"%H:%M").time() and restarts[name]<2:
                         restarts[name]+=1
                         print(f"[{now}] {name} crashed; PAPER recovery attempt {restarts[name]}/2. Saved reservations remain consumed.")
                         replacement=subprocess.Popen(command,cwd=PROJECT_DIR,env=child_env)
@@ -96,10 +97,10 @@ def main():
             if index_done and stock_done:
                 break
 
-            # Check if past 02:46 PM IST shutdown time
+            # Allow the stock engine to square off at 15:15 IST first.
             now = datetime.now()
-            if now.weekday() >= 5 or now.time() > datetime.strptime("14:46", "%H:%M").time():
-                print(f"[{datetime.now()}] Reached 02:46 PM IST session cutoff. Initiating clean shutdown...")
+            if now.weekday() >= 5 or now.time() >= datetime.strptime("15:16", "%H:%M").time():
+                print(f"[{datetime.now()}] Reached 03:16 PM IST session cutoff. Initiating clean shutdown...")
                 break
 
     except KeyboardInterrupt:

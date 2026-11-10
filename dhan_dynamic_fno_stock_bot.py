@@ -23,8 +23,9 @@ from stock_option_signals import evaluate_stock_setup, scanx_stock_membership, r
 from stock_option_policy import premium_plan, rank_candidates, DailyTradeGate, stock_reentry_reason, option_chain_request_slot, single_bot_session, session_open_wait_seconds
 
 IST = timezone(timedelta(hours=5, minutes=30))
-SESSION_START_TIME = dtime(9, 15)
-SESSION_END_TIME = dtime(14, 45)
+SESSION_START_TIME = dtime(9, 15)  # Market data and opening-range reference
+ENTRY_START_TIME = dtime(9, 20)
+SESSION_END_TIME = dtime(15, 15)
 
 try:
     from telegram_notifier import TelegramNotifier
@@ -166,7 +167,7 @@ class DynamicStrategyConfig:
         self.max_theta_pct_per_day = float(env.get("STOCK_OPT_MAX_THETA_PCT_PER_DAY", 6))
         self.no_progress_bars = int(env.get("STOCK_OPT_NO_PROGRESS_BARS", 3))
         self.max_premium = float(env.get("STOCK_OPT_MAX_PREMIUM", 1000))
-        self.confirm_window_sec = int(env.get("STOCK_OPT_CONFIRM_WINDOW_SEC", 600))
+        self.confirm_window_sec = int(env.get("STOCK_OPT_CONFIRM_WINDOW_SEC", 300))
         self.poll_interval_sec = float(env.get("STOCK_OPT_POLL_INTERVAL_SEC", 4))
         self.gate_dir = "stock_option_daily_entries"
         self.enable_opening_trend=env.get("STOCK_OPT_OPENING_TREND","false").strip().lower()=="true"
@@ -387,7 +388,8 @@ class DynamicStockOptionsUniverse:
             return None
         for candidate in candidates:
             candidate["iv_range_low"], candidate["iv_range_high"] = min(ivs), max(ivs)
-        return min(candidates, key=lambda c: (abs(abs(c["delta"])-(cfg.min_delta+cfg.max_delta)/2), c["iv"]))
+        candidates.sort(key=lambda c: (abs(abs(c["delta"])-(cfg.min_delta+cfg.max_delta)/2), c["iv"]))
+        return {**candidates[0], "alternate_contracts": candidates[1:3]}
 
 
 CACHE_VERSION = 2
@@ -765,17 +767,53 @@ def shortlist_movers(quotes, cfg):
     return sorted(bulls, reverse=True) + sorted(bears)
 
 
-def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day_change_pct, cfg, reasons=None):
+def fresh_stock_underlying_quote(client,security_id,market_quotes=None):
+    quote=(market_quotes or {}).get(str(security_id),{})
+    if isinstance(quote,dict) and 0<=quote_received_age(quote,time.time())<6:
+        return dict(quote)
+    return client.fetch_batch_ohlc([security_id]).get('NSE_EQ',{}).get(str(security_id),{})
+
+
+def recheck_recent_stock_candidate(client,candidate,cfg,market_quotes,reasons):
+    """Reuse a <10s verification, while checking a fresh underlying and depth."""
+    def reject(reason):
+        reasons.append(reason);return None
+    now=time.time();verified=candidate.get('verified_epoch',0)
+    if not 0<=now-verified<10 or int(now//300)!=int(verified//300):
+        return reject('Candidate needs full closed-candle verification')
+    context=getattr(client,'_stock_verification_context',{})
+    context=context.get(str(candidate['eq_security_id'])) if isinstance(context,dict) else None
+    if not context:return reject('Candidate verification context unavailable')
+    quote=fresh_stock_underlying_quote(client,candidate['eq_security_id'],market_quotes)
+    if not 0<=quote_received_age(quote,time.time())<6:return reject('Reused candidate underlying quote stale')
+    quote['previous_session_reference']=context['daily_reference']
+    membership=scanx_stock_membership(context['candles'],quote,time.time(),cfg.min_day_change_pct,cfg.ema_period)
+    if not membership['allowed'] or membership['opt_type']!=candidate['opt_type']:
+        return reject('Final scanner membership: '+membership['reason'])
+    if not 0<=time.time()-(candidate['signal_timestamp']+300)<cfg.confirm_window_sec:
+        return reject('Underlying confirmation expired during candidate selection')
+    sign=1 if candidate['opt_type']=='CE' else -1
+    spot=float(quote['last_price']);advance=sign*(spot-candidate['conf_close'])
+    band=candidate['entry_price_validation'];level=band.get('trigger_level')
+    if not band['minimum_advance']<=advance<=band['maximum_advance'] or (level is not None and sign*(spot-level)<=0):
+        return reject('Reused candidate no longer holds structural entry band')
+    return {**candidate,'spot_ltp':spot,'scanner_membership':membership,
+            'entry_price_validation':{**band,'final_spot':spot,'reused_recent_verification':True,
+                'final_signal_age_seconds':time.time()-(candidate['signal_timestamp']+300)}}
+
+
+def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day_change_pct, cfg, reasons=None, market_quotes=None):
     def reject(reason):
         if reasons is not None:
             reasons.append(reason)
         return None
-    candles = client.fetch_intraday_candles(stock_info["eq_security_id"], interval="5")
+    candles = client.fetch_intraday_candles(stock_info["eq_security_id"], interval="5",
+        from_date=(datetime.now(IST)-timedelta(days=10)).strftime("%Y-%m-%d"))
     if not candles:
         return reject("Underlying candle history unavailable")
     daily_reference=client.scanner_previous_session(stock_info['eq_security_id'])
     if not daily_reference:return reject('Scanner previous-session daily volume unavailable')
-    current = client.fetch_batch_ohlc([stock_info["eq_security_id"]]).get("NSE_EQ", {}).get(str(stock_info["eq_security_id"]), {})
+    current = fresh_stock_underlying_quote(client,stock_info["eq_security_id"],market_quotes)
     current['previous_session_reference']=daily_reference
     membership=scanx_stock_membership(candles,current,time.time(),cfg.min_day_change_pct,cfg.ema_period)
     if not membership['allowed']:
@@ -812,7 +850,7 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
         minimum_advance=-min(0.25*sig['atr_5m'],max(0.0,0.5*candle_room))
         minimum_advance=max(minimum_advance,
             direction*(float(level)-sig['conf_close'])+float(confirmation.get('buffer',0)))
-    maximum_advance=0.35*sig['atr_5m']
+    maximum_advance=0.70*sig['atr_5m']
 
     def entry_price_issue(price, observed_at):
         age=observed_at-(sig.get('signal_timestamp',observed_at-300)+300)
@@ -843,7 +881,7 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
     contract = DynamicStockOptionsUniverse.resolve_atm_option(stock_info, spot_ltp, sig["opt_type"], chain, cfg)
     if not contract:
         return reject("No master-matched option with valid broker Greeks in the delta band")
-    final_quote=client.fetch_batch_ohlc([stock_info['eq_security_id']]).get('NSE_EQ',{}).get(str(stock_info['eq_security_id']),{})
+    final_quote=fresh_stock_underlying_quote(client,stock_info['eq_security_id'],market_quotes)
     try:
         if not 0<=quote_received_age(final_quote,time.time())<=8:return reject('Final underlying quote stale or future-dated')
         final_spot=float(final_quote.get('last_price',0))
@@ -865,7 +903,12 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
     except (TypeError,ValueError,OverflowError):return reject('Final underlying quote malformed')
     if sig.get('breakout_confirmation'):
         client.logger.info('[STOCK BREAKOUT CONFIRMED] %s | %s',stock_info['symbol'],json.dumps(sig['breakout_confirmation']))
-    return {**sig, **contract, "spot_ltp": final_spot, "eq_security_id": stock_info["eq_security_id"]}
+    context=getattr(client,'_stock_verification_context',{})
+    if not isinstance(context,dict):context={}
+    context[str(stock_info['eq_security_id'])]={'candles':candles,'daily_reference':daily_reference}
+    client._stock_verification_context=context
+    return {**sig, **contract, "spot_ltp": final_spot, "eq_security_id": stock_info["eq_security_id"],
+            'verified_epoch':time.time()}
 
 
 def stock_entry_structure_check(sig, plan, ask, bid):
@@ -889,7 +932,7 @@ def stock_entry_structure_check(sig, plan, ask, bid):
         if not all(math.isfinite(v) for v in values) or min(spot,atr,trigger,invalidation,delta)<=0 or buffer<0:
             raise ValueError('Invalid structural inputs')
         distance=sign*(spot-trigger);structural_move=sign*(spot-invalidation)
-        maximum_distance_atr=0.50 if path=='CONSOLIDATION_BREAKOUT' else 0.75
+        maximum_distance_atr=0.80 if path=='CONSOLIDATION_BREAKOUT' else 1.10
         allowed_distance=maximum_distance_atr*atr
         projected_premium_risk=ask-bid+delta*structural_move
         available=ask-stop
@@ -1041,6 +1084,25 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         return reject(f"Malformed quote or Greek data ({type(error).__name__})")
 
 
+def qualify_stock_contracts(client, sig, cfg, wallet, reject_label):
+    primary = {**sig}
+    alternatives = primary.pop("alternate_contracts", [])
+    contracts = [primary, *({**primary, **contract} for contract in alternatives)]
+    depth = client.fetch_option_quotes([contract["opt_security_id"] for contract in contracts])
+    for contract in contracts:
+        reasons = []
+        quote = depth.get(str(contract["opt_security_id"]), {})
+        qualified = qualify_quote(contract, quote, cfg, wallet, reasons=reasons)
+        if qualified:
+            qualified["alternate_contracts"] = [
+                alternate for alternate in alternatives if alternate["opt_security_id"] != contract["opt_security_id"]
+            ]
+            return qualified, quote
+        client.logger.info("[%s] %s %s strike %s | %s", reject_label, contract["symbol"], contract["opt_type"],
+                           contract.get("strike", "?"), reasons[0] if reasons else "Unspecified rejection")
+    return None, {}
+
+
 def update_ledger_metrics(ledger):
     trades = ledger["trades"]
     ledger["total_trades"] = len(trades)
@@ -1169,7 +1231,7 @@ def assess_stock_runner(pos, quote, underlying, chain, now_epoch, cfg):
                         if pos['entry_epoch']<=float(v[0])<now_epoch),None)
         else:
             return result
-        if impulse<0.20*atr:return result
+        if impulse<0.12*atr:return result
         if cfg.staged_profit:
             if prior is None or len(prior)<3:return result
             increment=float(underlying['volume'])-float(prior[2])
@@ -1194,11 +1256,12 @@ def assess_stock_runner(pos, quote, underlying, chain, now_epoch, cfg):
         needed=max(0,(target-net)/qty)
         horizon=min(remaining,cutoff,15)
         gain=max(0,delta*min(3*atr,2*impulse)-theta*horizon/375-bid*cfg.slippage_pct/100)
-        result.update(hold=gain>=1.2*needed,current_net=round(net,2),
+        hold_runner=(gain>=1.2*needed) or (advance>=0.30*atr and impulse>=0.12*atr and delta>=cfg.min_delta)
+        result.update(hold=hold_runner,current_net=round(net,2),
                       oi_regime='OI_UNCHANGED' if current_oi==old_oi else 'LONG_BUILDUP' if current_oi>old_oi else 'SHORT_COVERING',
                       underlying_impulse_5m=round(impulse,4),
                       required_premium_gain=round(needed,2),scenario_gain=round(gain,2),
-                      reason='Underlying continuation and option-move scenario support runner' if gain>=1.2*needed else 'Remaining move does not support upper target')
+                      reason='Fresh underlying continuation or option-move scenario supports runner' if hold_runner else 'Remaining move does not support runner')
         return result
     except (KeyError,TypeError,ValueError,OverflowError,StopIteration,ZeroDivisionError):return result
 
@@ -1266,6 +1329,16 @@ def stock_net_protection_bid(pos, upper_bid, target_net, cfg):
     return lo/20
 
 
+def stock_profit_protection_net(peak_net):
+    """Requested net-profit tiers; actual execution can gap below a floor."""
+    peak=float(peak_net)
+    if not math.isfinite(peak):return None
+    if peak>=1800:return 0.75*peak
+    if peak>=1200:return 0.60*peak
+    if peak>=750:return 100.0
+    return None
+
+
 def paper_exit(pos, quote, now, cfg, urgent_only=False):
     stamp=now.timestamp()
     monitor=pos.setdefault('exit_monitor',{'checks':0,'unusable_checks':0,'recent_quotes':[]})
@@ -1313,27 +1386,13 @@ def paper_exit(pos, quote, now, cfg, urgent_only=False):
         if net<target:return
         floor=stock_net_protection_bid(pos,bid,target,cfg)
         if floor is not None and floor<bid-1e-9:pos['current_sl']=max(pos['current_sl'],floor)
-    # Cash risk, after modeled costs, is the unit used for early profit protection.
-    effective_risk=min(cfg.rupee_max_risk,float(pos.get('expected_net_risk',cfg.rupee_max_risk)))
-    if not urgent_only and not base_target_reached and math.isfinite(effective_risk) and effective_risk>0 and net>=0.5*effective_risk:
-        protect_net_floor(0.0)
-    # Every position receives fee-aware breakeven protection, including one lot.
-    learned_protection=(pos.get('adaptive_feedback') or {}).get('exit_policy')=='PROTECT_EARNED_PROFIT'
-    protection_jump,protection_r=(1.25,0.60) if learned_protection else (1.5,0.75)
-    if not urgent_only and not base_target_reached and jump>0 and pos['peak_bid']-pos['entry_price']>=max(protection_jump*jump,protection_r*pos['opt_1r']):
-        protect_net_floor(0.0)
-    if not urgent_only and not base_target_reached and not staged_wait and jump>0 and pos['peak_bid']-pos['entry_price']+1e-9>=2.2*jump:
-        distance=max(0.85*jump,pos['opt_1r'] if managing_runner or pos.get('base_target_locked') else 0.5*pos['opt_1r'])
-        pos['current_sl']=max(pos['current_sl'],round_tick(pos['peak_bid']-distance))
-    if not urgent_only and managing_runner and not staged_wait:
-        protect_net_floor(max(0,pos.get('partial_net',0)) if pos.get('partial_booked')
-                          else pos.get('net_profit_target',cfg.rupee_target))
-    if not urgent_only and managing_runner and bid >= pos['rupee_target_price']:
-        locked_floor=round_tick(max(pos['entry_price']+0.5*pos['opt_1r'],
-                                    pos['rupee_target_price']-0.5*pos['opt_1r']))
-        locked_floor=min(locked_floor,math.floor((bid-0.05)*20+1e-9)/20)
-        pos['current_sl']=max(pos['current_sl'],locked_floor)
-        pos['base_target_locked']=True
+    # Tiered floors use peak modeled net after charges and slippage.
+    if not urgent_only:
+        locked_net=stock_profit_protection_net(pos['peak_net_pnl'])
+        if locked_net is not None:
+            protect_net_floor(locked_net)
+        if managing_runner and net>=pos.get('net_profit_target',cfg.rupee_target):
+            pos['base_target_locked']=True
     reason = None
     if net <= -cfg.rupee_max_risk:
         reason = "CASH_LOSS_LIMIT"
@@ -1565,7 +1624,7 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                     return
                 time.sleep(max(0.05, next_refresh-time.monotonic()))
                 continue
-            if not SESSION_START_TIME <= now.time().replace(tzinfo=None) < SESSION_END_TIME:
+            if not ENTRY_START_TIME <= now.time().replace(tzinfo=None) < SESSION_END_TIME:
                 if scan_once or (now.hour >= 14 and not positions):
                     return
                 time.sleep(cfg.poll_interval_sec)
@@ -1606,7 +1665,7 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                             logger.info('[OPTSTK REENTRY WAIT] %s | %s',universe[sec_id]['symbol'],reason)
                             continue
                     signal_reasons = []
-                    sig = verify_live_scanx_and_resolve_stock_option(client, universe[sec_id], ltp, change, cfg, reasons=signal_reasons)
+                    sig = verify_live_scanx_and_resolve_stock_option(client, universe[sec_id], ltp, change, cfg, reasons=signal_reasons,market_quotes=market_quotes)
                     if sig:
                         if cfg.reentry_after_loss:
                             reason=stock_reentry_reason(sig['symbol'],completed,time.time(),sig['signal_timestamp'])
@@ -1614,9 +1673,7 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                                 logger.info('[OPTSTK REENTRY WAIT] %s | %s',sig['symbol'],reason)
                                 continue
                         signals.append(sig)
-                        depth = client.fetch_option_quotes([sig["opt_security_id"]])
-                        reasons = []
-                        qualified = qualify_quote(sig, depth.get(str(sig["opt_security_id"]), {}), cfg, wallet, reasons=reasons)
+                        qualified, _ = qualify_stock_contracts(client, sig, cfg, wallet, "OPTSTK REJECT")
                         if qualified:
                             candidates.append(qualified)
                             if not scan_once:
@@ -1625,8 +1682,6 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                                 if len(pool)>=3:
                                     yield from ranked_pool()
                                     pool_started=None
-                        else:
-                            logger.info("[OPTSTK REJECT] %s %s | %s", sig["symbol"], sig["opt_type"], reasons[0] if reasons else "Unspecified rejection")
                     else:
                         logger.info("[OPTSTK REJECT] %s | %s", universe[sec_id]["symbol"], signal_reasons[0] if signal_reasons else "Setup unavailable")
                 if pool:yield from ranked_pool()
@@ -1667,16 +1722,17 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                 # The verifier owns the structural price band; a second band here
                 # would reject valid pullbacks before they can be re-evaluated.
                 signal_reasons = []
-                best = verify_live_scanx_and_resolve_stock_option(client, universe[best["eq_security_id"]], best.get('spot_ltp',0), 0, cfg, reasons=signal_reasons)
+                if 0<=time.time()-best.get('verified_epoch',0)<10 and int(time.time()//300)==int(best['verified_epoch']//300):
+                    best=recheck_recent_stock_candidate(client,best,cfg,market_quotes,signal_reasons)
+                else:
+                    best = verify_live_scanx_and_resolve_stock_option(client, universe[best["eq_security_id"]], best.get('spot_ltp',0), 0, cfg, reasons=signal_reasons,market_quotes=market_quotes)
                 if not best:
                     logger.info("[OPTSTK RECHECK REJECT] %s", signal_reasons[0] if signal_reasons else "Setup no longer current")
                     continue
-                fresh = client.fetch_option_quotes([best["opt_security_id"]])
-                reasons = []
                 symbol = best["symbol"]
-                best = qualify_quote(best, fresh.get(str(best["opt_security_id"]), {}), cfg, wallet, reasons=reasons)
-                if not best:
-                    logger.info("[OPTSTK RECHECK REJECT] %s | %s", symbol, reasons[0] if reasons else "Unspecified rejection")
+                best, entry_quote = qualify_stock_contracts(client, best, cfg, wallet, "OPTSTK RECHECK REJECT")
+                if best:
+                    best.pop("alternate_contracts", None)
                 now = datetime.now(IST)
                 if not best or now.time().replace(tzinfo=None) >= SESSION_END_TIME:
                     continue
@@ -1703,7 +1759,7 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                     "peak_bid": best.get('bid',0.0),"initial_bid":best.get('bid',best['opt_ltp']),
                     "current_sl": best["initial_sl"], "entry_ts": now.strftime("%Y-%m-%d %H:%M:%S"),
                     "entry_epoch": now.timestamp(), "entry_id": f"STOCK_{today}_{slot}"}
-                update_position_quote(pos,fresh.get(str(best['opt_security_id']),{}),now.timestamp())
+                update_position_quote(pos,entry_quote,now.timestamp())
                 pos['persisted_quote_epoch']=pos.get('quote_received_epoch',0)
                 if not gate.reserve(today, {"mode": "LIVE" if live_mode else "PAPER", "position": pos}, slot):
                     return
@@ -1783,12 +1839,11 @@ def simulate_fixed_premium_trade(entry_ts, bars, qty, cfg, opt_type="CE"):
             jump = plan["trail_jump"]
             peak_fill=math.floor(max(0.05,peak*(1-cfg.slippage_pct/100))*20+1e-9)/20
             peak_net=stock_position_value({'entry_price':entry,'qty':plan['qty']},peak_fill)['net']
-            if (peak_net>=0.5*min(cfg.rupee_max_risk,plan.get('expected_net_risk',cfg.rupee_max_risk))
-                    or (jump>0 and peak-entry>=max(1.5*jump,0.75*plan['opt_1r']))):
-                floor=stock_net_protection_bid({'entry_price':entry,'qty':plan['qty']},peak,0.0,cfg)
+            locked_net=stock_profit_protection_net(peak_net)
+            if locked_net is not None:
+                floor=stock_net_protection_bid({'entry_price':entry,'qty':plan['qty']},peak,locked_net,cfg)
                 if floor is not None:stop=max(stop,floor)
-            if jump > 0 and peak - entry + 1e-9 >= 2.2 * jump:
-                stop = max(stop,round_tick(peak - max(0.85 * jump,0.5*plan['opt_1r'])))
+
         if reason:
             price = math.floor(max(0.05,price*(1-cfg.slippage_pct/100))*20+1e-9)/20
             return {**plan,"entry_price":entry,"exit_price":price,"exit_reason":reason,
@@ -1832,7 +1887,7 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current
             if day != last_day:
                 prev_close, last_day = last_close, day
             last_close = float(candles["close"][i])
-            if prev_close is None or not SESSION_START_TIME <= dt.time().replace(tzinfo=None) < SESSION_END_TIME:
+            if prev_close is None or not ENTRY_START_TIME <= dt.time().replace(tzinfo=None) < SESSION_END_TIME:
                 continue
             snapshots.setdefault(ts+300, {})[sec] = {"last_price": last_close, "ohlc": {"close": prev_close}}
             # Live scans shortlist by day move before evaluating candle history.

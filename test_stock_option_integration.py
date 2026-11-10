@@ -109,8 +109,7 @@ class IntegrationTests(unittest.TestCase):
         pos['peak_bid']=18+1.5*pos['trail_jump']+0.10;pos['runner_assessment']={'hold':False}
         quote['depth']['buy'][0]['price']=pos['peak_bid']
         self.assertIsNone(bot.paper_exit(pos,quote,self.now,cfg))
-        self.assertGreater(pos['current_sl'],18)
-        self.assertLessEqual(pos['current_sl'],18.25)
+        self.assertEqual(pos['current_sl'],pos['initial_sl'])
         pos['runner_assessment']={'hold':True,'assessed_epoch':self.now.timestamp()}
         quote['depth']['buy'][0]['price']=20.4
         partial=bot.book_stock_partial(pos,quote,self.now,cfg,MagicMock(),'2026-10-22')
@@ -168,7 +167,7 @@ class IntegrationTests(unittest.TestCase):
         cfg,pos,quote=self.staged_position()
         bot.book_stock_partial(pos,quote,self.now,cfg,MagicMock(),'2026-10-22')
         pos['runner_assessment']={'hold':False}
-        cutoff=self.now.replace(hour=14,minute=45)
+        cutoff=self.now.replace(hour=15,minute=15)
         quote['received_epoch']=cutoff.timestamp()
         self.assertEqual(bot.paper_exit(pos,quote,cutoff,cfg)[1],'EOD_SQUAREOFF')
 
@@ -382,7 +381,7 @@ class IntegrationTests(unittest.TestCase):
         client=MagicMock()
         client.fetch_intraday_candles.return_value={"timestamp":[1]}
         for side,direction in (("CE",1),("PE",-1)):
-            for advance,allowed in ((-0.21,False),(-0.2,True),(0,True),(0.7,True),(0.71,False),(1,False)):
+            for advance,allowed in ((-0.21,False),(-0.2,True),(0,True),(0.7,True),(1.4,True),(1.41,False)):
                 with self.subTest(side=side,advance=advance):
                     client.fetch_batch_ohlc.return_value={"NSE_EQ":{"1":{"last_price":100+direction*advance,"received_epoch":bot.time.time()}}}
                     sig={"opt_type":side,"conf_close":100,"atr_5m":2}
@@ -414,7 +413,7 @@ class IntegrationTests(unittest.TestCase):
     def test_structural_entry_band_holds_breakout_without_chasing(self):
         from unittest.mock import MagicMock
         for side,direction in (('CE',1),('PE',-1)):
-            for advance,allowed in ((-0.4,True),(-0.51,False),(0.7,True),(0.71,False),(-1.1,False)):
+            for advance,allowed in ((-0.4,True),(-0.51,False),(1.4,True),(1.41,False),(-1.1,False)):
                 with self.subTest(side=side,advance=advance):
                     client=MagicMock()
                     client.fetch_intraday_candles.return_value={'timestamp':[1]}
@@ -511,7 +510,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual((cfg.max_daily_trades,cfg.max_concurrent), (1,1))
 
     def test_confirmation_window_boundaries_and_validation(self):
-        for age, allowed in ((-1,False),(0,True),(300,True),(599,True),(600,False)):
+        for age, allowed in ((-1,False),(0,True),(299,True),(300,False),(599,False)):
             with self.subTest(age=age):
                 sig={**self.sig,"signal_timestamp":self.now.timestamp()-300-age}
                 result=bot.qualify_quote(sig,self.quote,self.cfg,60000,self.now.timestamp())
@@ -706,9 +705,11 @@ class IntegrationTests(unittest.TestCase):
         q.update(last_trade_time="21/10/2026 10:00:00",received_epoch=self.now.timestamp())
         q["depth"]["buy"][0]["price"]=106
         self.assertEqual(bot.paper_exit(pos,q,self.now,self.cfg)[1],'RUPEE_TARGET')
-        self.assertEqual(pos['current_sl'],99)
+        self.assertGreater(pos['current_sl'],99)
+        protected=pos['current_sl']
         q["received_epoch"]-=31
         self.assertIsNone(bot.paper_exit(pos,q,self.now,self.cfg))
+        self.assertEqual(pos['current_sl'],protected)
 
     def test_premium_cap(self):
         q = copy.deepcopy(self.quote)
@@ -730,14 +731,17 @@ class IntegrationTests(unittest.TestCase):
         self.assertGreaterEqual(bot.stock_position_value(pos,result[0])['net'],plan['net_profit_target'])
         pos = position()
         self.assertIsNone(bot.paper_exit(pos,quote(100+2.2*plan['trail_jump']+0.05),self.now,self.cfg))
-        self.assertGreater(pos["current_sl"],pos["initial_sl"])
+        self.assertGreater(pos['current_sl'],pos['initial_sl'])
+        arm=bot.stock_net_protection_bid(pos,plan['rupee_target_price'],0.86*plan['net_profit_target'],self.cfg)
+        self.assertIsNone(bot.paper_exit(pos,quote(arm),self.now,self.cfg))
+        self.assertGreater(pos['current_sl'],pos['initial_sl'])
         self.assertEqual(bot.paper_exit(pos,quote(pos['current_sl']-0.05),self.now,self.cfg)[1],"TRAIL_STOP")
         pos = position()
         pos["entry_epoch"] -= self.cfg.no_progress_bars*300
         self.assertEqual(bot.paper_exit(pos,quote(100),self.now,self.cfg)[1],"NO_PROGRESS")
 
-    def test_paper_position_exits_at_1445_with_fresh_depth(self):
-        cutoff=self.now.replace(hour=14,minute=45)
+    def test_paper_position_exits_at_1515_with_fresh_depth(self):
+        cutoff=self.now.replace(hour=15,minute=15)
         plan=self.cfg.plan(100,500)
         pos={**plan,'entry_price':100,'entry_epoch':cutoff.timestamp()-60,
              'current_sl':plan['initial_sl']}
@@ -746,12 +750,12 @@ class IntegrationTests(unittest.TestCase):
         decision=bot.paper_exit(pos,quote,cutoff,self.cfg)
         self.assertEqual(decision[1], 'EOD_SQUAREOFF')
 
-    def test_stock_replay_closes_at_1445_without_later_bars(self):
-        stamp=self.now.replace(hour=14,minute=40,second=0,microsecond=0).timestamp()
+    def test_stock_replay_closes_at_1515_without_later_bars(self):
+        stamp=self.now.replace(hour=15,minute=10,second=0,microsecond=0).timestamp()
         bars={stamp:{'open':100,'high':100.1,'low':99.9,'close':100,'strike':100}}
         result=bot.simulate_fixed_premium_trade(stamp,bars,500,self.cfg)
         self.assertEqual(result['exit_reason'], 'EOD_SQUAREOFF')
-        self.assertTrue(result['exit_timestamp'].endswith('14:45:00'))
+        self.assertTrue(result['exit_timestamp'].endswith('15:15:00'))
         self.assertIsNone(bot.simulate_fixed_premium_trade(stamp+300,bars,500,self.cfg))
 
     def test_real_delta_selects_strike_instead_of_distance(self):
@@ -782,6 +786,9 @@ class IntegrationTests(unittest.TestCase):
     def test_live_selection_compares_candidates_before_first_entry(self):
         self.run_ranked_session(False,live=False,prefer_last=True)
 
+    def test_final_recheck_uses_alternate_strike_when_preferred_spread_widens(self):
+        self.run_ranked_session(False, live=False, prefer_last=True, use_final_alternate=True)
+
     def test_market_poll_interval_is_bounded_to_three_to_five_seconds(self):
         self.assertEqual(bot.DynamicStrategyConfig({}, argparse.Namespace()).poll_interval_sec, 4)
         for seconds in (3, 5):
@@ -800,7 +807,7 @@ class IntegrationTests(unittest.TestCase):
         client.before_market_request.assert_called_once_with()
         self.assertAlmostEqual(sleep.call_args.args[0], 0.55)
 
-    def run_ranked_session(self, reject_top, live=True, slow_screen=False, prefer_last=False):
+    def run_ranked_session(self, reject_top, live=True, slow_screen=False, prefer_last=False, use_final_alternate=False):
         from unittest.mock import MagicMock
         cfg = self.cfg
         cfg.initial_capital = 200000
@@ -814,6 +821,9 @@ class IntegrationTests(unittest.TestCase):
         client = MagicMock()
         client.fetch_batch_ohlc.return_value = {"NSE_EQ":{str(i):{"last_price":100} for i in range(1,4)}}
         client.fetch_option_quotes.return_value = {"11":{},"12":{},"13":{}}
+        if use_final_alternate:
+            candidates[-1]["alternate_contracts"] = [{"opt_security_id":"23", "strike":105, "trading_symbol":"CCC105CE"}]
+            client.fetch_option_quotes.return_value["23"] = {}
         client.place_option_super_order.return_value = "order-id"
         universe = {str(i):{"symbol":name} for i,name in enumerate(("AAA","BBB","CCC"),1)}
         attempts = {}
@@ -829,6 +839,11 @@ class IntegrationTests(unittest.TestCase):
                 kwargs["reasons"].append("Setup changed during recheck")
                 return None
             return next(x for x in candidates if x["symbol"]==name)
+        def qualify(candidate, *_args, reasons=None):
+            if use_final_alternate and candidate["opt_security_id"] == "13" and attempts.get("CCC",0) > 1:
+                reasons.append("Spread consumes over 25% of effective stop distance")
+                return None
+            return candidate
         with tempfile.TemporaryDirectory() as folder:
             cfg.gate_dir = folder
             with patch.object(bot,"datetime") as clock, patch.object(bot,"DhanStockOptionsClient",return_value=client), \
@@ -837,7 +852,7 @@ class IntegrationTests(unittest.TestCase):
                  patch.object(bot,"load_or_init_ledger",return_value={"trades":[],"virtual_balance_net":200000}), \
                  patch.object(bot,"shortlist_movers",return_value=[(3,str(i),100) for i in range(1,4)]), \
                  patch.object(bot,"verify_live_scanx_and_resolve_stock_option",side_effect=verify), \
-                 patch.object(bot,"qualify_quote",side_effect=lambda sig,*args,**kwargs: sig), \
+                 patch.object(bot,"qualify_quote",side_effect=qualify), \
                  patch.object(bot.time,"monotonic",side_effect=lambda: elapsed[0]), \
                  patch.object(bot.time,"sleep",side_effect=lambda *_: setattr(clock.now,"return_value",self.now.replace(day=23))), \
                  patch.object(bot,"TelegramNotifier",None):
@@ -854,6 +869,10 @@ class IntegrationTests(unittest.TestCase):
                 self.assertEqual(saved_best['symbol'],'CCC')
                 self.assertEqual(len(saved_best['selection_comparison']),3)
                 self.assertEqual(saved_best['selection_comparison'][0]['symbol'],'CCC')
+                if use_final_alternate:
+                    self.assertEqual(saved_best['opt_security_id'], '23')
+                    self.assertEqual(saved_best['strike'], 105)
+                    self.assertGreaterEqual(client.fetch_option_quotes.call_args_list.count(unittest.mock.call(["13","23"])), 2)
             if slow_screen:
                 universe_refreshes = [call for call in client.fetch_batch_ohlc.call_args_list if call.args[0] == list(universe)]
                 self.assertGreaterEqual(len(universe_refreshes), 3)
@@ -1149,13 +1168,14 @@ class StockSetupTests(unittest.TestCase):
                 self.assertIsNone(evaluate_stock_setup(data, self.as_of))
 
 class BreakoutContinuationTests(unittest.TestCase):
-    def test_early_breakout_requires_eighty_percent_close_strength_even_on_later_poll(self):
+    def test_fresh_direct_breakout_accepts_seventy_percent_close_strength(self):
         self.data['high'][-1]=103.4
         for now in (self.now,self.now+60):
             reasons=[]
             with patch('stock_option_signals._atr',return_value=[2]),patch('stock_option_signals._ema',return_value=[99.9,100.2]):
-                self.assertIsNone(evaluate_stock_setup(self.data,now,min_day_change_pct=2,require_breakout=True,reasons=reasons))
-            self.assertIn('closing strength',reasons[0])
+                signal=evaluate_stock_setup(self.data,now,min_day_change_pct=2,require_breakout=True,reasons=reasons)
+                self.assertIsNotNone(signal)
+                self.assertGreaterEqual(signal['breakout_confirmation']['close_strength'],0.70)
 
     def test_breakout_range_above_one_and_half_atr_is_rejected(self):
         self.data['high'][-1]=103.25
@@ -1166,7 +1186,7 @@ class BreakoutContinuationTests(unittest.TestCase):
 
     def test_individual_breakout_cannot_override_failed_scanner_volume(self):
         from stock_option_signals import scanx_stock_membership
-        quote={'last_price':103,'ohlc':{'close':100},'volume':2000,'received_epoch':self.now}
+        quote={'last_price':103,'ohlc':{'close':100},'volume':1000,'received_epoch':self.now}
         self.assertFalse(scanx_stock_membership(self.data,quote,self.now)['allowed'])
         with self.assertRaises(TypeError):
             scanx_stock_membership(self.data,quote,self.now,require_daily_volume=False)
@@ -1242,15 +1262,16 @@ class BreakoutContinuationTests(unittest.TestCase):
             self.data[field][-1]=value
         self.assertIsNone(self.signal())
 
-    def test_scanner_uses_full_session_volume_and_quote_previous_close(self):
+    def test_scanner_uses_full_session_or_pace_volume_and_quote_previous_close(self):
         from stock_option_signals import scanx_stock_membership
         quote={'last_price':103,'ohlc':{'close':100},'volume':10000,'received_epoch':self.now}
         result=scanx_stock_membership(self.data,quote,self.now)
         self.assertTrue(result['allowed'])
         self.assertEqual(result['previous_session_volume'],7500)
         self.assertEqual(result['opt_type'],'CE')
-        # A large five-minute candle cannot override insufficient daily volume.
-        self.assertFalse(scanx_stock_membership(self.data,{**quote,'volume':7000},self.now)['allowed'])
+        # Early volume pace can qualify before the full-day total; insufficient absolute volume cannot.
+        self.assertTrue(scanx_stock_membership(self.data,{**quote,'volume':7000},self.now)['allowed'])
+        self.assertFalse(scanx_stock_membership(self.data,{**quote,'volume':1000},self.now)['allowed'])
         self.assertFalse(scanx_stock_membership(self.data,{**quote,'ohlc':{'close':102}},self.now)['allowed'])
 
     def test_scanner_rejects_stale_quote_and_partial_previous_session(self):
@@ -1388,6 +1409,9 @@ class StockExitProtectionTests(unittest.TestCase):
         self.assertIsNone(bot.paper_exit(pos,self.quote(25.5,now),now,cfg))
         self.assertEqual(pos['current_sl'],pos['initial_sl'])
         self.assertIsNone(bot.paper_exit(pos,self.quote(26.45,now),now,cfg))
+        self.assertGreater(pos['current_sl'],pos['entry_price'])
+        arm=bot.stock_net_protection_bid(pos,pos['rupee_target_price'],.86*pos['net_profit_target'],cfg)
+        self.assertIsNone(bot.paper_exit(pos,self.quote(arm,now),now,cfg))
         floor=pos['current_sl'];self.assertGreater(floor,pos['entry_price'])
         decision=bot.paper_exit(pos,self.quote(floor,now),now,cfg)
         self.assertEqual(decision[1],'TRAIL_STOP')
@@ -1445,7 +1469,7 @@ class StockExitProtectionTests(unittest.TestCase):
 
 
 class CashRiskProfitProtectionRegressionTests(unittest.TestCase):
-    def test_dixon_recorded_profit_arms_fee_aware_floor_before_old_trigger(self):
+    def test_dixon_recorded_profit_arms_requested_hundred_rupee_net_floor(self):
         cfg=bot.DynamicStrategyConfig({'STOCK_OPT_RUPEE_MAX_RISK':'1800','STOCK_OPT_SLIPPAGE_PCT':'0.05'},argparse.Namespace())
         now=datetime(2026,11,2,12,20,tzinfo=IST)
         pos={'entry_price':506.25,'entry_epoch':now.timestamp()-100,'qty':50,'lots':1,
@@ -1456,9 +1480,160 @@ class CashRiskProfitProtectionRegressionTests(unittest.TestCase):
         self.assertLess(531.7-506.25,max(1.5*14.15,.75*37.95))
         self.assertIsNone(bot.paper_exit(pos,quote(531.7),now,cfg))
         self.assertGreater(pos['current_sl'],pos['entry_price'])
+        arm=bot.stock_net_protection_bid(pos,562.8,.86*2700,cfg)
+        self.assertIsNone(bot.paper_exit(pos,quote(arm),now,cfg))
+        self.assertGreater(pos['current_sl'],pos['entry_price'])
         self.assertGreater(pos['peak_net_pnl'],900)
         floor=pos['current_sl']
         decision=bot.paper_exit(pos,quote(floor),now,cfg)
         self.assertEqual(decision[1],'TRAIL_STOP')
         self.assertGreaterEqual(bot.stock_position_value(pos,decision[0])['net'],0)
         self.assertEqual(pos['current_sl'],floor)
+
+
+class RequestedEarlyEntryRunnerPatchTests(unittest.TestCase):
+    def test_fresh_scanner_quote_reused_but_stale_or_future_quote_refetched(self):
+        from unittest.mock import MagicMock
+        client=MagicMock();now=bot.time.time()
+        fresh={'last_price':100,'received_epoch':now-5.9}
+        with patch.object(bot.time,'time',return_value=now):
+            self.assertEqual(bot.fresh_stock_underlying_quote(client,'1',{'1':fresh}),fresh)
+            client.fetch_batch_ohlc.assert_not_called()
+            for stamp in (now-6,now+1):
+                bot.fresh_stock_underlying_quote(client,'1',{'1':{**fresh,'received_epoch':stamp}})
+        self.assertEqual(client.fetch_batch_ohlc.call_count,2)
+
+    def test_recent_candidate_reuses_verification_without_chain_but_rechecks_price(self):
+        from unittest.mock import MagicMock
+        client=MagicMock();now=datetime(2026,11,5,10,1,tzinfo=IST).timestamp()
+        client._stock_verification_context={'1':{'candles':{},'daily_reference':{'volume':100}}}
+        cfg=bot.DynamicStrategyConfig({},argparse.Namespace())
+        candidate={'eq_security_id':'1','verified_epoch':now-2,'signal_timestamp':now-360,
+                   'opt_type':'CE','conf_close':100,'entry_price_validation':{
+                   'minimum_advance':-.2,'maximum_advance':1.4,'trigger_level':99.9}}
+        quote={'last_price':101.3,'received_epoch':now}
+        with patch.object(bot.time,'time',return_value=now),patch.object(bot,'scanx_stock_membership',return_value={'allowed':True,'opt_type':'CE'}):
+            self.assertIsNotNone(bot.recheck_recent_stock_candidate(client,candidate,cfg,{'1':quote},[]))
+            self.assertIsNone(bot.recheck_recent_stock_candidate(client,candidate,cfg,{'1':{**quote,'last_price':101.5}},[]))
+            self.assertIsNone(bot.recheck_recent_stock_candidate(client,{**candidate,'verified_epoch':now-10},cfg,{'1':quote},[]))
+        client.fetch_option_chain.assert_not_called();client.fetch_intraday_candles.assert_not_called()
+        client.fetch_batch_ohlc.assert_not_called()
+
+    def test_runner_can_hold_on_fresh_trend_without_forecasting_upper_target(self):
+        fixture=IntegrationTests();fixture.setUp();cfg,pos,quote=fixture.staged_position()
+        now=fixture.now.timestamp()
+        pos.update(conf_close=100,atr_5m=10,entry_contract_oi=100000,
+                   entry_epoch=now-400,volume_context={'regular_average':500},
+                   underlying_observations=[[now-300,102.5,1000]])
+        underlying={'last_price':104,'received_epoch':now,'volume':3000}
+        chain={'1660':{'ce':{'oi':102000,'greeks':{'delta':.6,'theta':-1}}}}
+        result=bot.assess_stock_runner(pos,quote,underlying,chain,now,cfg)
+        self.assertLess(result['scenario_gain'],1.2*result['required_premium_gain'])
+        self.assertTrue(result['hold'])
+        self.assertFalse(bot.assess_stock_runner(pos,quote,{**underlying,'received_epoch':now-9},chain,now,cfg)['hold'])
+
+    def test_runner_locks_requested_tier_without_exiting_at_base(self):
+        cfg=bot.DynamicStrategyConfig({'STOCK_OPT_RUPEE_TARGET':'1200','STOCK_OPT_RUNNER_TARGET':'4500'},argparse.Namespace())
+        now=datetime(2026,11,5,12,tzinfo=IST)
+        pos={'entry_price':100,'entry_epoch':now.timestamp()-60,'qty':100,'lots':1,
+             'initial_sl':94.5,'current_sl':94.5,'peak_bid':100,'trail_jump':4,'opt_1r':5.5,
+             'net_profit_target':1200,'rupee_target_price':113,'runner_assessment':{'hold':True,'assessed_epoch':now.timestamp()}}
+        quote={'received_epoch':now.timestamp(),'depth':{'buy':[{'price':118,'quantity':100}]}}
+        self.assertIsNone(bot.paper_exit(pos,quote,now,cfg))
+        floor=pos['current_sl'];self.assertGreater(floor,100);self.assertLess(floor,118)
+        quote['depth']['buy'][0]['price']=floor
+        decision=bot.paper_exit(pos,quote,now,cfg)
+        self.assertEqual(decision[1],'TRAIL_STOP')
+        self.assertGreaterEqual(bot.stock_position_value(pos,decision[0])['net'],bot.stock_profit_protection_net(pos['peak_net_pnl'])-1)
+
+
+class PaceVolumeBoundaryTests(unittest.TestCase):
+    def test_bearish_volume_surge_can_pass_scanner_but_needs_fresh_closed_breakdown(self):
+        from stock_option_signals import scanx_stock_membership
+        fixture=BreakoutContinuationTests()
+        fixture.setUp()
+        data=fixture.data
+        for i in range(len(data['timestamp'])):
+            data['open'][i]=200-data['open'][i]
+            data['close'][i]=200-data['close'][i]
+            data['high'][i],data['low'][i]=200-data['low'][i],200-data['high'][i]
+        now=fixture.now
+        quote={'last_price':97,'ohlc':{'close':100},'volume':1000,'received_epoch':now}
+        data['volume'][-1]=360
+        accepted=scanx_stock_membership(data,quote,now)
+        self.assertTrue(accepted['allowed'])
+        self.assertEqual(accepted['opt_type'],'PE')
+        self.assertEqual(accepted['volume_surge_ratio'],3)
+        for as_of in (now-1,now+300):
+            self.assertFalse(scanx_stock_membership(data,{**quote,'received_epoch':as_of},as_of)['allowed'])
+        self.assertFalse(scanx_stock_membership(data,{**quote,'last_price':98},now)['allowed'])
+        self.assertFalse(scanx_stock_membership(data,{**quote,'last_price':94},now)['allowed'])
+        data['volume'][-1]=359
+        self.assertFalse(scanx_stock_membership(data,quote,now)['allowed'])
+        data['volume'][-1]=360
+        for field,value in zip(data,(now,97,97.2,96.5,96.7,120)):
+            data[field].append(value)
+        next_quote={**quote,'last_price':96.7,'received_epoch':now+300}
+        self.assertTrue(scanx_stock_membership(data,next_quote,now+300)['allowed'])
+        self.assertFalse(scanx_stock_membership(data,{**next_quote,'received_epoch':now+600},now+600)['allowed'])
+
+
+    def test_early_minimum_and_late_full_day_override(self):
+        from stock_option_signals import scanx_stock_membership
+        fixture=BreakoutContinuationTests();fixture.setUp()
+        quote={'last_price':103,'ohlc':{'close':100},'volume':1124,'received_epoch':fixture.now}
+        self.assertFalse(scanx_stock_membership(fixture.data,quote,fixture.now)['allowed'])
+        accepted=scanx_stock_membership(fixture.data,{**quote,'volume':1125},fixture.now)
+        self.assertTrue(accepted['allowed']);self.assertEqual(accepted['minimum_absolute_volume'],1125)
+        self.assertFalse(scanx_stock_membership(fixture.data,{**quote,'volume':1125,'received_epoch':fixture.now+1},fixture.now)['allowed'])
+        late=datetime.fromtimestamp(fixture.now,IST).replace(hour=14,minute=0).timestamp()
+        self.assertFalse(scanx_stock_membership(fixture.data,{**quote,'volume':7400,'received_epoch':late},late)['allowed'])
+        self.assertTrue(scanx_stock_membership(fixture.data,{**quote,'volume':7501,'received_epoch':late},late)['allowed'])
+
+
+class RequestedExhaustionAndNetTierTests(unittest.TestCase):
+    def test_exact_net_tier_boundaries(self):
+        for peak,expected in [(749.99,None),(750,100),(1199,100),(1200,720),(1799,1079.4),(1800,1350),(3000,2250)]:
+            with self.subTest(peak=peak):
+                result=bot.stock_profit_protection_net(peak)
+                if expected is None:self.assertIsNone(result)
+                else:self.assertAlmostEqual(result,expected)
+
+    def test_scanner_exhaustion_cap_is_symmetric_and_inclusive(self):
+        from stock_option_signals import scanx_stock_membership
+        fixture=BreakoutContinuationTests();fixture.setUp()
+        for sign in (1,-1):
+            for change,allowed in [(5.5,True),(5.5001,False),(7.4,False),(13.15,False)]:
+                quote={'last_price':100*(1+sign*change/100),'ohlc':{'close':100},
+                       'volume':10000,'received_epoch':fixture.now}
+                with self.subTest(sign=sign,change=change):
+                    # EMA remains on the appropriate side for both directions.
+                    with patch('stock_option_signals._ema',return_value=[100]*30):
+                        result=scanx_stock_membership(fixture.data,quote,fixture.now)
+                    self.assertEqual(result['allowed'],allowed)
+                    if not allowed:self.assertIn('exhaustion cap',result['reason'])
+
+    def test_closed_signal_cannot_bypass_exhaustion_cap(self):
+        fixture=BreakoutContinuationTests();fixture.setUp()
+        reasons=[]
+        self.assertIsNone(evaluate_stock_setup(fixture.data,fixture.now,previous_close=90,
+                         enable_opening_trend=True,require_breakout=True,reasons=reasons))
+        self.assertIn('5.5% exhaustion cap',reasons[0])
+
+    def test_each_tier_locks_net_after_charges_and_never_lowers_stop(self):
+        cfg=bot.DynamicStrategyConfig({'STOCK_OPT_RUPEE_TARGET':'1500','STOCK_OPT_RUNNER_TARGET':'4500',
+                                      'STOCK_OPT_RUPEE_MAX_RISK':'1000'},argparse.Namespace())
+        now=datetime(2026,11,5,12,tzinfo=IST)
+        pos={'entry_price':100,'entry_epoch':now.timestamp()-60,'qty':100,'lots':1,
+             'initial_sl':92.5,'current_sl':92.5,'peak_bid':100,'trail_jump':4,'opt_1r':7.5,
+             'net_profit_target':1500,'rupee_target_price':116,'runner_assessment':{'hold':True,'assessed_epoch':now.timestamp()}}
+        previous_stop=pos['current_sl']
+        for net_target in (800,1300,1900):
+            bid=bot.stock_net_protection_bid(pos,200,net_target,cfg)
+            quote={'received_epoch':now.timestamp(),'depth':{'buy':[{'price':bid,'quantity':100}]}}
+            self.assertIsNone(bot.paper_exit(pos,quote,now,cfg))
+            locked=bot.stock_profit_protection_net(pos['peak_net_pnl'])
+            self.assertGreaterEqual(pos['current_sl'],previous_stop)
+            fill=__import__('math').floor(pos['current_sl']*(1-cfg.slippage_pct/100)*20+1e-9)/20
+            self.assertGreaterEqual(bot.stock_position_value(pos,fill)['net'],locked-1)
+            previous_stop=pos['current_sl']

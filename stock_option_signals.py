@@ -137,11 +137,10 @@ def _completed_15m_bars(bars: List[dict]) -> List[dict]:
 def scanx_stock_membership(candles, quote, as_of_epoch, min_day_change_pct=2.0, ema_period=10):
     """ScanX-style membership, separate from trade qualification.
 
-    Unqualified Volume/Previous Volume are interpreted as current cumulative
-    session volume versus previous full-session volume. No partial prior day
-    or incomplete 15-minute bucket can silently become a reference.
+    Require session volume or a fresh directional breakout on exceptional
+    five-minute volume. Use only complete reference sessions and candles.
     """
-    result={'allowed':False,'reason':'Scanner reference unavailable','profile':'SCANX_STYLE_DAILY_VOLUME_PREVIOUS_15M_EMA'}
+    result={'allowed':False,'reason':'Scanner reference unavailable','profile':'PACE_ADJUSTED_VOLUME_PREVIOUS_15M_EMA'}
     try:
         threshold=float(min_day_change_pct)
         if not isfinite(threshold) or threshold<=0 or ema_period!=10:
@@ -176,7 +175,42 @@ def scanx_stock_membership(candles, quote, as_of_epoch, min_day_change_pct=2.0, 
                       session_volume=volume,previous_session_volume=prior_volume,
                       previous_ema_15m=ema,ema_reference_epoch=completed[-1]['timestamp'],
                       previous_session_date=prior[0]['date'].isoformat(),quote_age_seconds=age)
-        if volume<=prior_volume:result['reason']='Session volume not above previous full-session volume'
+        now_dt=datetime.fromtimestamp(as_of_epoch,IST)
+        elapsed_m=max(10.0,min(375.0,(now_dt-now_dt.replace(hour=9,minute=15,second=0,microsecond=0)).total_seconds()/60.0))
+        expected_volume=prior_volume*(elapsed_m/375.0)
+        vol_pace_ok=(volume>prior_volume) or (volume>=1.60*expected_volume and volume>=0.15*prior_volume)
+        result.update(volume_pace_ratio=volume/expected_volume,minimum_pace_volume=1.60*expected_volume,
+                      minimum_absolute_volume=0.15*prior_volume,volume_basis='FULL_SESSION_OR_1.60X_PACE_WITH_15PCT_MINIMUM')
+        # A sharp move can start before cumulative volume catches up. Require a
+        # fresh close beyond five contiguous session bars and a live price holding it.
+        surge_ok = False
+        if (not vol_pace_ok and direction
+                and 0 <= as_of_epoch - (bars[-1]['timestamp'] + BAR_SECONDS) < BAR_SECONDS):
+            bullish = direction == 'CE'
+            for end in (len(bars), len(bars)-1):
+                window = bars[max(0, end-6):]
+                recent = window[:6]
+                if (end < 6 or recent[0]['date'] != today
+                        or any(b['timestamp'] - a['timestamp'] != BAR_SECONDS
+                               for a, b in zip(window, window[1:]))):
+                    continue
+                baseline = sum(b['volume'] for b in recent[:-1]) / 5
+                last = recent[-1]
+                level = (max(b['high'] for b in recent[:-1]) if bullish
+                         else min(b['low'] for b in recent[:-1]))
+                directional_break = (last['close'] > max(last['open'], level)
+                                     and min(price, bars[-1]['close']) > level if bullish
+                                     else last['close'] < min(last['open'], level)
+                                     and max(price, bars[-1]['close']) < level)
+                surge_ok = baseline > 0 and last['volume'] >= 3 * baseline and directional_break
+                if surge_ok:
+                    result.update(volume_basis='CLOSED_5M_BREAKOUT_3X_RECENT_VOLUME',
+                                  volume_surge_ratio=last['volume']/baseline, volume_surge_level=level,
+                                  volume_surge_epoch=last['timestamp'])
+                    break
+        if not (vol_pace_ok or surge_ok):
+            result['reason']='Session volume below full-session and pace-adjusted prior volume; no qualifying closed-candle volume surge'
+        elif abs(change)>5.5+1e-9:result['reason']='Day move exceeds 5.5% exhaustion cap (no late top chasing)'
         elif direction is None:result['reason']='Day change and previous 15-minute EMA do not match a scanner side'
         else:result.update(allowed=True,opt_type=direction,reason='Scanner filters passed')
         return result
@@ -269,7 +303,7 @@ def evaluate_stock_setup(
     ema_period: int = 10,
     enable_opening_trend: bool = False,
     reasons=None,
-    confirm_window_sec: int = 600,
+    confirm_window_sec: int = 300,
     previous_close=None,
     require_breakout=False,
     previous_session=None,
@@ -320,6 +354,8 @@ def evaluate_stock_setup(
     day_change_pct = (latest["close"] / reference_close - 1.0) * 100.0
     if abs(day_change_pct) < min_day_change_pct:
         return reject('Closed day move below scanner threshold')
+    if abs(day_change_pct)>5.5+1e-9:
+        return reject('Closed day move exceeds 5.5% exhaustion cap')
     bars_15m = _completed_15m_bars(bars)
     if len(bars_15m) < ema_period + 2:
         return reject('Insufficient completed 15-minute EMA history')
@@ -447,7 +483,9 @@ def evaluate_stock_setup(
         elif sign*(latest['close']-trigger)>0.75*atr_5m:
             return reject('Direct breakout is overextended; wait for controlled pullback and reconfirmation')
         early_confirmation=datetime.fromtimestamp(latest['timestamp']+BAR_SECONDS,IST).time()<=time(9,45)
-        if body_ratio<0.60 or close_strength<(0.80 if early_confirmation else 0.75):
+        minimum_body=0.55 if direct and not retest and not prepared else 0.60
+        minimum_close=0.70 if direct and not retest and not prepared else (0.80 if early_confirmation else 0.75)
+        if body_ratio<minimum_body or close_strength<minimum_close:
             return reject('Breakout confirmation body or closing strength insufficient')
         if abs(latest['close']-ema_value)>3*atr_15m or candle_range>1.5*atr_5m:
             return reject('Breakout candle is overextended')

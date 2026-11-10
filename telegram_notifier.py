@@ -327,8 +327,8 @@ class TelegramNotifier:
         self.enabled = bool(self.token and self.chat_id)
         self._events = queue.Queue()
         self._lock = threading.Lock()
-        self._position = None
-        self._next_update = float('inf')
+        self._positions = {}
+        self._next_update = {}
         self._closing = threading.Event()
         self._thread = None
         if self.enabled:
@@ -381,9 +381,9 @@ class TelegramNotifier:
         )
         return self._bold_company(message,p['index'])
 
-    def partial(self, position, fill):
+    def partial(self, position, fill, position_key=None):
         if not self.enabled:return
-        self.position(position)
+        self.position(position, position_key=position_key)
         self._events.put(self._bold_company(
             f"[{self.mode}] PARTIAL PROFIT BOOKED\n{position['index']}\n"
             f"Quantity sold: {fill['qty']}\nExit: Rs.{fill['price']:.2f}\n"
@@ -391,7 +391,7 @@ class TelegramNotifier:
             f"Remaining lots: {position['lots']}\nRemaining quantity: {position['qty']}\n"
             f"Time: {ist_now()}",position['index']))
 
-    def position(self, position, entry=False):
+    def position(self, position, entry=False, position_key=None):
         if not self.enabled:
             return
         stamp=position.get('quote_received_epoch')
@@ -399,21 +399,23 @@ class TelegramNotifier:
                   if stamp is not None else ist_now())
         snapshot = dict(position, _observed_at=observed)
         with self._lock:
-            if entry or self._position is None:
-                self._next_update = time.monotonic() + self.INTERVAL
-            self._position = snapshot
+            if entry or position_key not in self._positions:
+                self._next_update[position_key] = time.monotonic() + self.INTERVAL
+            self._positions[position_key] = snapshot
             if entry:
                 self._events.put(f'[{self.mode}] TRADE ENTRY\n{self._details(snapshot)}\nEngine event; broker fill not independently verified.')
 
-    def exited(self, trade):
+    def exited(self, trade, position_key=None):
         if not self.enabled:
             return
+        channel_call = (trade.get('market_structure') or {}).get('telegram_call') or {}
+        source = f"Source: Telegram {channel_call['source']}\n" if channel_call.get('source') else ''
         with self._lock:
-            self._position = None
-            self._next_update = float('inf')
+            self._positions.pop(position_key, None)
+            self._next_update.pop(position_key, None)
             self._events.put(self._bold_company(
                 f"[{self.mode}] TRADE EXIT\n{trade.get('index', trade.get('symbol', ''))}\nContract: {trade['contract']}\n"
-                f"Lots: {trade['lots']}\nQuantity: {trade['qty']}\n\n"
+                f"{source}Lots: {trade['lots']}\nQuantity: {trade['qty']}\n\n"
                 f"Entry: Rs.{trade['entry_price']:.2f}\nExit: Rs.{trade['exit_price']:.2f}\n"
                 f"Gross P&L: {chr(0x1F7E2) if trade['gross_pnl']>0 else chr(0x1F534)} Rs.{trade['gross_pnl']:+,.2f}\n"
                 f"Net P&L: {chr(0x1F7E2) if trade['net_pnl']>0 else chr(0x1F534)} Rs.{trade['net_pnl']:+,.2f}\n"
@@ -424,21 +426,31 @@ class TelegramNotifier:
             ))
 
     def _send(self, message):
+        heading = message.partition('\n')[0]
+        is_trade_event = heading.endswith(('TRADE ENTRY', 'TRADE EXIT', 'PARTIAL PROFIT BOOKED'))
+        event = ' | '.join(message.splitlines()[:4]) if is_trade_event else heading
         try:
-            response = requests.post(
-                f'https://api.telegram.org/bot{self.token}/sendMessage',
-                json={'chat_id': self.chat_id, 'text': message, 'parse_mode':'HTML'}, timeout=(3, 4),
-            )
-            body = response.json()
-            if response.status_code == 429:
+            for attempt in range(2 if is_trade_event else 1):
+                response = requests.post(
+                    f'https://api.telegram.org/bot{self.token}/sendMessage',
+                    json={'chat_id': self.chat_id, 'text': message, 'parse_mode':'HTML'}, timeout=(3, 4),
+                )
+                body = response.json()
+                if response.ok and body.get('ok'):
+                    if is_trade_event:
+                        self.logger.info('Telegram acknowledged %s | message_id=%s',
+                                         event, body.get('result', {}).get('message_id'))
+                    return
+                if response.status_code != 429:
+                    break
                 delay = max(1, int(body.get('parameters', {}).get('retry_after', 5)))
-                self.logger.warning('Telegram rate limited; pausing alerts for %s seconds.', delay)
-                self._closing.wait(delay)
-            if not response.ok or not body.get('ok'):
-                self.logger.warning('Telegram delivery failed (HTTP %s). Check token and channel permissions.', response.status_code)
+                self.logger.warning('Telegram rate limited on %s; pausing alerts for %s seconds.', event, delay)
+                if self._closing.wait(delay):
+                    break
+            self.logger.warning('Telegram delivery failed (HTTP %s) | %s', response.status_code, event)
         except Exception:
             # Request exception strings can contain the token-bearing URL.
-            self.logger.warning('Telegram delivery failed; check connectivity and Telegram configuration.')
+            self.logger.warning('Telegram delivery unverified | %s', event)
 
     def _run(self):
         while not self._closing.is_set() or not self._events.empty():
@@ -448,9 +460,11 @@ class TelegramNotifier:
                 message = None
             if message is None and not self._closing.is_set():
                 with self._lock:
-                    if self._position and time.monotonic() >= self._next_update:
-                        message = f'[{self.mode}] OPEN TRADE UPDATE\n{self._details(self._position)}\nUpdate: {ist_now()}'
-                        self._next_update = time.monotonic() + self.INTERVAL
+                    if self._next_update:
+                        key = min(self._next_update, key=self._next_update.get)
+                        if time.monotonic() >= self._next_update[key]:
+                            message = f'[{self.mode}] OPEN TRADE UPDATE\n{self._details(self._positions[key])}\nUpdate: {ist_now()}'
+                            self._next_update[key] = time.monotonic() + self.INTERVAL
             if message:
                 self._send(message)
 

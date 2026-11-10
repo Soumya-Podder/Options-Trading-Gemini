@@ -50,20 +50,12 @@ class OpeningRegimeTests(unittest.TestCase):
             for k,v in zip(d,(dt.timestamp(),*row)):d[k].append(v)
         return d,d['timestamp'][-1]+300
 
-    def test_stock_confirmed_gap_break_can_pass_ema_distance_without_bypassing_volume(self):
-        d,now=self.stock_fixture()
-        reasons=[]
-        self.assertIsNone(evaluate_stock_setup(d,now,reasons=reasons))
-        self.assertIn('EMA distance',reasons[0])
-        signal=evaluate_stock_setup(d,now,enable_opening_trend=True)
-        self.assertEqual(signal['opt_type'],'PE')
-        self.assertEqual(signal['scanner'],'OPENING_GAP_BREAK_PE')
-        expected=copy.deepcopy(signal)
-        for k,v in zip(d,(now,200,250,100,200,1000000)):d[k].append(v)
-        self.assertEqual(evaluate_stock_setup(d,now,enable_opening_trend=True),expected)
-        for values in d.values():values.pop()
-        d['volume'][-1]=1000
-        self.assertIsNone(evaluate_stock_setup(d,now,enable_opening_trend=True))
+    def test_stock_exhaustion_cap_blocks_large_gap_even_with_opening_trend(self):
+        data,now=self.stock_fixture()
+        for enabled in (False,True):
+            reasons=[]
+            self.assertIsNone(evaluate_stock_setup(data,now,enable_opening_trend=enabled,reasons=reasons))
+            self.assertIn('5.5% exhaustion cap',reasons[0])
 
     def test_nifty_first_gap_break_requires_oi_and_is_explicit(self):
         fixture=level_fixtures.LevelEntryTests();fixture.setUp()
@@ -165,7 +157,7 @@ class ConsolidationBreakoutTests(unittest.TestCase):
         from unittest.mock import patch
         start=datetime(2026,10,28,9,15,tzinfo=IST)
         data={k:[] for k in ('timestamp','open','high','low','close','volume')}
-        rows=[(95,96,94,95,1000)]*75
+        rows=[(99,100,98,99,1000)]*75
         bars=self.sequence()
         # A prior high remains ahead, but there is more than one ATR of room.
         bars.insert(3,dict(open=101,high=106,low=101,close=102,volume=4000))
@@ -236,7 +228,7 @@ class PullbackRetestTests(unittest.TestCase):
         from unittest.mock import patch
         start=datetime(2026,10,28,9,15,tzinfo=IST)
         data={k:[] for k in ('timestamp','open','high','low','close','volume')}
-        rows=[(95,96,94,95,1000)]*75
+        rows=[(99,100,98,99,1000)]*75
         rows += [(b['open'],b['high'],b['low'],b['close'],b['volume']) for b in self.sequence()]
         for i,row in enumerate(rows):
             stamp=((start-timedelta(days=1)+timedelta(minutes=5*i)) if i<75

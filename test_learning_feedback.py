@@ -426,7 +426,7 @@ class AdaptiveSetupFeedbackTests(unittest.TestCase):
         self.assertEqual(feedback['exit_policy'],'PROTECT_EARNED_PROFIT')
         self.assertFalse(feedback['paused'])
 
-    def test_stock_protection_uses_frozen_entry_feedback_without_changing_risk(self):
+    def test_stock_feedback_cannot_arm_before_requested_base_progress(self):
         import argparse
         import dhan_dynamic_fno_stock_bot as stock
         cfg=stock.DynamicStrategyConfig({},argparse.Namespace())
@@ -438,7 +438,7 @@ class AdaptiveSetupFeedbackTests(unittest.TestCase):
         protected=copy.deepcopy(base);standard=copy.deepcopy(base);standard['adaptive_feedback']={}
         self.assertIsNone(stock.paper_exit(protected,quote,when,cfg))
         self.assertIsNone(stock.paper_exit(standard,quote,when,cfg))
-        self.assertGreater(protected['current_sl'],100)
+        self.assertEqual(protected['current_sl'],90)
         self.assertEqual(standard['current_sl'],90)
         self.assertEqual(protected['initial_sl'],90)
 

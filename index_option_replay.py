@@ -113,14 +113,14 @@ def replay_option_trade(entry_idx,is_ce,timestamps,opens,highs,lows,closes,strik
             return finish(j,o,"THETA_TIME_STOP")
         if hard_target_points is not None and o>=entry+hard_target_points:
             if split and not first_done and hard_target_points>=12:target_one(j)
-            return finish(j,entry+hard_target_points,'TARGET_2_20_POINTS')
+            return finish(j,entry+hard_target_points,f'TARGET_2_{hard_target_points:g}_POINTS')
         if session_profit_check is not None and session_profit_check(entry,remaining,fills,sell(o)):
             return finish(j,o,"TARGET_2_20_POINTS" if o-entry>=18 else "DAILY_NET_PROFIT_TARGET")
         if split:
             if not first_done and o>=entry+12:
                 target_one(j)
             if o>=entry+22:
-                return finish(j,entry+22,"TARGET_2_20_POINTS")
+                return finish(j,entry+22,"TARGET_2_22_POINTS")
         # Unknown intrabar order uses the existing stop before later targets.
         if l<=stop:
             return finish(j,stop,reason)
@@ -129,14 +129,14 @@ def replay_option_trade(entry_idx,is_ce,timestamps,opens,highs,lows,closes,strik
             target_one(j)
             daily=daily_trigger(h)
         if hard_target_points is not None and h>=entry+hard_target_points and (daily is None or entry+hard_target_points<=daily):
-            return finish(j,entry+hard_target_points,'TARGET_2_20_POINTS')
+            return finish(j,entry+hard_target_points,f'TARGET_2_{hard_target_points:g}_POINTS')
         if daily is not None and (not split or daily<=entry+22):
             return finish(j,daily,"TARGET_2_20_POINTS" if daily-entry>=18 else "DAILY_NET_PROFIT_TARGET")
         if split:
             if not first_done and h>=entry+12:
                 target_one(j)
             if h>=entry+22:
-                return finish(j,entry+22,"TARGET_2_20_POINTS")
+                return finish(j,entry+22,"TARGET_2_22_POINTS")
         peak=max(peak,h)
         if profit_floor_check is not None:
             floor=profit_floor_check(entry,remaining,fills)

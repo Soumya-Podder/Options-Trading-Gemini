@@ -11,26 +11,46 @@ import dhan_bot_engine as bot
 class ReplayTests(unittest.TestCase):
     def test_runner_requires_fresh_supported_room_and_feasible_move(self):
         import copy
-        now=datetime(2026,10,26,10).timestamp()
+        now=datetime(2026,10,26,10,tzinfo=bot.IST).timestamp()
         position={'entry_price':100,'qty':65,'lots':1,'index':'NIFTY',
-                  'strike':23000,'option_type':'CE','entry_epoch':now-600}
+                  'strike':22950,'option_type':'CE','entry_epoch':now-600}
         node={'top_bid_price':120,'top_ask_price':120.2,'top_bid_quantity':650,
               'top_ask_quantity':650,'greeks':{'delta':0.6,'theta':-10}}
-        view={'spot':23000,'snapshot_received_epoch':now,'d_spot_5m':60,
+        view={'spot':23000,'session_vwap':22990,'snapshot_received_epoch':now,'d_spot_5m':3,
+              'd_spot_15m':30,'trend_15m_ready':True,'put_strikes_below':[23000,22950,22900],
               'oi_analysis':{'ready':True,'nearby_strikes':[
                   {'strike':23000,'side':'pe','change_over_5m':200000,'premium_change_over_5m':-2},
                   {'strike':23200,'side':'ce','change_over_5m':200000,'premium_change_over_5m':-2}]}}
         self.assertTrue(bot.assess_index_runner(view,position,node,now,0)['hold'])
         for mutate in (lambda v,n:v.update(snapshot_received_epoch=now-9),
-                       lambda v,n:v.update(d_spot_5m=-10),
+                       lambda v,n:v.update(trend_15m_ready=False),
                        lambda v,n:v['oi_analysis'].update(ready=False),
                        lambda v,n:v['oi_analysis']['nearby_strikes'][0].update(premium_change_over_5m=2),
                        lambda v,n:v['oi_analysis']['nearby_strikes'][1].update(strike=23010),
                        lambda v,n:n.update(top_bid_quantity=64),
-                       lambda v,n:n['greeks'].update(theta=-3000)):
+                       lambda v,n:(n['greeks'].update(theta=-3000),
+                                   v['oi_analysis']['nearby_strikes'][1].update(strike=23035))):
             v=copy.deepcopy(view);n=copy.deepcopy(node);mutate(v,n)
             self.assertFalse(bot.assess_index_runner(v,position,n,now,0)['hold'])
-        self.assertFalse(bot.assess_index_runner(view,{**position,'entry_epoch':now-1100},node,now,0)['hold'])
+        self.assertTrue(bot.assess_index_runner(view,{**position,'entry_epoch':now-1300},node,now,0)['hold'])
+        self.assertFalse(bot.assess_index_runner(view,{**position,'entry_epoch':now-2700},node,now,0)['hold'])
+        reentry={**position,'entry_epoch':now,'entry_price':120.35}
+        self.assertEqual(bot.post_lock_runner_lots(view,reentry,node,now,2000),0)
+        trend={**view,'diff_ce_minus_pe_lakhs':-35}
+        self.assertEqual(bot.post_lock_runner_lots(trend,reentry,node,now,1276.50),0)
+        self.assertEqual(bot.post_lock_runner_lots(trend,reentry,node,now,2000),1)
+
+    def test_post_lock_reservations_count_towards_persisted_daily_limit(self):
+        day = '2026-11-06'
+        ledger = {}
+        with tempfile.TemporaryDirectory() as folder:
+            path = str(Path(folder) / 'ledger.json')
+            for _ in range(bot.MAX_POST_LOCK_RUNNER_ENTRIES):
+                self.assertTrue(bot.reserve_index_entry(ledger, day, {'post_lock_runner': True}, path))
+                ledger = json.loads(Path(path).read_text(encoding='utf-8'))
+                ledger.pop('pending_entry')
+            self.assertFalse(bot.reserve_index_entry(ledger, day, {'post_lock_runner': True}, path))
+            self.assertEqual(bot.index_entries_today(ledger, day), 2)
 
     def test_profit_floor_covers_fees_slippage_prior_losses_and_partials(self):
         import math
@@ -69,8 +89,9 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(bot.option_stop_points('SENSEX',550),32)
 
     def test_nifty_ratchet_waits_then_locks_and_never_lowers_stop(self):
-        for peak,expected in ((108.49,(90,False)),(108.5,(103.5,True)),(112.5,(108,True)),(118,(114,True)),(130,(126,True))):
+        for peak,expected in ((108.49,(90,False)),(108.5,(90,False)),(111.5,(103.5,True)),(112.5,(108,True)),(118,(114,True)),(130,(126,True))):
             self.assertEqual(bot.update_ratchet_sl(100,90,peak,10),expected)
+        self.assertEqual(bot.update_ratchet_sl(131.75,120.55,143.65,11.20),(120.55,False))
         self.assertEqual(bot.update_ratchet_sl(100,128,130,10),(128,True))
         self.assertEqual(bot.update_ratchet_sl(100,90,130,0),(90,False))
 
@@ -92,11 +113,11 @@ class ReplayTests(unittest.TestCase):
 
     def test_daily_target_includes_prior_losses_and_partial_profit_once(self):
         position={'entry_price':100,'qty':65,'lots':1}
-        self.assertFalse(bot.daily_target_reached(0,position,139.45))
-        self.assertTrue(bot.daily_target_reached(0,position,139.50))
-        self.assertFalse(bot.daily_target_reached(-500,position,139.50))
+        self.assertFalse(bot.daily_target_reached(0,position,147.10))
+        self.assertTrue(bot.daily_target_reached(0,position,147.15))
+        self.assertFalse(bot.daily_target_reached(-500,position,147.30))
         position={'entry_price':100,'qty':65,'lots':2,'exit_fills':[{'price':110,'qty':65}]}
-        self.assertTrue(bot.daily_target_reached(0,position,131))
+        self.assertTrue(bot.daily_target_reached(0,position,138))
         self.assertFalse(bot.daily_target_reached(0,position,125))
 
     def replay(self,bars,**kwargs):
@@ -112,13 +133,13 @@ class ReplayTests(unittest.TestCase):
 
     def test_current_daily_target_uses_shared_net_helper(self):
         def check(entry,remaining,fills,bid):
-            return bot.daily_target_reached(700,{'entry_price':entry,'qty':remaining,'lots':2,'exit_fills':fills},bid)
+            return bot.daily_target_reached(1200,{'entry_price':entry,'qty':remaining,'lots':2,'exit_fills':fills},bid)
         result,fills=self.replay([(100,100,100,100),(100,120,99,119)],lots=2,
             session_profit_check=check,current_session_policy=True)
         self.assertEqual(result[3],'DAILY_NET_PROFIT_TARGET')
         self.assertEqual(len(fills),2)
         gross=sum((f['price']-100)*f['qty'] for f in fills)
-        self.assertGreaterEqual(700+gross-(40+2*24.5+20),2500)
+        self.assertGreaterEqual(1200+gross-(40+2*24.5+20),3000)
         self.assertEqual(fills[0]['price'],112)
 
     def test_current_daily_target_cannot_override_same_bar_stop(self):
@@ -127,11 +148,11 @@ class ReplayTests(unittest.TestCase):
             session_profit_check=check,current_session_policy=True)
         self.assertEqual(result[3],'INITIAL_SL_HIT')
 
-    def test_single_lot_twenty_point_target_after_prior_daily_loss(self):
+    def test_single_lot_twenty_two_point_target_after_prior_daily_loss(self):
         check=lambda e,q,f,b:bot.daily_target_reached(-500,{'entry_price':e,'qty':q,'lots':1,'exit_fills':f},b)
-        result,_=self.replay([(100,100,100,100),(100,121,99,120)],entry_at_open=True,
+        result,_=self.replay([(100,100,100,100),(100,123,99,122)],entry_at_open=True,
                              current_session_policy=True,session_profit_check=check)
-        self.assertEqual((result[1],result[3]),(120,'TARGET_2_20_POINTS'))
+        self.assertEqual((result[1],result[3]),(122,'TARGET_2_22_POINTS'))
 
     def test_single_lot_twenty_point_target_still_uses_stop_first(self):
         result,_=self.replay([(100,100,100,100),(100,125,90,120)],entry_at_open=True,
@@ -313,7 +334,7 @@ class NiftyTargetTests(unittest.TestCase):
 
     def test_two_targets_average_to_seventeen_points(self):
         result,fills=self.replay([(100,100,100,100),(100,112,99,111),(113,122,110,121)])
-        self.assertEqual(result[3],"TARGET_2_20_POINTS")
+        self.assertEqual(result[3],"TARGET_2_22_POINTS")
         self.assertEqual(result[1],117)
         self.assertEqual([(f["qty"],f["price"]) for f in fills],[(65,112),(65,122)])
 
@@ -349,7 +370,8 @@ class NiftyTargetTests(unittest.TestCase):
 
     def test_partial_is_booked_once_and_final_is_one_trade(self):
         ledger={"initial_capital":30000,"virtual_balance_gross":30000,
-                "virtual_balance_net":30000,"trades":[]}
+                "virtual_balance_net":30000,"trades":[],
+                "active_channel_position":{"qty":65,"entry_price":100,"lots":1}}
         pos={"entry_price":100,"lots":2,"qty":130,"original_qty":130,
              "target_one_qty":65,"target_one_done":False}
         brain=MagicMock()
@@ -369,6 +391,7 @@ class NiftyTargetTests(unittest.TestCase):
         self.assertEqual(ledger["total_trades"],1)
         self.assertEqual(ledger["trades"][0]["net_pnl"],1841)
         self.assertNotIn("active_position",ledger)
+        self.assertEqual(ledger["active_channel_position"]["qty"],65)
         brain.learn_from_trade.assert_called_once()
 
 
@@ -393,6 +416,22 @@ class NiftyEntryLimitTests(unittest.TestCase):
                 "active_position":{"entry_ts":self.day+" 10:00:00","target_one_done":True}}
         self.assertEqual(bot.index_entries_today(ledger,self.day),8)
         self.assertFalse(bot.reserve_index_entry(ledger,self.day,{}))
+
+    def test_channel_and_native_positions_consume_slots_and_share_cash(self):
+        native = {"entry_ts": self.day + " 10:00:00", "entry_price": 120, "qty": 130, "lots": 2}
+        channel = {"entry_ts": self.day + " 10:01:00", "entry_price": 150, "qty": 130, "lots": 2}
+        ledger = {"trades": [], "virtual_balance_net": 40000, "active_position": native}
+        with tempfile.TemporaryDirectory() as directory:
+            path = str(Path(directory) / "ledger.json")
+            self.assertFalse(bot.reserve_index_entry(ledger, self.day, {}, path))
+            self.assertTrue(bot.reserve_index_entry(
+                ledger, self.day, {"telegram_call_key": "call"}, path, "active_channel_position"))
+            ledger.pop("pending_entry")
+            ledger["active_channel_position"] = channel
+            self.assertEqual(bot.index_entries_today(ledger, self.day), 2)
+            self.assertEqual(bot.index_available_cash(ledger), 4682)
+            self.assertFalse(bot.reserve_index_entry(
+                ledger, self.day, {}, path, "active_channel_position"))
 
     def test_interrupted_submission_blocks_duplicate_entry(self):
         with tempfile.TemporaryDirectory() as directory:

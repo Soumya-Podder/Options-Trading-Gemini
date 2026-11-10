@@ -35,7 +35,7 @@ class HistoricalDataTests(unittest.TestCase):
         self.client.session=MagicMock()
         self.sleep=patch("dhan_dynamic_fno_stock_bot.time.sleep")
         self.sleep.start();self.addCleanup(self.sleep.stop)
-        self.stamp=datetime(2026,9,18,14,40,tzinfo=IST).timestamp()
+        self.stamp=datetime(2026,9,18,15,10,tzinfo=IST).timestamp()
 
     def fetch(self):
         return self.client.fetch_intraday_candles("1",from_date="2026-09-18",to_date="2026-09-19",use_cache=True)
@@ -50,12 +50,12 @@ class HistoricalDataTests(unittest.TestCase):
         self.assertEqual(stored["version"],2)
         self.assertIn("received_epoch",stored)
 
-    def test_missing_after_1445_does_not_mark_active_session_tail_missing(self):
+    def test_missing_after_1515_does_not_mark_active_session_tail_missing(self):
         self.client.session.post.return_value=response(candles(self.stamp))
         self.assertIsNotNone(self.fetch())
         self.assertEqual(self.client.history_events, [])
 
-    def test_missing_before_1445_remains_a_coverage_warning(self):
+    def test_missing_before_1515_remains_a_coverage_warning(self):
         self.client.session.post.return_value=response(candles(self.stamp-300))
         self.assertIsNotNone(self.fetch())
         self.assertEqual(self.client.history_events[-1]['reason'], 'partial_session_tail')

@@ -230,13 +230,15 @@ def render_dashboard(
             lines.append(f"{CYAN}|{RESET}   STRUCTURE: {'ELIGIBLE' if structure.get('allowed') else 'WAIT'} | {structure.get('reason','Awaiting verified price/OI levels')}")
         lines.append(border)
 
-    active_pos = telemetry.get("active_position")
-    if active_pos:
+    open_positions = telemetry.get("active_positions")
+    if open_positions is None:
+        open_positions = [telemetry["active_position"]] if telemetry.get("active_position") else []
+    for active_pos in open_positions:
         lines.append(
             f"{CYAN}|{RESET} {BG_GREEN} OPEN TRADE {RESET} {BOLD}{active_pos.get('index')} {active_pos.get('strike')} {active_pos.get('option_type')}{RESET} "
             f"| Entry: Rs.{active_pos.get('entry_price'):.2f} | SL: Rs.{active_pos.get('current_sl'):.2f} | Peak: Rs.{active_pos.get('highest_ltp'):.2f}"
         )
-    else:
+    if not open_positions:
         consec_l = 0
         for t in reversed(trades):
             if float(t.get("gross_pnl", 0)) <= 0:

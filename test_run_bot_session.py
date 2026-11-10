@@ -81,7 +81,7 @@ class SessionLauncherTests(unittest.TestCase):
         dashboard.poll.return_value=None
         with patch.object(session.subprocess,'Popen',side_effect=[index,stock,dashboard]),\
              patch.object(session.time,'sleep'),patch.object(session,'datetime') as clock,patch('builtins.print'):
-            clock.now.return_value=datetime(2026,10,23,11)
+            clock.now.return_value=datetime(2026,10,23,14,47)
             clock.strptime.side_effect=datetime.strptime
             session.main()
         self.assertEqual(stock.poll.call_count,3)
@@ -95,7 +95,7 @@ class EngineMaintenanceTests(unittest.TestCase):
         import threading,queue
         notifier=notifications.TelegramNotifier.__new__(notifications.TelegramNotifier)
         notifier.enabled=True;notifier.mode='PAPER';notifier._lock=threading.Lock()
-        notifier._events=queue.Queue();notifier._position=None;notifier._next_update=float('inf')
+        notifier._events=queue.Queue();notifier._positions={};notifier._next_update={}
         pos={'index':'ATHERENERG','strike':1660,'option_type':'CE','lots':1,'qty':375,
              'original_qty':750,'partial_booked':True,'partial_net':800,'partial_gross':881.25,
              'entry_price':18,'current_bid':20.4,'current_ltp':20.4,'current_ask':20.45,
@@ -185,6 +185,7 @@ class EngineMaintenanceTests(unittest.TestCase):
         notifier=notifications.TelegramNotifier.__new__(notifications.TelegramNotifier)
         notifier.enabled=True;notifier.mode='PAPER'
         notifier._lock=threading.Lock();notifier._events=queue.Queue()
+        notifier._positions={};notifier._next_update={}
         pos={'index':'SWIGGY','symbol':'SWIGGY','strike':180,'option_type':'CE',
              'lots':1,'qty':100,'entry_price':10.65,'current_ltp':10.65,
              'current_sl':9.9,'peak_bid':11.2,'entry_ts':'2026-10-26 09:35:16'}
@@ -201,15 +202,15 @@ class EngineMaintenanceTests(unittest.TestCase):
         import queue,threading
         notifier=notifications.TelegramNotifier.__new__(notifications.TelegramNotifier)
         notifier.enabled=True;notifier._lock=threading.Lock();notifier._events=queue.Queue()
-        notifier._position=None;notifier._next_update=float('inf')
+        notifier._positions={};notifier._next_update={}
         with patch.object(notifications.time,'monotonic',return_value=100):
             notifier.position({'entry_price':38.85,'current_ltp':38.5,'quote_received_epoch':50})
-        self.assertEqual(notifier._next_update,105)
-        self.assertEqual(notifier._position['current_ltp'],38.5)
+        self.assertEqual(notifier._next_update[None],105)
+        self.assertEqual(notifier._positions[None]['current_ltp'],38.5)
         self.assertTrue(notifier._events.empty())
         with patch.object(notifications.time,'monotonic',return_value=102):
             notifier.position({'entry_price':38.85,'current_ltp':38.4,'quote_received_epoch':52})
-        self.assertEqual(notifier._next_update,105)
+        self.assertEqual(notifier._next_update[None],105)
 
     def test_stock_notifications_separate_entry_ltp_and_bid(self):
         import telegram_notifier as notifications
@@ -235,13 +236,13 @@ class EngineMaintenanceTests(unittest.TestCase):
         import queue
         notifier=notifications.TelegramNotifier.__new__(notifications.TelegramNotifier)
         notifier.enabled=True;notifier.mode='PAPER'
-        notifier._lock=threading.Lock();notifier._position={};notifier._events=queue.Queue()
+        notifier._lock=threading.Lock();notifier._positions={None:{}};notifier._next_update={None:0};notifier._events=queue.Queue()
         trade={'index':'NIFTY','contract':'22000_CE','lots':1,'qty':65,
                'entry_price':100,'exit_price':110,'gross_pnl':650,'net_pnl':580,
                'r_mult':1.25,'exit_reason':'TARGET','exit_timestamp':'2026-10-23 10:00:00'}
         notifier.exited(trade)
         self.assertIn('+1.25R',notifier._events.get_nowait())
-        self.assertIsNone(notifier._position)
+        self.assertEqual(notifier._positions,{})
 
     def test_requests_reuse_headers_and_chain_requests_keep_shared_pacing(self):
         import dhan_bot_engine as engine
@@ -284,6 +285,37 @@ class EngineMaintenanceTests(unittest.TestCase):
             engine.run_intraday_market_session(False,MagicMock(),['NIFTY'])
         notifier.assert_called_once_with(env,unittest.mock.ANY,'PAPER')
         notifier.return_value.close.assert_called_once()
+
+
+    def test_profit_protected_session_keeps_scanning_without_reserving_entry(self):
+        import dhan_bot_engine as engine
+        when = datetime(2026, 11, 6, 14, 30)
+        trade = {"timestamp": "2026-11-06 10:00:00", "net_pnl": 1276.50}
+        view = {"entry_decision": {"action": "BUY_CE"}}
+        with patch.object(engine, "datetime") as clock, \
+             patch.object(engine, "load_dotenv_file", return_value={}), \
+             patch.object(engine, "DhanV2RestClient") as client, \
+             patch.object(engine, "MarketMicrostructureAnalyzer") as analyzer, \
+             patch.object(engine, "SelfLearningBrain") as brain, \
+             patch.object(engine, "TelegramNotifier"), \
+             patch.object(engine, "reserve_index_entry") as reserve, \
+             patch.object(engine, "atomic_write_json") as write:
+            clock.now.return_value = when
+            client.return_value.fetch_nearest_expiry.return_value = "2026-11-12"
+            client.return_value.fetch_option_chain.return_value = {"oc": {}}
+            client.return_value.oc_poll_gap = 3.6
+            analyzer.return_value.evaluate_chain.return_value = view
+            brain._load_json.side_effect = lambda path, defaults: {**defaults, "trades": [trade]}
+            def finish_after_scan(path, data):
+                clock.now.return_value = when.replace(minute=45)
+            write.side_effect = finish_after_scan
+            engine.run_intraday_market_session(False, MagicMock(), ["SENSEX"])
+        client.return_value.fetch_option_chain.assert_called_once()
+        brain.return_value.select_action.assert_called_once_with(
+            view, 0, bar_time=when.time(), observation_only=True)
+        self.assertEqual(view["signal_decision"]["action"], "BUY_CE")
+        self.assertEqual(view["entry_decision"]["reason"], "Daily index profit protection active")
+        reserve.assert_not_called()
 
 
 class RiskRegressionTests(unittest.TestCase):
