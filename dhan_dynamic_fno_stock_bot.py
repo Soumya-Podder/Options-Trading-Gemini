@@ -12,6 +12,9 @@ import time
 import json
 import hashlib
 import logging
+import struct
+import threading
+from urllib.parse import urlencode
 import argparse
 from datetime import datetime, timedelta, time as dtime, timezone
 from typing import Dict, Any, List, Optional
@@ -19,12 +22,13 @@ import requests
 from collections import Counter
 from bisect import bisect_left
 from pathlib import Path
-from stock_option_signals import evaluate_stock_setup, scanx_stock_membership, recent_entry_momentum
-from stock_option_policy import premium_plan, rank_candidates, DailyTradeGate, stock_reentry_reason, option_chain_request_slot, single_bot_session, session_open_wait_seconds
+from stock_option_signals import evaluate_stock_setup, scanx_stock_membership, recent_entry_momentum, order_flow_direction
+from stock_option_policy import premium_plan, rank_candidates, DailyTradeGate, stock_reentry_reason, option_chain_request_slot, market_quote_request_slot, single_bot_session, session_open_wait_seconds
 
 IST = timezone(timedelta(hours=5, minutes=30))
 SESSION_START_TIME = dtime(9, 15)  # Market data and opening-range reference
 ENTRY_START_TIME = dtime(9, 20)
+SCAN_END_TIME = dtime(13, 30)
 SESSION_END_TIME = dtime(15, 15)
 
 try:
@@ -196,10 +200,10 @@ class DynamicStrategyConfig:
         if not 5<=self.runner_max_hold_minutes<=120:
             raise ValueError('Runner holding limit must be between 5 and 120 minutes')
 
-    def plan(self, entry: float, qty: int, max_target_price=None, min_lots=1):
+    def plan(self, entry: float, qty: int, max_target_price=None, min_lots=1, min_net_rr=None):
         # Cash loss is an exit trigger for the whole position, not an entry veto.
         plan = premium_plan(entry, qty, compute_fno_option_charges, self.target_pct,
-                            self.stop_pct, self.min_rr_target, self.slippage_pct,
+                            self.stop_pct, max(self.min_rr_target, min_net_rr or 0), self.slippage_pct,
                             self.rupee_target, self.max_lots, float("inf"),self.extend_rupee_target,max_target_price,
                             min_lots=min_lots,cash_loss_limit=self.rupee_max_risk)
         if plan is None:
@@ -411,7 +415,133 @@ def quote_received_age(quote, now_epoch):
     return age if math.isfinite(age) else float("inf")
 
 
+class DhanCandleOrderFlow:
+    """Estimate aggressor volume from observed trades and the preceding book."""
+
+    def __init__(self, client_id, token, security_ids, logger):
+        self.client_id = client_id
+        self.token = token
+        self.security_ids = set(map(str, security_ids))
+        self.logger = logger
+        self.previous = {}
+        self.candles = {}
+        self.reported = {}
+        self.lock = threading.Lock()
+        self.stop = threading.Event()
+        self.worker = None
+
+    def start(self):
+        if self.security_ids and self.worker is None:
+            self.worker = threading.Thread(target=self.run, name="stock-order-flow", daemon=True)
+            self.worker.start()
+
+    def close(self):
+        self.stop.set()
+        if self.worker:
+            self.worker.join(timeout=2)
+
+    def ingest(self, packet, received):
+        if not isinstance(packet, bytes) or len(packet) < 162 or packet[0] != 8 or packet[3] != 1:
+            return
+        security_id = str(struct.unpack_from("<I", packet, 4)[0])
+        if security_id not in self.security_ids:
+            return
+        price, quantity, traded_at, _, cumulative = struct.unpack_from("<fHIfI", packet, 8)
+        bid, ask = struct.unpack_from("<ff", packet, 74)
+        if traded_at > received + 1 or not math.isfinite(price) or price <= 0:
+            return
+        with self.lock:
+            prior = self.previous.get(security_id)
+            if prior and (traded_at < prior[0] or cumulative < prior[1]):
+                return
+            self.previous[security_id] = (traded_at, cumulative, bid, ask, received)
+            if prior is None or cumulative == prior[1]:
+                return
+            delta = cumulative - prior[1]
+            old_bid, old_ask = prior[2:4]
+            side = "unclassified"
+            if (delta == quantity and 0 < old_bid < old_ask < math.inf
+                    and 0 <= received - prior[4] <= 5 and -1 <= received - traded_at <= 5):
+                if price >= old_ask - 0.00005:
+                    side = "estimated_buy"
+                elif price <= old_bid + 0.00005:
+                    side = "estimated_sell"
+            candle_start = traded_at // 300 * 300
+            candles = self.candles.setdefault(security_id, {})
+            candle = candles.setdefault(candle_start, Counter())
+            candle[side] += delta
+            for stamp in list(candles):
+                if stamp < candle_start - 3600:
+                    del candles[stamp]
+
+    def snapshot(self, security_id, candle_start, candle_volume):
+        with self.lock:
+            observed = self.candles.get(str(security_id), {}).get(candle_start, {}).copy()
+        buy = observed.get("estimated_buy", 0)
+        sell = observed.get("estimated_sell", 0)
+        classified = buy + sell
+        consistent = bool(candle_volume and sum(observed.values()) <= candle_volume)
+        return {
+            "candle_start_epoch": candle_start,
+            "estimated_buy": buy,
+            "estimated_sell": sell,
+            "estimated_delta": buy - sell,
+            "total_candle_volume": candle_volume,
+            "observed_unclassified": observed.get("unclassified", 0),
+            "unclassified_or_unobserved": candle_volume - classified if consistent else None,
+            "classified_fraction": round(classified / candle_volume, 4) if consistent else None,
+            "status": "ESTIMATED" if consistent and classified else
+                      "VOLUME_MISMATCH" if observed and not consistent else "UNAVAILABLE",
+        }
+
+    def run(self):
+        try:
+            from websockets.sync.client import connect
+        except ImportError:
+            self.logger.warning("[STOCK ORDER FLOW] WebSocket dependency unavailable")
+            return
+        url = "wss://api-feed.dhan.co?" + urlencode({
+            "version": 2, "token": self.token, "clientId": self.client_id, "authType": 2,
+        })
+        instruments = [{"ExchangeSegment": "NSE_EQ", "SecurityId": sid}
+                       for sid in sorted(self.security_ids)]
+        while not self.stop.is_set() and datetime.now(IST).time() < SCAN_END_TIME:
+            try:
+                with connect(url, open_timeout=5, close_timeout=1) as socket:
+                    with self.lock:
+                        self.previous.clear()
+                    for start in range(0, len(instruments), 100):
+                        batch = instruments[start:start + 100]
+                        socket.send(json.dumps({"RequestCode": 21, "InstrumentCount": len(batch),
+                                                "InstrumentList": batch}))
+                    self.logger.info("[STOCK ORDER FLOW] Subscribed to %d cash stocks", len(instruments))
+                    while not self.stop.is_set() and datetime.now(IST).time() < SCAN_END_TIME:
+                        try:
+                            packet = socket.recv(timeout=1)
+                        except TimeoutError:
+                            continue
+                        if isinstance(packet, bytes) and packet and packet[0] == 50:
+                            code = struct.unpack_from("<H", packet, 8)[0] if len(packet) >= 10 else None
+                            self.logger.warning("[STOCK ORDER FLOW] Dhan disconnected, code=%s", code)
+                            break
+                        self.ingest(packet, time.time())
+            except Exception as error:
+                # Exception details can include the credential-bearing WebSocket URL.
+                self.logger.warning("[STOCK ORDER FLOW] Feed unavailable (%s); retrying",
+                                    type(error).__name__)
+            self.stop.wait(5)
+
+
 class DhanStockOptionsClient:
+    def start_order_flow(self, universe):
+        self.order_flow = DhanCandleOrderFlow(self.client_id, self.access_token, universe, self.logger)
+        self.order_flow.start()
+
+    def stop_order_flow(self):
+        flow = getattr(self, "order_flow", None)
+        if flow is not None:
+            flow.close()
+
     def _history_issue(self, payload, start, end, kind, **details):
         event = {"security_id": str(payload["securityId"]), "instrument": payload["instrument"],
                  "side": payload.get("drvOptionType"), "from": start.isoformat(),
@@ -621,7 +751,8 @@ class DhanStockOptionsClient:
         self._pace_quote()
         try:
             # Full quotes include cumulative session volume; OHLC alone does not.
-            resp = self.session.post(f"{self.BASE_URL}/marketfeed/quote", json=payload, timeout=(3,5))
+            with market_quote_request_slot():
+                resp = self.session.post(f"{self.BASE_URL}/marketfeed/quote", json=payload, timeout=(3,5))
             if resp.status_code == 200:
                 data=resp.json().get("data", {})
                 received=time.time()
@@ -698,8 +829,9 @@ class DhanStockOptionsClient:
             return {}
         self._pace_quote()
         try:
-            response = self.session.post(f"{self.BASE_URL}/marketfeed/quote",
-                json={"NSE_FNO": [int(s) for s in security_ids]}, timeout=(3,5))
+            with market_quote_request_slot():
+                response = self.session.post(f"{self.BASE_URL}/marketfeed/quote",
+                    json={"NSE_FNO": [int(s) for s in security_ids]}, timeout=(3,5))
             if response.status_code == 200:
                 quotes = response.json().get("data", {}).get("NSE_FNO", {})
                 received = time.time()
@@ -802,7 +934,7 @@ def recheck_recent_stock_candidate(client,candidate,cfg,market_quotes,reasons):
                 'final_signal_age_seconds':time.time()-(candidate['signal_timestamp']+300)}}
 
 
-def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day_change_pct, cfg, reasons=None, market_quotes=None):
+def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day_change_pct, cfg, reasons=None, market_quotes=None, *, membership_only=False):
     def reject(reason):
         if reasons is not None:
             reasons.append(reason)
@@ -820,17 +952,36 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
         return reject('Scanner membership: '+membership['reason'])
     client.logger.info('[STOCK SCANNER %s] %s | %s','MATCH',
                        stock_info['symbol'],json.dumps(membership))
+    order_flow = getattr(client, "order_flow", None)
+    flow = None
+    if isinstance(order_flow, DhanCandleOrderFlow):
+        latest_closed = int(time.time()) // 300 * 300 - 300
+        timestamps = candles["timestamp"]
+        index = bisect_left(timestamps, latest_closed)
+        if index < len(timestamps) and timestamps[index] == latest_closed:
+            security_id = str(stock_info["eq_security_id"])
+            flow = order_flow.snapshot(security_id, latest_closed, int(candles["volume"][index]))
+            if order_flow.reported.get(security_id) != flow:
+                client.logger.info("[STOCK ORDER FLOW CANDLE] %s | %s", stock_info["symbol"], json.dumps(flow))
+                order_flow.reported[security_id] = flow
+    if membership_only:
+        return membership
     sig = evaluate_stock_setup(candles, time.time(), cfg.min_day_change_pct, cfg.ema_period,
                                enable_opening_trend=cfg.enable_opening_trend,reasons=reasons,
                                confirm_window_sec=cfg.confirm_window_sec,
                                previous_close=membership['previous_close'],
-                               require_breakout=cfg.require_confirmed_breakout,previous_session=daily_reference)
+                               require_breakout=cfg.require_confirmed_breakout,previous_session=daily_reference,
+                               **({"order_flow": flow} if flow is not None else {}))
     if not sig:
         if reasons:return None
         return reject("No fresh confirmed momentum setup (EMA/VWAP/volume/body/proximity)")
     if sig['opt_type']!=membership['opt_type']:
         return reject('Trade confirmation conflicts with scanner direction')
     sig['scanner_membership']=membership
+    if flow and flow['candle_start_epoch'] == sig['signal_timestamp']:
+        sig['estimated_order_flow'] = flow
+        if order_flow_direction(flow) == (1 if sig["opt_type"] == "CE" else -1):
+            sig["order_flow_min_net_rr"] = 2.0
     spot_ltp = float(current.get("last_price", 0) or 0)
     if spot_ltp <= 0:
         return reject("Current underlying quote unavailable")
@@ -981,6 +1132,8 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         spread_limit = cfg.max_spread_pct + (1.0 if strong_mover else 0.0)
         if spread > spread_limit:
             return reject(f"Spread {spread:.2f}% above {spread_limit:.2f}%")
+        flow_rr = sig.get("order_flow_min_net_rr")
+        plan_options = {"min_net_rr": flow_rr} if flow_rr is not None else {}
         if cfg.extend_rupee_target:
             # Feed the same option-move estimate into sizing. A small first lot
             # must not veto a larger affordable lot count that fits both the
@@ -991,9 +1144,9 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
             premium_move=abs(delta)*move+0.5*gamma*move*move-decay
             # Strong movers use the explicit 55% scenario screen below; the
             # cash target, full planned RR and cash-risk cap remain mandatory.
-            plan=cfg.plan(ask,qty,max_target_price=None if strong_mover else ask+premium_move)
+            plan=cfg.plan(ask,qty,max_target_price=None if strong_mover else ask+premium_move, **plan_options)
         else:
-            plan = cfg.plan(ask, qty)
+            plan = cfg.plan(ask, qty, **plan_options)
         if not plan:
             return reject(f"No lot count reaches Rs.{cfg.rupee_target:.0f} within risk/RR limits")
         qty = plan["qty"]
@@ -1048,7 +1201,8 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
             lot_size=int(sig['lot_size'])
             for lots in range(plan['lots']+1,min(3,cfg.max_lots)+1):
                 larger=cfg.plan(ask,lot_size,min_lots=lots,
-                    max_target_price=ask+premium_move if cfg.extend_rupee_target and not strong_mover else None)
+                    max_target_price=ask+premium_move if cfg.extend_rupee_target and not strong_mover else None,
+                    **plan_options)
                 if not larger or larger['lots']!=lots:continue
                 if not stock_entry_structure_check(sig,larger,ask,bid)['allowed']:continue
                 if ask-bid>0.25*(ask-max(larger['initial_sl'],larger['cash_loss_stop_price']))+1e-9:continue
@@ -1189,7 +1343,7 @@ def close_paper_position(ledger, pos, price, reason, now):
     # These fields are observations, not relaxed entry criteria or new signals.
     rec['entry_diagnostics']={k:pos[k] for k in (
         'signal_timestamp','conf_close','conf_high','conf_low','atr_5m','day_change_pct','scanner_membership','entry_price_validation','entry_structure_check',
-        'cash_price_pressure','volume_confirmation','volume_context','breakout_continuation',
+        'cash_price_pressure','estimated_order_flow','order_flow_min_net_rr','volume_confirmation','volume_context','breakout_continuation',
         'ema10_15m','ema10_15m_slope','higher_timeframe_aligned',
         'vwap','bid','opt_ltp','spread_pct','quoted_spread_points',
         'spread_fraction_of_initial_risk','bid_room_to_initial_stop',
@@ -1375,7 +1529,10 @@ def paper_exit(pos, quote, now, cfg, urgent_only=False):
     pos["peak_bid"] = max(pos.get("peak_bid", bid), bid)
     assessment=pos.get('runner_assessment') or {}
     runner_hold=bool(assessment.get('hold') and 0<=now.timestamp()-assessment.get('assessed_epoch',now.timestamp())<=8)
-    managing_runner=runner_hold or bool(pos.get('partial_booked'))
+    exit_flow = pos.get("exit_order_flow") or {}
+    latest_closed = int(stamp) // 300 * 300 - 300
+    opposing_flow = order_flow_direction(exit_flow, latest_closed) == (-1 if pos["opt_type"] == "CE" else 1) if exit_flow else False
+    managing_runner=(runner_hold or bool(pos.get('partial_booked'))) and not opposing_flow
     jump = pos["trail_jump"]
     price = math.floor(max(0.05, executable * (1 - cfg.slippage_pct/100))*20 + 1e-9)/20
     net = stock_position_value(pos,price)['net']
@@ -1400,6 +1557,8 @@ def paper_exit(pos, quote, now, cfg, urgent_only=False):
         reason = "TRAIL_STOP" if pos["current_sl"] > pos["initial_sl"] else "PREMIUM_STOP"
     elif urgent_only:
         reason='EOD_SQUAREOFF' if now.time().replace(tzinfo=None)>=SESSION_END_TIME else None
+    elif opposing_flow and net > 0 and (base_target_reached or pos.get('base_target_locked')):
+        reason='ORDER_FLOW_PROFIT_EXIT'
     elif base_target_reached:
         reason='RUPEE_TARGET'
     elif (pos.get('breakout_failure') or {}).get('failed') and 0<=stamp-pos['breakout_failure'].get('assessed_epoch',0)<=90:
@@ -1423,7 +1582,7 @@ def paper_exit(pos, quote, now, cfg, urgent_only=False):
             'cash_loss_limit':cfg.rupee_max_risk,'cash_limit_overrun':round(max(0,-net-cfg.rupee_max_risk),2),
             'current_stop':pos['current_sl'],'peak_bid':pos['peak_bid'],
             'peak_executable_vwap':pos.get('peak_executable_vwap'),
-            'breakout_failure':pos.get('breakout_failure'),'monitor':monitor}
+            'breakout_failure':pos.get('breakout_failure'),'estimated_order_flow':exit_flow or None,'monitor':monitor}
     return (price, reason) if reason else None
 
 
@@ -1521,6 +1680,7 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                 now = datetime.now(IST)
                 for pos in positions:
                     update_position_quote(pos,quotes.get(str(pos['opt_security_id']),{}),now.timestamp())
+                    if telegram:telegram.position(pos, position_key=pos["slot"])
                 for pos in positions[:]:
                     urgent_quote=quotes.get(str(pos["opt_security_id"]),{})
                     try:urgent_bid=float(urgent_quote['depth']['buy'][0]['price'])
@@ -1531,7 +1691,7 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                         gate.mark_closed(today,rec,pos["slot"])
                         positions.remove(pos)
                         logger.info("[PAPER OPTSTK EXIT] %s | %s | net Rs.%+.2f",pos["contract"],urgent[1],rec["net_pnl"])
-                        if telegram:telegram.exited(rec)
+                        if telegram:telegram.exited({**pos, **rec}, position_key=pos["slot"], ledger_trades=ledger["trades"])
                 for pos in positions[:]:
                     if (pos.get('breakout_confirmation') and pos.get('eq_security_id')
                             and time.time()-pos.get('breakout_check_epoch',0)>=30):
@@ -1544,6 +1704,22 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                     try:
                         bid=float(quote['depth']['buy'][0]['price'])
                         net=stock_position_value(pos,bid)['net']
+                        flow = getattr(client, "order_flow", None)
+                        flow_now = time.time()
+                        closed_start = int(flow_now) // 300 * 300 - 300
+                        if (isinstance(flow, DhanCandleOrderFlow) and pos.get("eq_security_id")
+                                and (net >= pos.get("net_profit_target", cfg.rupee_target) or pos.get("base_target_locked"))
+                                and closed_start + 300 > pos["entry_epoch"]
+                                and closed_start != pos.get("exit_flow_checked_candle")):
+                            pos["exit_flow_checked_candle"] = closed_start
+                            bar = client.fetch_intraday_candles(
+                                pos["eq_security_id"], interval="5",
+                                from_date=datetime.fromtimestamp(closed_start, IST),
+                                to_date=datetime.fromtimestamp(closed_start + 300, IST),
+                            )
+                            if bar and closed_start in bar["timestamp"]:
+                                index = bar["timestamp"].index(closed_start)
+                                pos["exit_order_flow"] = flow.snapshot(pos["eq_security_id"], closed_start, int(bar["volume"][index]))
                         if net>=pos.get('net_profit_target',cfg.rupee_target):
                             # Refresh held-contract Greeks/OI only when a runner is relevant.
                             context=runner_chains.get(str(pos['opt_security_id'])) or {}
@@ -1561,11 +1737,15 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                     except (KeyError,TypeError,ValueError,IndexError):
                         pos['runner_assessment']={'hold':False,'reason':'Runner quote malformed'}
                     now=datetime.now(IST)
-                    partial=book_stock_partial(pos,quote,now,cfg,gate,today)
+                    latest_closed = int(now.timestamp()) // 300 * 300 - 300
+                    adverse = order_flow_direction(pos.get("exit_order_flow"), latest_closed)
+                    partial = None
+                    if not adverse or adverse == (1 if pos["opt_type"] == "CE" else -1):
+                        partial=book_stock_partial(pos,quote,now,cfg,gate,today)
                     if partial:
                         logger.info('[PAPER OPTSTK PARTIAL] %s | %d units @ %.2f | booked net Rs.%+.2f',
                             pos['contract'],partial['qty'],partial['price'],partial['booked_net'])
-                        if telegram:telegram.partial(pos,partial)
+                        if telegram:telegram.partial(pos, partial, position_key=pos["slot"])
                     decision = paper_exit(pos, quotes.get(str(pos["opt_security_id"]), {}), now, cfg)
                     if decision:
                         rec = close_paper_position(ledger, pos, *decision, now)
@@ -1573,7 +1753,7 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                         positions.remove(pos)
                         logger.info("[PAPER OPTSTK EXIT] %s | %s | net Rs.%+.2f", pos["contract"], decision[1], rec["net_pnl"])
                         if telegram:
-                            telegram.exited(rec)
+                            telegram.exited({**pos, **rec}, position_key=pos["slot"], ledger_trades=ledger["trades"])
                     else:
                         state = (pos["current_sl"], pos["peak_bid"])
                         quote_due=(pos.get('quote_received_epoch',0)-pos.get('persisted_quote_epoch',0)>=30)
@@ -1581,11 +1761,13 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                             pos["persisted_state"] = state
                             pos['persisted_quote_epoch']=pos.get('quote_received_epoch',0)
                             gate.update_position(today, pos["slot"], pos)
-                        if telegram:telegram.position(pos)
+                        if telegram:telegram.position(pos, position_key=pos["slot"])
             if SESSION_START_TIME <= now.time().replace(tzinfo=None) < SESSION_END_TIME:
                 # Clear a failed refresh instead of reusing an older scan quote.
                 if not opening_response_received:logger.info('[OPENING DATA REQUEST] STOCKS | %s',datetime.now(IST).isoformat(timespec='milliseconds'))
-                market_quotes = client.fetch_batch_ohlc(list(universe)).get("NSE_EQ", {})
+                security_ids = (list(universe) if now.time().replace(tzinfo=None) < SCAN_END_TIME
+                                else list({str(p["eq_security_id"]) for p in positions if p.get("eq_security_id")}))
+                market_quotes = client.fetch_batch_ohlc(security_ids).get("NSE_EQ", {}) if security_ids else {}
                 if market_quotes and not opening_response_received:
                     opening_response_received=True
                     logger.info('[OPENING DATA RESPONSE] STOCKS | %s',datetime.now(IST).isoformat(timespec='milliseconds'))
@@ -1600,35 +1782,64 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
             servicing = False
 
     client.before_market_request = service_market_data
+    last_scan_only_reason = None
     try:
+        if not scan_once:
+            client.start_order_flow(universe)
         while True:
             now = datetime.now(IST)
-            if now.strftime("%Y-%m-%d") != today or now.weekday() >= 5 or (now.time().replace(tzinfo=None) >= SESSION_END_TIME and not positions):
+            now_time = now.time().replace(tzinfo=None)
+            if now.strftime("%Y-%m-%d") != today or now.weekday() >= 5:
                 return
-            if not positions and now.time().replace(tzinfo=None)<SESSION_START_TIME:
+            if not positions and now_time < SESSION_START_TIME:
                 if scan_once:return
                 time.sleep(session_open_wait_seconds(now,SESSION_START_TIME))
                 continue
+            if now_time >= SCAN_END_TIME and not positions:
+                return
             service_market_data()
-            outcomes=[] if scan_once else executed_stock_outcomes(ledger,gate)
-            completed = [t for t in outcomes if str(t.get("timestamp", "")).startswith(today)]
-            risk_reason=None if scan_once else stock_daily_risk_reason(outcomes,positions,cfg,today)
-            if risk_reason:
-                logger.warning("[STOCK RISK] %s",risk_reason)
-                if not positions:return
-                time.sleep(cfg.poll_interval_sec)
-                continue
-            consumed = 0 if scan_once else max(gate.count_entries(today), len(completed)+len(positions))
-            if consumed >= cfg.max_daily_trades or len(positions) >= cfg.max_concurrent:
+            now_time = datetime.now(IST).time().replace(tzinfo=None)
+            if now_time >= SCAN_END_TIME:
                 if not positions:
                     return
                 time.sleep(max(0.05, next_refresh-time.monotonic()))
                 continue
-            if not ENTRY_START_TIME <= now.time().replace(tzinfo=None) < SESSION_END_TIME:
-                if scan_once or (now.hour >= 14 and not positions):
-                    return
+            if now_time < ENTRY_START_TIME:
+                if scan_once:return
                 time.sleep(cfg.poll_interval_sec)
                 continue
+            outcomes=[] if scan_once else executed_stock_outcomes(ledger,gate)
+            completed = [t for t in outcomes if str(t.get("timestamp", "")).startswith(today)]
+            risk_reason=None if scan_once else stock_daily_risk_reason(outcomes,positions,cfg,today)
+            consumed = 0 if scan_once else max(gate.count_entries(today), len(completed)+len(positions))
+            scan_only_reason = risk_reason
+            if consumed >= cfg.max_daily_trades:
+                scan_only_reason = "Daily stock entry cap reached"
+            elif len(positions) >= cfg.max_concurrent:
+                scan_only_reason = scan_only_reason or "All stock position slots occupied"
+            if scan_only_reason:
+                if scan_only_reason != last_scan_only_reason:
+                    logger.info("[STOCK SCAN ONLY] %s | Scanning through 13:30 IST", scan_only_reason)
+                last_scan_only_reason = scan_only_reason
+                for change, sec_id, ltp in shortlist_movers(market_quotes, cfg):
+                    service_market_data()
+                    scan_now = datetime.now(IST)
+                    if scan_now.strftime("%Y-%m-%d") != today or scan_now.time().replace(tzinfo=None) >= SCAN_END_TIME:
+                        break
+                    stock = universe.get(sec_id)
+                    if not stock:
+                        continue
+                    reasons = []
+                    membership = verify_live_scanx_and_resolve_stock_option(
+                        client, stock, ltp, change, cfg, reasons=reasons,
+                        market_quotes=market_quotes, membership_only=True,
+                    )
+                    if not membership:
+                        logger.info("[OPTSTK REJECT] %s | %s", stock["symbol"],
+                                    reasons[0] if reasons else "Scanner membership unavailable")
+                time.sleep(max(0.05, next_refresh-time.monotonic()))
+                continue
+            last_scan_only_reason = None
             wallet = cfg.initial_capital if scan_once else ledger["virtual_balance_net"]
             wallet -= sum(p["entry_price"]*p["qty"] + p["estimated_costs"] for p in positions)
             shortlist = shortlist_movers(market_quotes, cfg)
@@ -1655,7 +1866,7 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                     if pool and time.monotonic()-pool_started>=8:
                         yield from ranked_pool()
                         pool_started=None
-                    if datetime.now(IST).strftime("%Y-%m-%d") != today or datetime.now(IST).time().replace(tzinfo=None) >= SESSION_END_TIME:
+                    if datetime.now(IST).strftime("%Y-%m-%d") != today or datetime.now(IST).time().replace(tzinfo=None) >= SCAN_END_TIME:
                         break
                     if sec_id not in universe or universe[sec_id]["symbol"] in used_symbols:
                         continue
@@ -1734,7 +1945,7 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                 if best:
                     best.pop("alternate_contracts", None)
                 now = datetime.now(IST)
-                if not best or now.time().replace(tzinfo=None) >= SESSION_END_TIME:
+                if not best or now.time().replace(tzinfo=None) >= SCAN_END_TIME:
                     continue
                 refreshed=rank_candidates([best],executed_stock_outcomes(ledger,gate),now.timestamp())
                 if not refreshed:
@@ -1776,14 +1987,14 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                     positions.append(pos)
                     logger.info("[PAPER OPTSTK ENTRY] %s | %d lots @ %.2f", pos["contract"], pos["lots"], pos["entry_price"])
                     if telegram:
-                        telegram.position(pos, entry=True)
+                        telegram.position(pos, entry=True, position_key=pos["slot"])
             logger.info("Shortlist %d | confirmed %d | qualified %d | entered %d",
                         len(shortlist), len(signals), len(candidates), entered)
-            if live_mode and gate.count_entries(today):
-                return
             time.sleep(max(0.05, next_refresh-time.monotonic()))
     finally:
         client.before_market_request = None
+        if not scan_once:
+            client.stop_order_flow()
         if telegram:
             telegram.close()
 
@@ -1887,7 +2098,7 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current
             if day != last_day:
                 prev_close, last_day = last_close, day
             last_close = float(candles["close"][i])
-            if prev_close is None or not ENTRY_START_TIME <= dt.time().replace(tzinfo=None) < SESSION_END_TIME:
+            if prev_close is None or not ENTRY_START_TIME <= dt.time().replace(tzinfo=None) < SCAN_END_TIME:
                 continue
             snapshots.setdefault(ts+300, {})[sec] = {"last_price": last_close, "ohlc": {"close": prev_close}}
             # Live scans shortlist by day move before evaluating candle history.
@@ -1929,7 +2140,10 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current
     used_symbols = {}
     unresolved_days=set()
     for ts in sorted(snapshots):
-        day = datetime.fromtimestamp(ts, IST).strftime("%Y-%m-%d")
+        entry_time = datetime.fromtimestamp(ts, IST)
+        if entry_time.time() >= SCAN_END_TIME:
+            continue
+        day = entry_time.strftime("%Y-%m-%d")
         active_until = [end_ts for end_ts in active_until if end_ts > ts]
         if used_days.get(day, 0) >= cfg.max_daily_trades or len(active_until) >= cfg.max_concurrent:
             continue

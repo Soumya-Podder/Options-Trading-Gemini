@@ -11,6 +11,7 @@ import threading
 import time
 from datetime import datetime, timezone, timedelta
 from html.parser import HTMLParser
+from pathlib import Path
 
 import requests
 
@@ -340,90 +341,200 @@ class TelegramNotifier:
             logger.info('Telegram alerts disabled: set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.')
 
     @staticmethod
-    def _bold_company(message, company):
-        escaped=html.escape(str(message))
-        name=html.escape(str(company))
-        return escaped.replace(name,f"<b>{name}</b>",1) if name else escaped
+    def _price(value):
+        try:
+            value = float(value)
+            return f"{value:.2f}" if math.isfinite(value) and value > 0 else "-"
+        except (TypeError, ValueError, OverflowError):
+            return "-"
 
-    def _details(self, p):
-        def valid(value):
-            try:return math.isfinite(float(value)) and float(value)>0
-            except (TypeError,ValueError,OverflowError):return False
-        ltp=p.get('current_ltp');bid=p.get('current_bid');ask=p.get('current_ask')
-        ltp_text=f"Rs.{float(ltp):.2f}" if valid(ltp) else "unavailable"
-        quotes=(f"\nBid: Rs.{float(bid):.2f}" if valid(bid) else "\nBid: unavailable")
-        quotes+=(f"\nAsk: Rs.{float(ask):.2f}" if valid(ask) else "\nAsk: unavailable")
-        valuation=bid if valid(bid) else ltp
-        label='Gross P&L'
-        valuation_basis='Bid' if valid(bid) else 'LTP'
-        pnl=round((float(valuation)-p['entry_price'])*p['qty']+p.get('partial_gross',0),2) if valid(valuation) else None
-        pnl_text=(f"{chr(0x1F7E2) if pnl>0 else chr(0x1F534)} Rs.{pnl:+,.2f}" if pnl is not None else 'unavailable')
-        expiry=f"\nExpiry: {p['expiry']}" if p.get('expiry') else ''
-        source=((p.get('market_structure') or {}).get('telegram_call') or {}).get('source_url')
-        source_name=((p.get('market_structure') or {}).get('telegram_call') or {}).get('source','Tradewithsac')
-        source_text=f'\nSource: Telegram {source_name}\nAlert: {source}\nExit plan: Channel target; fixed premium SL' if source else ''
-        partial_text=(f"\nOriginal quantity: {p['original_qty']}\nBooked quantity: {p['original_qty']-p['qty']}"
-                      f"\nBooked net: {chr(0x1F7E2) if p.get('partial_net',0)>0 else chr(0x1F534)} Rs.{p.get('partial_net',0):+,.2f}"
-                      if p.get('partial_booked') else '')
-        cost_note=('Charges: Excluded from gross P&L\nBooked fills: Modeled slippage applied'
-                   if p.get('partial_booked') else 'Charges/slippage: Excluded')
-        stamp=p.get('quote_received_epoch')
-        age=f"\nQuote age: {max(0,time.time()-float(stamp)):.0f}s" if stamp is not None else ''
-        stale='\nStatus: [STALE]' if stamp is not None and time.time()-float(stamp)>30 else ''
-        message = (
-            f"{p['index']}\nStrike: {p['strike']:g}\nOption: {p['option_type']}\nSide: BUY{expiry}{source_text}\n"
-            f"Lots: {p['lots']}\nQuantity: {p['qty']}{partial_text}\n\n"
-            f"Entry: Rs.{p['entry_price']:.2f}\nLTP: {ltp_text}{quotes}\n"
-            f"Stop loss: Rs.{p['current_sl']:.2f}\nPeak: Rs.{p.get('highest_ltp',p.get('peak_bid',p['entry_price'])):.2f}\n\n"
-            f"{label}: {pnl_text}\nValuation: {valuation_basis}\n{cost_note}\n\n"
-            f"Entry time (engine): {p['entry_ts']}\n"
-            f"Price observed: {p['_observed_at']}{age}{stale}"
+    def _trade_table(self, positions, session_trades=None):
+        headers, columns, gross_values = [], [], []
+        now = time.time()
+        for number, trade in enumerate(positions, 1):
+            name = html.escape(str(trade.get("index") or trade.get("symbol") or "Trade"))
+            contract = trade.get("contract") or f'{trade.get("strike", "")} {trade.get("option_type", "")}'
+            if contract.startswith(f"{trade.get('symbol') or trade.get('index')}_"):
+                contract = contract.split("_", 1)[1]
+            entry, exit_price = trade.get("entry_price"), trade.get("exit_price")
+            fills = trade.get("exit_fills") or []
+            partial = trade.get("_partial_fill") or (fills[-1] if fills else {})
+            closed = trade.get("exit_timestamp") is not None
+            bid = trade.get("current_bid")
+            stamp = trade.get("quote_received_epoch")
+            age = now - float(stamp) if self._price(stamp) != "-" else math.inf
+            fresh_bid = self._price(bid) != "-" and 0 <= age <= 30
+            gross = trade.get("gross_pnl") if closed else (
+                (float(bid) - float(entry)) * trade["qty"] + trade.get("partial_gross", 0.0)
+                if fresh_bid else None
+            )
+            gross_values.append(gross)
+            call = (trade.get("market_structure") or {}).get("telegram_call") or {}
+            expiry = f" · {trade['expiry']}" if trade.get("expiry") else ""
+            source = f" · {call['source']}" if call.get("source") else ""
+            icon = " 🟢" if gross is not None and gross > 0 else " 🔴" if gross is not None and gross < 0 else ""
+            headers.append(f"{number}. <b>{name}</b> {html.escape(str(contract) + expiry + source)}{icon}")
+            targets = sorted(float(t) for t in call.get("targets", [])
+                             if self._price(t) != "-" and self._price(entry) != "-" and float(t) > float(entry))
+            target = trade.get("rupee_target_price")
+            if call and targets:
+                target = (targets[1] if len(targets) > 1 else None) if trade.get("target_one_done") else targets[0]
+            elif not call and trade.get("index") == "NIFTY" and trade.get("target_points"):
+                target = float(entry) + (12 if trade.get("target_one_qty") and not trade.get("target_one_done") else trade["target_points"])
+            elif not target:
+                target = (trade.get("entry_diagnostics") or {}).get("rupee_target_price")
+            cash_stop = trade.get("cash_loss_stop_price")
+            stop = trade.get("current_sl") or (trade.get("entry_diagnostics") or {}).get("initial_sl")
+            if self._price(cash_stop) != "-":
+                stop = max(float(cash_stop), float(stop or 0))
+            net = trade.get("net_pnl") if closed else trade.get("partial_net", partial.get("booked_net"))
+            columns.append([
+                "Closed" if closed else "Open" if fresh_bid else "Open*",
+                str(trade.get("lots", "-")), str(trade.get("qty", "-")),
+                self._price(entry), self._price(exit_price if closed else partial.get("price")),
+                self._price(stop), self._price(target),
+                self._price(trade.get("current_ltp")) if not closed else "-",
+                self._price(bid) if not closed else "-",
+                self._price(trade.get("current_ask")) if not closed else "-",
+                self._price(trade.get("highest_ltp", trade.get("peak_bid"))) if not closed else "-",
+                f"{gross:+,.2f}" if gross is not None else "-",
+                f"{net:+,.2f}" if net is not None else "-",
+            ])
+        labels = ("Status", "Lots", "Quantity", "Entry", "Exit/part", "SL", "Target", "LTP", "Bid", "Ask", "Peak", "Gross P&L", "Booked net")
+        widths = [max(9, *(len(value) for value in column)) for column in columns]
+        lines = ["Trade      " + " ".join(f"{i:>{w}}" for i, w in enumerate(widths, 1))]
+        lines.extend(
+            f"{label:<10} " + " ".join(f"{value:>{width}}" for value, width in zip(values, widths))
+            for label, values in zip(labels, zip(*columns))
         )
-        return self._bold_company(message,p['index'])
+        available = [value for value in gross_values if value is not None]
+        total = sum(available)
+        icon = chr(0x1F7E2) if total > 0 else chr(0x1F534) if total < 0 else ""
+        if available:
+            qualifier = " (priced trades only)" if len(available) < len(positions) else ""
+            overall = f"{icon} <b>Overall gross P&amp;L{qualifier}</b> Rs.{total:+,.2f}".lstrip()
+        else:
+            overall = "<b>Overall gross P&amp;L</b> unavailable"
+        if session_trades is not None:
+            gross_total = sum(float(t["gross_pnl"]) for t in session_trades)
+            net_total = sum(float(t["net_pnl"]) for t in session_trades)
+            lines.extend((
+                "",
+                f"Session closed {len(session_trades):>9}",
+                f"Session gross  {gross_total:>+9,.2f}",
+                f"Session net    {net_total:>+9,.2f}",
+            ))
+            icon = "🟢" if net_total > 0 else "🔴" if net_total < 0 else "⚪"
+            overall = f"{icon} Session net is realised, after estimated charges."
+        note = "\n* Bid unavailable or older than 30s." if len(available) < len(positions) else ""
+        return "\n".join(headers) + "\n<pre>" + html.escape("\n".join(lines)) + "</pre>\n" + overall + note
 
     def partial(self, position, fill, position_key=None):
-        if not self.enabled:return
-        self.position(position, position_key=position_key)
-        self._events.put(self._bold_company(
-            f"[{self.mode}] PARTIAL PROFIT BOOKED\n{position['index']}\n"
-            f"Quantity sold: {fill['qty']}\nExit: Rs.{fill['price']:.2f}\n"
-            f"Booked net: {chr(0x1F7E2) if fill['booked_net']>0 else chr(0x1F534)} Rs.{fill['booked_net']:+,.2f}\n"
-            f"Remaining lots: {position['lots']}\nRemaining quantity: {position['qty']}\n"
-            f"Time: {ist_now()}",position['index']))
+        if not self.enabled:
+            return
+        self.position(dict(position, _partial_fill=fill), position_key=position_key)
+        with self._lock:
+            table = self._trade_table(list(self._positions.values()))
+            self._events.put(
+                f"[{self.mode}] PARTIAL PROFIT BOOKED\n{table}\n"
+                f"Quantity sold: {fill['qty']}\nTime: {ist_now()}"
+            )
 
     def position(self, position, entry=False, position_key=None):
         if not self.enabled:
             return
-        stamp=position.get('quote_received_epoch')
-        observed=(datetime.fromtimestamp(float(stamp),timezone(timedelta(hours=5,minutes=30))).strftime('%Y-%m-%d %H:%M:%S IST')
-                  if stamp is not None else ist_now())
-        snapshot = dict(position, _observed_at=observed)
         with self._lock:
+            previous = self._positions.get(position_key, {})
+            snapshot = dict(position)
+            if "_partial_fill" in previous and "_partial_fill" not in snapshot:
+                snapshot["_partial_fill"] = previous["_partial_fill"]
             if entry or position_key not in self._positions:
                 self._next_update[position_key] = time.monotonic() + self.INTERVAL
             self._positions[position_key] = snapshot
             if entry:
-                self._events.put(f'[{self.mode}] TRADE ENTRY\n{self._details(snapshot)}\nEngine event; broker fill not independently verified.')
+                table = self._trade_table(list(self._positions.values()))
+                self._events.put(f"[{self.mode}] TRADE ENTRY\n{table}\nEntry time: {position['entry_ts']}")
 
-    def exited(self, trade, position_key=None):
+    @staticmethod
+    def completed_paper_trades(day, directory=None):
+        directory = Path(directory) if directory is not None else Path(__file__).resolve().parent
+        trades, missing = [], []
+        for filename, segment in (
+            ("paper_trade_ledger.json", "Nifty/Sensex"),
+            ("stock_fno_paper_ledger.json", "Stock options"),
+        ):
+            try:
+                ledger = json.loads((directory / filename).read_text(encoding="utf-8-sig"))
+                if ledger.get("mode") != "PAPER" or not isinstance(ledger.get("trades"), list):
+                    raise ValueError("PAPER ledger unavailable")
+                trades.extend(t for t in ledger["trades"] if str(t.get("exit_timestamp", ""))[:10] == day)
+            except (OSError, ValueError, TypeError, AttributeError):
+                missing.append(segment)
+        return sorted(trades, key=lambda trade: trade["exit_timestamp"]), missing
+
+    @staticmethod
+    def completed_trade_table(trades, missing=()):
+        headings = []
+        rows = [f"{'#':>2} {'Entry':>7} {'Exit':>7} {'Gross':>10} {'Net':>10}"]
+        gross_total = net_total = 0.0
+        for number, trade in enumerate(trades, 1):
+            name = str(trade.get("index") or trade.get("symbol") or "Trade")
+            contract = str(trade.get("contract") or "").removeprefix(name + " ")
+            gross, net = float(trade["gross_pnl"]), float(trade["net_pnl"])
+            gross_total += gross
+            net_total += net
+            icon = "🟢" if net > 0 else "🔴" if net < 0 else "⚪"
+            headings.append(
+                f"{number}. <b>{html.escape(name)}</b> {html.escape(contract)} "
+                f"{icon} · {trade['exit_timestamp'][11:19]}"
+            )
+            rows.append(f"{number:>2} {float(trade['entry_price']):>7.2f} {float(trade['exit_price']):>7.2f} {gross:>+10,.2f} {net:>+10,.2f}")
+        rows.append(f"{'Total':<18} {gross_total:>+10,.2f} {net_total:>+10,.2f}")
+        coverage = f"\nIncomplete ledger data for {html.escape(', '.join(missing))}." if missing else ""
+        return ("\n".join(headings) + "\n<pre>" + html.escape("\n".join(rows)) + "</pre>"
+                + f"\n{len(trades)} closed · INR · Net after estimated charges" + coverage)
+
+    def exited(self, trade, position_key=None, ledger_trades=None):
         if not self.enabled:
             return
         channel_call = (trade.get('market_structure') or {}).get('telegram_call') or {}
-        source = f"Source: Telegram {channel_call['source']}\n" if channel_call.get('source') else ''
+        source = f"Source: Telegram {html.escape(channel_call['source'])}\n" if channel_call.get('source') else ''
         with self._lock:
-            self._positions.pop(position_key, None)
+            previous = self._positions.pop(position_key, {})
             self._next_update.pop(position_key, None)
-            self._events.put(self._bold_company(
-                f"[{self.mode}] TRADE EXIT\n{trade.get('index', trade.get('symbol', ''))}\nContract: {trade['contract']}\n"
-                f"{source}Lots: {trade['lots']}\nQuantity: {trade['qty']}\n\n"
-                f"Entry: Rs.{trade['entry_price']:.2f}\nExit: Rs.{trade['exit_price']:.2f}\n"
-                f"Gross P&L: {chr(0x1F7E2) if trade['gross_pnl']>0 else chr(0x1F534)} Rs.{trade['gross_pnl']:+,.2f}\n"
-                f"Net P&L: {chr(0x1F7E2) if trade['net_pnl']>0 else chr(0x1F534)} Rs.{trade['net_pnl']:+,.2f}\n"
-                f"Result: {trade.get('r_multiple', trade.get('r_mult', 0.0)):+.2f}R\nReason: {trade['exit_reason']}\n"
-                f"Exit time (engine): {trade['exit_timestamp']}\n"
-                'Engine event; broker fill not independently verified.',
-                trade.get('index',trade.get('symbol',''))
-            ))
+            closed = {**previous, **trade}
+            exit_day = trade["exit_timestamp"][:10]
+            session_trades = None if ledger_trades is None else [
+                record for record in ledger_trades
+                if str(record.get("exit_timestamp", ""))[:10] == exit_day
+            ]
+            if self.mode == "PAPER" and ledger_trades is not None:
+                combined, missing = self.completed_paper_trades(exit_day)
+                known = {(t.get("timestamp"), t["exit_timestamp"], t.get("contract")) for t in combined}
+                for record in (*session_trades, closed):
+                    key = (record.get("timestamp"), record["exit_timestamp"], record.get("contract"))
+                    if key not in known:
+                        combined.append(record)
+                        known.add(key)
+                combined.sort(key=lambda record: record["exit_timestamp"])
+                table = self.completed_trade_table(combined, missing)
+                if self._positions:
+                    table += "\nStill open: " + ", ".join(
+                        html.escape(str(p.get("symbol") or p.get("index") or "Trade"))
+                        for p in self._positions.values()
+                    )
+                stop = self._price(closed.get("current_sl"))
+                target = self._price(closed.get("rupee_target_price"))
+                if target == "-" and closed.get("index") == "NIFTY" and closed.get("target_points"):
+                    target = self._price(closed["entry_price"] + closed["target_points"])
+                table += f"\nLatest exit SL: {stop} · Target: {target}"
+            else:
+                table = self._trade_table([closed, *self._positions.values()], session_trades)
+            self._events.put(
+                f"[{self.mode}] TRADE EXIT\n{table}\n{source}"
+                f"Result: {trade.get('r_multiple', trade.get('r_mult', 0.0)):+.2f}R\n"
+                f"Reason: {html.escape(trade['exit_reason'])}\nExit time: {trade['exit_timestamp']}"
+            )
 
     def _send(self, message):
         heading = message.partition('\n')[0]
@@ -460,11 +571,12 @@ class TelegramNotifier:
                 message = None
             if message is None and not self._closing.is_set():
                 with self._lock:
-                    if self._next_update:
-                        key = min(self._next_update, key=self._next_update.get)
-                        if time.monotonic() >= self._next_update[key]:
-                            message = f'[{self.mode}] OPEN TRADE UPDATE\n{self._details(self._positions[key])}\nUpdate: {ist_now()}'
-                            self._next_update[key] = time.monotonic() + self.INTERVAL
+                    now = time.monotonic()
+                    if self._next_update and now >= min(self._next_update.values()):
+                        table = self._trade_table(list(self._positions.values()))
+                        message = f'[{self.mode}] OPEN TRADE UPDATE\n{table}\nUpdate: {ist_now()}'
+                        for key in self._next_update:
+                            self._next_update[key] = now + self.INTERVAL
             if message:
                 self._send(message)
 

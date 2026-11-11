@@ -1,13 +1,350 @@
 {
   "mode": "PAPER",
   "initial_capital": 40000.0,
-  "virtual_balance_gross": 40000.0,
-  "virtual_balance_net": 40000.0,
-  "profit_without_charges": 0.0,
-  "net_profit_after_charges": 0.0,
-  "total_trades": 0,
-  "avg_winning_value_rs": 0.0,
+  "virtual_balance_gross": 41446.25,
+  "virtual_balance_net": 41317.25,
+  "profit_without_charges": 1446.25,
+  "net_profit_after_charges": 1317.25,
+  "total_trades": 2,
+  "avg_winning_value_rs": 723.12,
   "avg_losing_value_rs": 0.0,
   "win_to_loss_ratio": 0.0,
-  "trades": []
+  "trades": [
+    {
+      "timestamp": "2026-11-11 12:13:36",
+      "exit_timestamp": "2026-11-11 12:15:36",
+      "index": "NIFTY",
+      "contract": "25300_PE",
+      "lots": 1,
+      "qty": 65,
+      "spot_at_entry": 25339.05,
+      "oi_diff_lakhs": 45.84,
+      "entry_price": 199.75,
+      "exit_price": 204.7,
+      "gross_pnl": 321.75,
+      "net_pnl": 257.25,
+      "initial_risk_points": 7.8,
+      "r_multiple": 0.63,
+      "learning_r_multiple": 0.507396,
+      "learning_risk_rs": 507.0,
+      "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+      "state_vec": [
+        -0.9168,
+        -0.299,
+        0.7509,
+        -0.8,
+        0.6,
+        -1.5,
+        -1.35,
+        0.614,
+        -1.0,
+        0.4883
+      ],
+      "exit_reason": "ASYMMETRIC_TRAIL_PROFIT",
+      "rule_used": "VWAP_TREND_FLOW & regime=HIGH_IV_VEGA_MOMENTUM & q=LONG_BUILDUP -> BUY_PE",
+      "data_health": "LIVE_CLEAN",
+      "market_structure": {
+        "allowed": false,
+        "ready": true,
+        "reason": "No marked level with both closed-candle reaction and supportive same-strike OI",
+        "source": "INDEX_5M_OHLC",
+        "day_range_points": 160.54999999999927,
+        "min_body_fraction": 0.4,
+        "min_close_fraction": 0.6,
+        "confirm_window_sec": 600,
+        "confirmation_age_seconds": 216.03129386901855,
+        "levels": {
+          "previous_day_high": 25084.05,
+          "previous_day_low": 24838.75,
+          "day_high": 25424.35,
+          "day_low": 25263.8,
+          "opening_high": 25399.1,
+          "opening_low": 25263.8,
+          "range_high_before_confirmation": 25424.35,
+          "range_low_before_confirmation": 25263.8,
+          "range_high_before_breakout": 25424.35,
+          "range_low_before_breakout": 25263.8
+        },
+        "put_oi_wall": {
+          "strike": 25000.0,
+          "oi": 7984015.0,
+          "change_from_previous_close": 2664090.0
+        },
+        "call_oi_wall": {
+          "strike": 25500.0,
+          "oi": 9160255.0,
+          "change_from_previous_close": 3052985.0
+        },
+        "opening_trend": null,
+        "put_oi_buildup": {
+          "strike": 25300.0,
+          "oi": 5830305.0,
+          "change_from_previous_close": 5696405.0
+        },
+        "call_oi_buildup": {
+          "strike": 25400.0,
+          "oi": 8760310.0,
+          "change_from_previous_close": 6545890.0
+        },
+        "nearest_put_oi_level": {
+          "strike": 25300.0,
+          "oi": 5830305.0,
+          "change_from_previous_close": 5696405.0
+        },
+        "nearest_call_oi_level": {
+          "strike": 25350.0,
+          "oi": 4212780.0,
+          "change_from_previous_close": 3709420.0
+        },
+        "swing_levels": [
+          25327.95,
+          25331.9,
+          25359.05,
+          25374.85,
+          25394.25,
+          25396.95,
+          25397.8,
+          25424.35
+        ],
+        "confirmation_close": 25374.8,
+        "entry_levels": [
+          25394.25,
+          25370.45
+        ],
+        "confirmation_body_fraction": 0.6886792452832163,
+        "confirmation_close_strength": 0.7099056603774216,
+        "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V2",
+        "level_reference_age_seconds": 274.19,
+        "direction_checks": {
+          "BUY_CE": {
+            "allowed": false,
+            "reason": "Price has not held directional confirmation",
+            "trigger_level": null,
+            "setup": null,
+            "room_points": null,
+            "structure_rr": null,
+            "oi_confirmed_levels": []
+          },
+          "BUY_PE": {
+            "allowed": false,
+            "reason": "Current price has advanced beyond the confirmation entry zone",
+            "trigger_level": null,
+            "setup": null,
+            "room_points": null,
+            "structure_rr": null,
+            "oi_confirmed_levels": [
+              25000.0,
+              25300.0,
+              25394.25,
+              25396.95,
+              25397.8,
+              25399.1,
+              25400.0,
+              25424.35
+            ]
+          }
+        },
+        "theta_horizon_minutes": 35,
+        "max_hold_minutes": 35,
+        "modeled_holding_theta_points": 0.8248485333333333,
+        "adaptive_feedback": {
+          "basis": "CLOSED_PAPER_SETUP_WALK_FORWARD",
+          "setup_key": null,
+          "closed_trades": 0,
+          "independent_days": 0,
+          "quality_adjustment": 0.0,
+          "paused": false,
+          "exit_policy": "STANDARD",
+          "reason": "Insufficient independent closed outcomes"
+        },
+        "lot_sizing": {
+          "basis": "Strict 1-lot capital shield (requires >= +Rs.1,200 banked intraday profit to scale)",
+          "lots": 1,
+          "risk_budget_rs": 650.0,
+          "probability_estimated": false
+        },
+        "entry_quote": {
+          "received_epoch": 1794379416.0291293,
+          "decision_epoch": 1794379416.6826873,
+          "modeled_entry_price_basis": "EXECUTABLE_ASK_PLUS_0.1PCT_SLIPPAGE",
+          "last_price": 199.45,
+          "top_bid_price": 199.15,
+          "top_ask_price": 199.55,
+          "top_bid_quantity": 520,
+          "top_ask_quantity": 195
+        }
+      }
+    },
+    {
+      "timestamp": "2026-11-11 12:22:23",
+      "exit_timestamp": "2026-11-11 12:27:42",
+      "index": "NIFTY",
+      "contract": "25300_PE",
+      "lots": 1,
+      "qty": 65,
+      "spot_at_entry": 25334.05,
+      "oi_diff_lakhs": 51.1,
+      "entry_price": 205.05,
+      "exit_price": 222.35,
+      "gross_pnl": 1124.5,
+      "net_pnl": 1060.0,
+      "initial_risk_points": 7.8,
+      "r_multiple": 2.22,
+      "learning_r_multiple": 2.09073,
+      "learning_risk_rs": 507.0,
+      "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+      "state_vec": [
+        -1.022,
+        -0.3097,
+        -0.101,
+        -0.8,
+        0.6,
+        1.5,
+        -0.54,
+        0.514,
+        -1.0,
+        0.5615
+      ],
+      "exit_reason": "PROFIT_BOOKED_NO_RUNNER",
+      "rule_used": "VWAP_TREND_FLOW & regime=HIGH_IV_VEGA_MOMENTUM & q=LONG_BUILDUP -> BUY_PE",
+      "data_health": "LIVE_CLEAN",
+      "market_structure": {
+        "allowed": false,
+        "ready": true,
+        "reason": "No marked level with both closed-candle reaction and supportive same-strike OI",
+        "source": "INDEX_5M_OHLC",
+        "day_range_points": 160.54999999999927,
+        "min_body_fraction": 0.4,
+        "min_close_fraction": 0.6,
+        "confirm_window_sec": 600,
+        "confirmation_age_seconds": 143.3745095729828,
+        "levels": {
+          "previous_day_high": 25084.05,
+          "previous_day_low": 24838.75,
+          "day_high": 25424.35,
+          "day_low": 25263.8,
+          "opening_high": 25399.1,
+          "opening_low": 25263.8,
+          "range_high_before_confirmation": 25424.35,
+          "range_low_before_confirmation": 25263.8,
+          "range_high_before_breakout": 25424.35,
+          "range_low_before_breakout": 25263.8
+        },
+        "put_oi_wall": {
+          "strike": 25000.0,
+          "oi": 7414355.0,
+          "change_from_previous_close": 2094430.0
+        },
+        "call_oi_wall": {
+          "strike": 25500.0,
+          "oi": 9544925.0,
+          "change_from_previous_close": 3437655.0
+        },
+        "opening_trend": null,
+        "put_oi_buildup": {
+          "strike": 25300.0,
+          "oi": 5958615.0,
+          "change_from_previous_close": 5824715.0
+        },
+        "call_oi_buildup": {
+          "strike": 25400.0,
+          "oi": 8706815.0,
+          "change_from_previous_close": 6492395.0
+        },
+        "nearest_put_oi_level": {
+          "strike": 25300.0,
+          "oi": 5958615.0,
+          "change_from_previous_close": 5824715.0
+        },
+        "nearest_call_oi_level": {
+          "strike": 25350.0,
+          "oi": 4636905.0,
+          "change_from_previous_close": 4133545.0
+        },
+        "swing_levels": [
+          25327.95,
+          25331.9,
+          25359.05,
+          25374.85,
+          25394.25,
+          25396.95,
+          25397.8,
+          25424.35
+        ],
+        "confirmation_close": 25332.35,
+        "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V2",
+        "level_reference_age_seconds": 273.75,
+        "direction_checks": {
+          "BUY_CE": {
+            "allowed": false,
+            "reason": "Weak follow-through candle body or closing location",
+            "trigger_level": null,
+            "setup": null,
+            "room_points": null,
+            "structure_rr": null,
+            "oi_confirmed_levels": []
+          },
+          "BUY_PE": {
+            "allowed": false,
+            "reason": "Price has not held directional confirmation",
+            "trigger_level": null,
+            "setup": null,
+            "room_points": null,
+            "structure_rr": null,
+            "oi_confirmed_levels": [
+              25300.0,
+              25327.95,
+              25331.9,
+              25359.05,
+              25374.85,
+              25394.25,
+              25396.95,
+              25397.8,
+              25399.1,
+              25400.0,
+              25424.35
+            ]
+          }
+        },
+        "theta_horizon_minutes": 35,
+        "max_hold_minutes": 35,
+        "modeled_holding_theta_points": 0.8357925333333334,
+        "adaptive_feedback": {
+          "basis": "CLOSED_PAPER_SETUP_WALK_FORWARD",
+          "setup_key": null,
+          "closed_trades": 0,
+          "independent_days": 0,
+          "quality_adjustment": 0.0,
+          "paused": false,
+          "exit_policy": "STANDARD",
+          "reason": "Insufficient independent closed outcomes"
+        },
+        "lot_sizing": {
+          "basis": "Strict 1-lot capital shield (requires >= +Rs.1,200 banked intraday profit to scale)",
+          "lots": 1,
+          "risk_budget_rs": 650.0,
+          "probability_estimated": false
+        },
+        "entry_quote": {
+          "received_epoch": 1794379943.3084059,
+          "decision_epoch": 1794379943.381389,
+          "modeled_entry_price_basis": "EXECUTABLE_ASK_PLUS_0.1PCT_SLIPPAGE",
+          "last_price": 204.8,
+          "top_bid_price": 204.3,
+          "top_ask_price": 204.8,
+          "top_bid_quantity": 65,
+          "top_ask_quantity": 455
+        }
+      }
+    }
+  ],
+  "pending_channel_calls": [],
+  "daily_entry_counts": {
+    "2026-11-11": 2
+  },
+  "daily_profit_protection": {
+    "day": "2026-11-11",
+    "armed": true,
+    "net_floor": 1200.0
+  }
 }

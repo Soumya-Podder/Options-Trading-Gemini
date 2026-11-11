@@ -35,6 +35,7 @@ from contextlib import nullcontext
 from itertools import islice
 from stock_option_policy import (
     option_chain_request_slot,
+    market_quote_request_slot,
     single_bot_session,
     adaptive_setup_feedback,
     session_open_wait_seconds,
@@ -425,7 +426,12 @@ class DhanV2RestClient:
 
     def _request(self, method, endpoint, **kwargs):
         self._enforce_gap(endpoint)
-        shared = option_chain_request_slot() if endpoint.startswith("/optionchain") else nullcontext()
+        if endpoint.startswith("/optionchain"):
+            shared = option_chain_request_slot()
+        elif endpoint.startswith("/marketfeed/"):
+            shared = market_quote_request_slot()
+        else:
+            shared = nullcontext()
         with shared:
             response = self.session.request(method, self.BASE_URL + endpoint, timeout=kwargs.pop("timeout", 5), **kwargs)
         if endpoint.startswith("/optionchain"):
@@ -450,10 +456,6 @@ class DhanV2RestClient:
 
     def fetch_held_channel_quote(self, position):
         """Poll only held-contract depth; full-chain pacing cannot delay channel exits."""
-        elapsed = time.monotonic() - getattr(self, 'last_held_quote_request', 0)
-        if elapsed < 4:
-            time.sleep(4 - elapsed)
-        self.last_held_quote_request = time.monotonic()
         segment = INDICES_CONFIG[position['index']]['fno_segment']
         sid = str(position['security_id'])
         try:
@@ -2765,6 +2767,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
     last_channel_execution_block = {}
     opening_responses = set()
     last_scan_only_reason = None
+    prioritized_calls = set()
 
     while True:
         now = datetime.now()
@@ -2782,6 +2785,21 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
             jobs.extend((None, index) for index in selected_indices)
         position_key, idx_name = jobs[cycle % len(jobs)]
         cycle += 1
+        # Give fresh channel calls the next scan turn while still servicing held positions.
+        if position_key is None and channel_slot_open and now.time() < EOD_SQUAREOFF_TIME:
+            consumed = ledger.get("telegram_call_entries", [])
+            fresh_calls = [
+                call for index in selected_indices
+                for call in call_feed.candidates(index, now.timestamp(), consumed)
+                if call["key"] not in prioritized_calls
+            ]
+            if fresh_calls:
+                call = max(fresh_calls, key=lambda item: item.get("activation_epoch", item["posted_epoch"]))
+                idx_name = call["index"]
+                prioritized_calls.add(call["key"])
+                eligible_epoch = call.get("activation_epoch", call["posted_epoch"])
+                logger.info("[CHANNEL QUOTE PRIORITY] %s | %s | %.2fs since eligibility",
+                            call["source"], call["key"], max(0.0, now.timestamp() - eligible_epoch))
         active_pos = positions.get(position_key)
         cfg = INDICES_CONFIG[idx_name]
         held_channel = bool(not live_mode and active_pos and
@@ -3052,7 +3070,8 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         f"[{'LIVE' if live_mode else 'PAPER'} EXIT] {idx_name} {strike_k}_{active_pos['option_type']} "
                         f"({exit_reason}) | Exit @ Rs.{exit_price:.2f} | Gross PnL: Rs.{gross_pnl:+,.2f} ({r_mult:+.2f}R)"
                     )
-                    telegram.exited(ledger["trades"][-1], position_key=position_key)
+                    telegram.exited({**active_pos, **ledger["trades"][-1]}, position_key=position_key,
+                                    ledger_trades=ledger["trades"])
                     positions.pop(position_key)
                     active_pos = None
 

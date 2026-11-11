@@ -296,6 +296,19 @@ def confirmed_consolidation_breakout(today_bars, atr, bullish):
     return None
 
 
+def order_flow_direction(flow, candle_start=None):
+    """Use signed delta only when most of the completed candle was classified."""
+    if not flow or flow.get("status") != "ESTIMATED":
+        return 0
+    if candle_start is not None and flow.get("candle_start_epoch") != candle_start:
+        return 0
+    volume = flow["total_candle_volume"]
+    if volume <= 0 or flow["classified_fraction"] < 0.60:
+        return 0
+    delta = flow["estimated_delta"]
+    return 1 if delta >= 0.15 * volume else -1 if delta <= -0.15 * volume else 0
+
+
 def evaluate_stock_setup(
     candles: dict,
     as_of_epoch: float,
@@ -307,6 +320,7 @@ def evaluate_stock_setup(
     previous_close=None,
     require_breakout=False,
     previous_session=None,
+    order_flow=None,
 ) -> Optional[dict]:
     """Return a selective CE/PE setup, or None when any confirmation is absent.
 
@@ -444,6 +458,9 @@ def evaluate_stock_setup(
     body_ratio = abs(latest["close"] - latest["open"]) / candle_range
     close_strength = ((latest["close"] - latest["low"]) if bullish
                       else (latest["high"] - latest["close"])) / candle_range
+    flow_direction = order_flow_direction(order_flow, latest["timestamp"])
+    if flow_direction and flow_direction != (1 if bullish else -1):
+        return reject("Completed candle order flow opposes the setup")
     breakout_confirmation=None
     if require_breakout:
         if (bullish and ema_value<=previous_ema) or (bearish and ema_value>=previous_ema):
@@ -487,7 +504,10 @@ def evaluate_stock_setup(
         minimum_close=0.70 if direct and not retest and not prepared else (0.80 if early_confirmation else 0.75)
         if body_ratio<minimum_body or close_strength<minimum_close:
             return reject('Breakout confirmation body or closing strength insufficient')
-        if abs(latest['close']-ema_value)>3*atr_15m or candle_range>1.5*atr_5m:
+        # Give a volume-backed break limited room while keeping the level and
+        # EMA distance bounds and the live follow-through check.
+        range_limit = 1.8 if flow_direction else 1.5
+        if abs(latest['close']-ema_value)>3*atr_15m or candle_range>range_limit*atr_5m:
             return reject('Breakout candle is overextended')
         breakout_confirmation={'trigger_level':trigger,'previous_day_high':prior_high,'previous_day_low':prior_low,
             'opening_high':orb_high,'opening_low':orb_low,'buffer':buffer,

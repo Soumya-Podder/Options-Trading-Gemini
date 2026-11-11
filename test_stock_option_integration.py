@@ -14,6 +14,62 @@ import dhan_dynamic_fno_stock_bot as bot
 
 
 class IntegrationTests(unittest.TestCase):
+    def test_order_flow_counts_trade_volume_once_and_exposes_missing_coverage(self):
+        import struct
+
+        flow = bot.DhanCandleOrderFlow("test", "test", ["42"], logging.getLogger("test"))
+        stamp = 1_794_371_400
+
+        def packet(second, price, quantity, volume, bid=100, ask=101):
+            data = bytearray(162)
+            struct.pack_into("<BHBI", data, 0, 8, 162, 1, 42)
+            struct.pack_into("<fHIfI", data, 8, price, quantity, stamp + second, 100.0, volume)
+            struct.pack_into("<ff", data, 74, bid, ask)
+            return bytes(data)
+
+        flow.ingest(packet(0, 100, 10, 1000), stamp)
+        flow.ingest(packet(1, 101, 10, 1010), stamp + 1)
+        flow.ingest(packet(1, 101, 10, 1010), stamp + 1.2)
+        flow.ingest(packet(2, 100, 5, 1015), stamp + 2)
+        flow.ingest(packet(3, 101, 10, 1040), stamp + 3)
+        flow.ingest(packet(2, 101, 10, 1050), stamp + 3.1)
+        result = flow.snapshot("42", stamp, 60)
+        self.assertEqual(result["status"], "ESTIMATED")
+        self.assertEqual(result["estimated_buy"], 10)
+        self.assertEqual(result["estimated_sell"], 5)
+        self.assertEqual(result["estimated_delta"], 5)
+        self.assertEqual(result["observed_unclassified"], 25)
+        self.assertEqual(result["unclassified_or_unobserved"], 45)
+        self.assertEqual(result["classified_fraction"], 0.25)
+        self.assertEqual(flow.snapshot("42", stamp, 30)["status"], "VOLUME_MISMATCH")
+        self.assertEqual(flow.snapshot("42", stamp - 300, 10)["status"], "UNAVAILABLE")
+
+    def test_full_daily_cap_keeps_scanning_until_1330(self):
+        from unittest.mock import MagicMock
+
+        cfg = bot.DynamicStrategyConfig({}, argparse.Namespace())
+        now = datetime(2026, 11, 11, 13, 29, tzinfo=IST)
+        client, gate = MagicMock(), MagicMock()
+        gate.read.return_value = {"state": "closed"}
+        gate.count_entries.return_value = cfg.max_daily_trades
+        stock = {"symbol": "RADICO"}
+        with patch.object(bot, "datetime") as clock, \
+             patch.object(bot, "DhanStockOptionsClient", return_value=client), \
+             patch.object(bot.DynamicStockOptionsUniverse, "load_universe", return_value={"1": stock}), \
+             patch.object(bot, "DailyTradeGate", return_value=gate), \
+             patch.object(bot, "load_dotenv_file", return_value={"DHAN_CLIENT_ID": "test", "DHAN_ACCESS_TOKEN": "test"}), \
+             patch.object(bot, "load_or_init_ledger", return_value={"trades": [], "virtual_balance_net": 50000}), \
+             patch.object(bot, "shortlist_movers", return_value=[(-2.72, "1", 4436.6)]), \
+             patch.object(bot, "verify_live_scanx_and_resolve_stock_option", return_value={"allowed": True}) as verify, \
+             patch.object(bot.time, "sleep", side_effect=lambda _: setattr(clock.now, "return_value", now.replace(minute=30))), \
+             patch.object(bot, "TelegramNotifier", None):
+            clock.now.return_value = now
+            bot.run_dynamic_stock_options_session(False, False, cfg, logging.getLogger("test"))
+        verify.assert_called_once()
+        self.assertEqual(verify.call_args.args[1], stock)
+        self.assertTrue(verify.call_args.kwargs["membership_only"])
+        gate.reserve.assert_not_called()
+
     def test_confirmed_breakout_never_bypasses_scanner_daily_volume_gate(self):
         from unittest.mock import MagicMock
         cfg=bot.DynamicStrategyConfig({'STOCK_OPT_REQUIRE_CONFIRMED_BREAKOUT':'true'},argparse.Namespace())
@@ -55,6 +111,36 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(bot.paper_exit(pos,quote(65),self.now,cfg)[1],'RUNNER_NET_TARGET')
         # A gap can still exceed the intended floor; the cash-loss exit wins.
         self.assertEqual(bot.paper_exit(pos,quote(40),self.now,cfg)[1],'CASH_LOSS_LIMIT')
+
+    def test_order_flow_plan_requires_two_to_one_and_opposing_flow_books_profit(self):
+        cfg = bot.DynamicStrategyConfig({
+            "STOCK_OPT_RUPEE_TARGET": "900", "STOCK_OPT_STOP_PCT": "4",
+            "STOCK_OPT_TARGET_PCT": "16", "STOCK_OPT_MIN_NET_RR": "1.25",
+            "STOCK_OPT_EXTEND_RUPEE_TARGET": "true",
+        }, argparse.Namespace())
+        plan = cfg.plan(50, 500, min_net_rr=2)
+        self.assertGreaterEqual(plan["expected_net_rr"], 2)
+        now = self.now.timestamp()
+        flow = {
+            "status": "ESTIMATED", "classified_fraction": 0.75,
+            "candle_start_epoch": int(now) // 300 * 300 - 300,
+            "estimated_delta": -20_000, "total_candle_volume": 100_000,
+        }
+        pos = {
+            **plan, "opt_type": "CE", "entry_price": 50, "entry_epoch": now - 600,
+            "current_sl": plan["initial_sl"],
+            "runner_assessment": {"hold": True, "assessed_epoch": now},
+            "exit_order_flow": flow,
+        }
+        quote = {"received_epoch": now, "depth": {"buy": [
+            {"price": plan["rupee_target_price"], "quantity": plan["qty"]},
+        ]}}
+        low_coverage = dict(flow, classified_fraction=0.4)
+        self.assertIsNone(bot.paper_exit({**pos, "exit_order_flow": low_coverage}, quote, self.now, cfg))
+        self.assertEqual(bot.paper_exit(pos, quote, self.now, cfg)[1], "ORDER_FLOW_PROFIT_EXIT")
+        self.assertEqual(bot.order_flow_direction(flow), -1)
+        self.assertEqual(bot.order_flow_direction(dict(flow, estimated_delta=20_000)), 1)
+        self.assertEqual(bot.order_flow_direction(flow, flow["candle_start_epoch"] + 300), 0)
 
     def staged_position(self):
         cfg=bot.DynamicStrategyConfig({'STOCK_OPT_STAGED_PROFIT':'true','STOCK_OPT_RUPEE_TARGET':'1600',
@@ -628,6 +714,10 @@ class IntegrationTests(unittest.TestCase):
             if len(calls)==3:
                 return 101,"TIME_EXIT"
             return None
+        def close_position(*args):
+            clock.now.return_value = self.now.replace(hour=13, minute=30)
+            return {"net_pnl": 0}
+
         client=MagicMock()
         def fresh_depth(*args):
             received=clock.now.return_value.replace(second=clock.now.return_value.second+1)
@@ -641,7 +731,7 @@ class IntegrationTests(unittest.TestCase):
              patch.object(bot,"DailyTradeGate",return_value=gate), \
              patch.object(bot,"load_or_init_ledger",return_value={"trades":[]}), \
              patch.object(bot,"paper_exit",side_effect=evaluate), \
-             patch.object(bot,"close_paper_position",return_value={"net_pnl":0}), \
+             patch.object(bot,"close_paper_position",side_effect=close_position), \
              patch.object(bot,"TelegramNotifier",None), patch.object(bot.time,"sleep"):
             clock.now.return_value=self.now
             bot.run_dynamic_stock_options_session(False,False,self.cfg,logging.getLogger("test"))

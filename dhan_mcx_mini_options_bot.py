@@ -44,9 +44,12 @@ except ImportError:
     IST = timezone(timedelta(hours=5, minutes=30))
 
 try:
-    from stock_option_policy import option_chain_request_slot
+    from stock_option_policy import market_quote_request_slot, option_chain_request_slot
 except ImportError:
     def option_chain_request_slot():
+        return nullcontext()
+
+    def market_quote_request_slot():
         return nullcontext()
 
 if __name__ == "__main__":
@@ -664,7 +667,12 @@ class DhanMCXClient:
         is_oc = endpoint.startswith("/optionchain")
         if is_oc and time.time() < self.oc_retry_after:
             return None
-        slot = option_chain_request_slot() if is_oc else nullcontext()
+        if is_oc:
+            slot = option_chain_request_slot()
+        elif endpoint.startswith("/marketfeed/"):
+            slot = market_quote_request_slot()
+        else:
+            slot = nullcontext()
         with slot:
             if is_oc:
                 elapsed = time.time() - self.last_oc_ts

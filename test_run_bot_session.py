@@ -99,14 +99,14 @@ class EngineMaintenanceTests(unittest.TestCase):
         pos={'index':'ATHERENERG','strike':1660,'option_type':'CE','lots':1,'qty':375,
              'original_qty':750,'partial_booked':True,'partial_net':800,'partial_gross':881.25,
              'entry_price':18,'current_bid':20.4,'current_ltp':20.4,'current_ask':20.45,
-             'current_sl':19.7,'peak_bid':20.4,'entry_ts':'2026-10-27 10:00:00'}
+             'current_sl':19.7,'peak_bid':20.4,'entry_ts':'2026-10-27 10:00:00',
+             'quote_received_epoch':notifications.time.time()}
         notifier.partial(pos,{'qty':375,'price':20.35,'booked_net':800})
         message=notifier._events.get_nowait()
         self.assertIn('<b>ATHERENERG</b>',message)
-        self.assertIn('Remaining quantity: 375',message)
-        details=notifier._details({**pos,'_observed_at':'now'})
-        self.assertIn('Rs.+1,781.25',details)
-        self.assertIn('Original quantity: 750',details)
+        self.assertRegex(message, r'Quantity +375')
+        self.assertRegex(message, r'Exit/part +20\.35')
+        self.assertIn('Rs.+1,781.25',message)
 
     def test_public_calls_parse_reposts_and_ignore_targets_and_external_instructions(self):
         from telegram_notifier import TelegramCallFeed
@@ -190,12 +190,12 @@ class EngineMaintenanceTests(unittest.TestCase):
              'lots':1,'qty':100,'entry_price':10.65,'current_ltp':10.65,
              'current_sl':9.9,'peak_bid':11.2,'entry_ts':'2026-10-26 09:35:16'}
         notifier.position(pos,entry=True)
-        self.assertIn('Peak: Rs.11.20',notifier._events.get_nowait())
+        self.assertRegex(notifier._events.get_nowait(), r'Peak +11\.20')
         trade={'symbol':'SWIGGY','contract':'180_CE','lots':1,'qty':100,
                'entry_price':10.65,'exit_price':11.2,'gross_pnl':55,'net_pnl':10,
                'r_multiple':0.5,'exit_reason':'TIME_EXIT','exit_timestamp':'2026-10-26 11:00:00'}
         notifier.exited(trade)
-        self.assertIn('<b>SWIGGY</b>\nContract: 180_CE',notifier._events.get_nowait())
+        self.assertIn('<b>SWIGGY</b> 180_CE',notifier._events.get_nowait())
 
     def test_recovered_position_resumes_updates_without_duplicate_entry(self):
         import telegram_notifier as notifications
@@ -218,17 +218,68 @@ class EngineMaintenanceTests(unittest.TestCase):
         pos={'index':'KFINTECH','strike':860,'option_type':'CE','expiry':'2026-11-23',
              'lots':1,'qty':575,'entry_price':38.85,'current_ltp':38.5,'current_bid':38.4,'current_ask':38.7,
              'current_sl':37.3,'peak_bid':38.9,'entry_ts':'2026-10-27 10:30:35','_observed_at':'actual quote time','quote_received_epoch':100}
-        with patch.object(notifications.time,'time',return_value=135):message=notifier._details(pos)
-        self.assertIn('Entry: Rs.38.85\nLTP: Rs.38.50',message)
-        self.assertIn('Bid: Rs.38.40',message)
-        self.assertIn('Rs.-258.75',message)
-        self.assertIn('Expiry: 2026-11-23',message)
-        self.assertIn('[STALE]',message)
-        self.assertIn('Quote age: 35s',message)
-        pos['current_ltp']=None
-        with patch.object(notifications.time,'time',return_value=105):message=notifier._details(pos)
-        self.assertIn('LTP: unavailable',message)
-        self.assertNotIn('[STALE]',message)
+        with patch.object(notifications.time, 'time', return_value=135):
+            message = notifier._trade_table([pos])
+        self.assertRegex(message, r'Entry +38\.85')
+        self.assertRegex(message, r'LTP +38\.50')
+        self.assertRegex(message, r'Bid +38\.40')
+        self.assertIn('2026-11-23', message)
+        self.assertIn('Bid unavailable or older than 30s', message)
+        self.assertNotIn('-258.75', message)
+        pos['current_ltp'] = None
+        with patch.object(notifications.time, 'time', return_value=105):
+            message = notifier._trade_table([pos])
+        self.assertRegex(message, r'LTP +-')
+        self.assertIn('Rs.-258.75', message)
+
+    def test_two_positions_share_a_periodic_table_and_exit_removes_only_one(self):
+        import telegram_notifier as notifications
+        import queue
+        import threading
+
+        notifier = notifications.TelegramNotifier.__new__(notifications.TelegramNotifier)
+        notifier.enabled = True
+        notifier.mode = 'PAPER'
+        notifier._lock = threading.Lock()
+        notifier._closing = threading.Event()
+        notifier._events = queue.Queue()
+        notifier._positions = {}
+        notifier._next_update = {}
+        first = dict(symbol='SWIGGY', qty=100, entry_price=20, current_bid=22,
+                     current_sl=19, rupee_target_price=24, quote_received_epoch=100,
+                     entry_ts='2026-11-11 10:00:00')
+        second = dict(first, symbol='POLICYBZR', current_bid=19.5)
+        notifier.position(first, position_key='slot_1')
+        notifier.position(second, position_key='slot_2')
+        with patch.object(notifications.time, 'time', return_value=105), \
+                patch.object(notifications.time, 'monotonic', return_value=max(notifier._next_update.values())), \
+                patch.object(notifier, '_send', side_effect=lambda _: notifier._closing.set()) as send:
+            notifier._run()
+        message = send.call_args.args[0]
+        send.assert_called_once()
+        self.assertIn('<b>SWIGGY</b>', message)
+        self.assertIn('<b>POLICYBZR</b>', message)
+        self.assertRegex(message, r'Target +24\.00 +24\.00')
+        self.assertIn('Rs.+150.00', message)
+
+        trade = dict(first, exit_timestamp='2026-11-11 10:10:00', exit_price=23,
+                     gross_pnl=300, net_pnl=260, exit_reason='TARGET')
+        earlier = dict(trade, symbol='M&M', exit_timestamp='2026-11-11 09:55:00',
+                       gross_pnl=-20, net_pnl=-40)
+        yesterday = dict(trade, exit_timestamp='2026-11-10 14:30:00', gross_pnl=900, net_pnl=800)
+        index_trade = dict(trade, index='NIFTY', contract='25300_PE',
+                           exit_timestamp='2026-11-11 09:50:00', gross_pnl=90, net_pnl=75)
+        with patch.object(notifier, 'completed_paper_trades', return_value=([index_trade, earlier, trade], [])):
+            notifier.exited(trade, position_key='slot_1', ledger_trades=[yesterday, earlier, trade])
+        message = notifier._events.get_nowait()
+        self.assertEqual(message.count('<pre>'), 1)
+        self.assertIn('<b>NIFTY</b>', message)
+        self.assertIn('<b>M&amp;M</b>', message)
+        self.assertIn('<b>SWIGGY</b>', message)
+        self.assertIn('Still open: POLICYBZR', message)
+        self.assertIn('3 closed', message)
+        self.assertRegex(message, r'Total +[+]370[.]00 +[+]295[.]00')
+        self.assertEqual(list(notifier._positions), ['slot_2'])
 
     def test_exit_notification_accepts_the_current_trade_reward_field(self):
         import telegram_notifier as notifications

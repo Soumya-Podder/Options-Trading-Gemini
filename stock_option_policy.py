@@ -61,7 +61,7 @@ def single_bot_session(role):
 
 
 @contextmanager
-def option_chain_request_slot(minimum_gap=3.2, lock_path=None):
+def option_chain_request_slot(minimum_gap=3.05, lock_path=None, *, pace_from_completion=True):
     """Serialize both bots' option-chain requests, including their HTTP wait."""
     path=Path(lock_path) if lock_path else Path(__file__).resolve().parent/'dhan_hist_cache'/'oc_global_lock.txt'
     path.parent.mkdir(parents=True,exist_ok=True)
@@ -93,12 +93,19 @@ def option_chain_request_slot(minimum_gap=3.2, lock_path=None):
                 stream.truncate(64)
             stamp()
             try:yield
-            finally:stamp()
+            finally:
+                if pace_from_completion:
+                    stamp()
         finally:
             if os.name=='nt':
                 stream.seek(0);msvcrt.locking(stream.fileno(),msvcrt.LK_UNLCK,1)
             else:
                 fcntl.flock(stream.fileno(),fcntl.LOCK_UN)
+
+
+def market_quote_request_slot():
+    path = Path(__file__).resolve().parent / "dhan_hist_cache" / "quote_global_lock.txt"
+    return option_chain_request_slot(1.05, path, pace_from_completion=False)
 
 
 def _decimal(value: Any) -> Decimal:
