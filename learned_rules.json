@@ -25,23 +25,25 @@
     "rule_id": "RULE_002",
     "condition_signature": "IF wall=CALL_SIDE_GT_50L & ce=LONG_UNWINDING & pe=SHORT_COVERING & ctrl=BUYERS_AND_CALL_WRITERS_ALIGNED & dom=BEARS_DOMINATING -> BUY_PE",
     "status": "CANDIDATE",
-    "trades_count": 1,
+    "trades_count": 2,
     "wins_count": 0,
-    "losses_count": 1,
+    "losses_count": 2,
     "unique_days_traded": [
       "2026-09-25",
-      "2026-09-28"
+      "2026-09-28",
+      "2026-11-12"
     ],
     "total_win_r": 0.0,
-    "total_loss_r": 0.725,
+    "total_loss_r": 2.077083,
     "avg_win_r": 0.0,
-    "avg_loss_r": 0.72,
-    "expectancy_r": -0.72,
-    "intraday_losses": 0,
-    "last_lot_loss": false,
+    "avg_loss_r": 1.04,
+    "expectancy_r": -1.04,
+    "intraday_losses": 1,
+    "last_lot_loss": true,
     "muted_on_day": "",
     "pruned_on_day": "2026-10-23",
-    "prune_count": 1
+    "prune_count": 1,
+    "last_trade_day": "2026-11-12"
   },
   "IF wall=CALL_SIDE_GT_50L & ce=SHORT_BUILDUP & pe=LONG_BUILDUP & ctrl=CALL_WRITERS_DOMINATING_CEILING & dom=BEARS_DOMINATING -> BUY_PE": {
     "rule_id": "RULE_003",
@@ -280,20 +282,41 @@
     "rule_id": "RULE_013",
     "condition_signature": "VWAP_TREND_FLOW & regime=HIGH_IV_VEGA_MOMENTUM & q=LONG_BUILDUP -> BUY_PE",
     "status": "CANDIDATE",
-    "trades_count": 2,
+    "trades_count": 3,
     "wins_count": 2,
-    "losses_count": 0,
+    "losses_count": 1,
     "unique_days_traded": [
-      "2026-11-11"
+      "2026-11-11",
+      "2026-11-12"
     ],
     "total_win_r": 2.598126,
-    "total_loss_r": 0.0,
+    "total_loss_r": 1.204142,
     "avg_win_r": 1.3,
-    "avg_loss_r": 0.0,
-    "expectancy_r": 1.3,
+    "avg_loss_r": 1.2,
+    "expectancy_r": 0.47,
+    "intraday_losses": 1,
+    "last_lot_loss": true,
+    "muted_on_day": "",
+    "last_trade_day": "2026-11-12"
+  },
+  "GAMMA_BLAST_HERO_ZERO & wall=CALL_SIDE_GT_50L & q=SHORT_COVERING -> BUY_PE": {
+    "rule_id": "RULE_014",
+    "condition_signature": "GAMMA_BLAST_HERO_ZERO & wall=CALL_SIDE_GT_50L & q=SHORT_COVERING -> BUY_PE",
+    "status": "CANDIDATE",
+    "trades_count": 2,
+    "wins_count": 1,
+    "losses_count": 1,
+    "unique_days_traded": [
+      "2026-11-12"
+    ],
+    "total_win_r": 0.924063,
+    "total_loss_r": 1.287475,
+    "avg_win_r": 0.92,
+    "avg_loss_r": 1.29,
+    "expectancy_r": -0.18,
     "intraday_losses": 0,
     "last_lot_loss": false,
     "muted_on_day": "",
-    "last_trade_day": "2026-11-11"
+    "last_trade_day": "2026-11-12"
   }
 }

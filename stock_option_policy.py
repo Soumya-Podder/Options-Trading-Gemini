@@ -17,6 +17,60 @@ from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
 
 
+COMBINED_PAPER_LOSS_LIMIT_RS = 2500.0
+
+
+def stock_reporting_exclusions(day, directory=None):
+    directory = Path(directory) if directory is not None else Path(__file__).resolve().parent
+    excluded = set()
+    for path in (directory / "stock_option_daily_entries").glob(f"{day}.slot*.json"):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8-sig"))
+            if record.get("state") == "closed" and record.get("exclude_from_daily_report") is True:
+                entry_id = (record.get("close_details") or {}).get("entry_id")
+                if entry_id:
+                    excluded.add(entry_id)
+        except (OSError, ValueError, AttributeError):
+            continue
+    return excluded
+
+
+def combined_paper_loss_state(day, directory=None):
+    """Read completed Nifty and stock PAPER exits and latch the realised loss limit for the day."""
+    directory = Path(directory) if directory is not None else Path(__file__).resolve().parent
+    excluded = stock_reporting_exclusions(day, directory)
+    trades = []
+    try:
+        for filename, index_only in (("paper_trade_ledger.json", True), ("stock_fno_paper_ledger.json", False)):
+            ledger = json.loads((directory / filename).read_text(encoding="utf-8-sig"))
+            if ledger.get("mode") != "PAPER":
+                return None, False
+            for trade in ledger["trades"]:
+                exit_time = str(trade.get("exit_timestamp", ""))
+                if exit_time[:10] != day or (index_only and trade.get("index") != "NIFTY"):
+                    continue
+                if not index_only and trade.get("entry_id") in excluded:
+                    continue
+                net = float(trade["net_pnl"])
+                if not math.isfinite(net):
+                    return None, False
+                trades.append((exit_time, round(net * 100)))
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, OverflowError):
+        return None, False
+    total = 0
+    reached = False
+    for _, net in sorted(trades, key=lambda trade: trade[0]):
+        total += net
+        reached |= total <= -COMBINED_PAPER_LOSS_LIMIT_RS * 100
+    return total / 100, reached
+
+
+def combined_paper_entry_allowed(day, directory=None):
+    """Allow entries until the shared realised loss breaker has tripped."""
+    net, reached = combined_paper_loss_state(day, directory)
+    return net is not None and not reached
+
+
 def session_open_wait_seconds(now, opening_time):
     """Shorten the last pre-open sleep to the remaining wall-clock interval."""
     opening=now.replace(hour=opening_time.hour,minute=opening_time.minute,
@@ -348,6 +402,15 @@ def selection_analysis(candidate):
             'basis':'CONFIRMED_SETUP_VOLUME_CLOSE_EXECUTION_AND_CLOSED_NET_FEEDBACK'}
 
 
+def learned_profit_floor(feedback, peak_net, risk):
+    """Protect half of a meaningful net peak for validated giveback patterns."""
+    if (feedback or {}).get('exit_policy') != 'PROTECT_EARNED_PROFIT':
+        return None
+    if math.isfinite(peak_net) and math.isfinite(risk) and risk > 0 and peak_net >= 0.5 * risk:
+        return 0.5 * peak_net
+    return None
+
+
 def adaptive_setup_feedback(candidate, closed_trades, as_of):
     """Walk-forward PAPER feedback across symbols, with chronological validation.
 
@@ -368,6 +431,8 @@ def adaptive_setup_feedback(candidate, closed_trades, as_of):
                 side=suffix if suffix in ('CE','PE') else None
             if side not in ('CE','PE'):return None
             return (record['index'],family,side)
+        if str(record.get('setup') or '').startswith('MCX_') and record.get('symbol'):
+            return ('MCX', record['symbol'], record['setup'])
         family=(diagnostics.get('breakout_confirmation') or {}).get('entry_path')
         if not family:family=record.get('scanner')
         return ('STOCK',family,record.get('opt_type')) if family and record.get('opt_type') in ('CE','PE') else None
@@ -394,10 +459,11 @@ def adaptive_setup_feedback(candidate, closed_trades, as_of):
             reward=max(-3.0,min(3.0,net/risk))
             diag=trade.get('exit_diagnostics') or {}
             peak=diag.get('peak_executable_vwap',(((trade.get('market_structure') or {}).get('telegram_call') or {}).get('exit_observation') or {}).get('peak_bid'));giveback=None
-            if peak is not None and len(trade.get('exit_fills') or [])<=1:
+            peak_net=diag.get('peak_net_pnl')
+            if peak_net is None and peak is not None and len(trade.get('exit_fills') or [])<=1:
                 peak_net=(float(peak)-float(trade['entry_price']))*float(trade['qty'])-(float(trade['gross_pnl'])-net)
-                if math.isfinite(peak_net) and peak_net>=0.5*risk:
-                    giveback=net<0.5*peak_net
+            if isinstance(peak_net,(float,int)) and math.isfinite(peak_net) and peak_net>=0.5*risk:
+                giveback=net<0.5*peak_net
             seen.add(identity);samples.append((exited,reward,giveback))
         except (KeyError,TypeError,ValueError,OverflowError):continue
     samples=sorted(samples,key=lambda x:x[0])[-40:]

@@ -38,7 +38,11 @@ from stock_option_policy import (
     market_quote_request_slot,
     single_bot_session,
     adaptive_setup_feedback,
+    learned_profit_floor,
     session_open_wait_seconds,
+    combined_paper_loss_state,
+    combined_paper_entry_allowed,
+    COMBINED_PAPER_LOSS_LIMIT_RS,
 )
 import requests
 
@@ -76,7 +80,7 @@ INDICES_CONFIG = {
         "instrument": "OPTIDX",
         "lot_size": 20,
         "strike_step": 100,
-        "sl_points": 18.00,          # 1R = Rs. 360.00 per lot (capped at 23.00 pts = Rs. 460)
+        "sl_points": 20.00,          # 1R = Rs. 400.00 per lot (capped at 23.00 pts = Rs. 460)
         "min_option_premium": 125.0, # Standard ATM floor (OTM Gamma Blast allows down to Rs. 45.0)
         "max_option_premium": 1250.0,# Allows Sensex momentum runners (550-900+)
         "min_spot_impulse": 18.0,
@@ -90,6 +94,8 @@ MAX_PRUNE_CYCLES = 3
 DAILY_PROFIT_TARGET_RS = 3000.0
 INDEX_PROFIT_LOCK_RS = 1200.0            # Locks daily session once realized net >= Rs. 1,200+
 INDEX_RUNNER_TARGET_RS = 3500.0
+NIFTY_TRADE_PROFIT_REVIEW_RS = 1000.0
+NIFTY_TRADE_RUNNER_FLOOR_RS = 750.0
 INDEX_RUNNER_HOLD_MINUTES = 45
 MAX_POST_LOCK_RUNNER_ENTRIES = 2
 
@@ -226,6 +232,31 @@ def channel_entry_view(view, chain, call, current_expiry, received_epoch, now_ep
         return result, 'Fresh channel trigger matched; following channel direction'
     except (KeyError, TypeError, ValueError, OverflowError):
         return None, 'Channel contract could not be verified'
+
+
+def prepared_channel_entry_quote(dhan, call, cached, expiry, lot_size, now_epoch):
+    """Resolve from the prior current-expiry chain and fetch this strike's depth."""
+    if not cached or cached["expiry"] != expiry or not 0 <= now_epoch - cached["received"] <= 30:
+        return None
+    strike_key = f"{call['strike']:.6f}"
+    side = call["option_type"].lower()
+    strike_node = cached["chain"].get(strike_key) or cached["chain"].get(str(call["strike"])) or {}
+    contract = strike_node.get(side) or {}
+    security_id = str(contract.get("security_id") or contract.get("securityId") or "")
+    if not security_id.isdigit():
+        return None
+    response = dhan.fetch_held_channel_quote({**call, "security_id": security_id, "qty": lot_size})
+    depth = (response or {}).get("oc", {}).get(strike_key, {}).get(side)
+    if not depth or depth.get("security_id") != security_id:
+        return None
+    return {
+        "oc": {strike_key: {side: {
+            **contract, **depth,
+            "top_bid_price": depth["best_bid_price"],
+            "top_bid_quantity": depth["best_bid_quantity"],
+        }}},
+        "received_epoch": depth["depth_received_epoch"],
+    }
 
 
 def index_entry_signal(brain, view, losses, now, cooldown_until, channel_call=None, closed_trades=()):
@@ -480,6 +511,7 @@ class DhanV2RestClient:
                 'top_bid_quantity': position['qty'],
                 'security_id': sid,
                 'best_bid_price': levels[0][0],
+                'best_bid_quantity': levels[0][1],
                 'depth_received_epoch': time.time(),
             }
             asks = quote.get('depth', {}).get('sell') or []
@@ -1915,9 +1947,7 @@ def option_stop_points(index: str, entry_price: float) -> float:
             return round(max(4.50, min(5.50, float(entry_price) * 0.085)), 2)
         return round(max(6.00, min(7.80, float(entry_price) * 0.062)), 2)
     if index == "SENSEX":
-        if float(entry_price) < 160.0:
-            return round(max(12.00, min(16.00, float(entry_price) * 0.085)), 2)
-        return round(max(18.00, min(23.00, float(entry_price) * 0.072)), 2)
+        return round(max(INDICES_CONFIG[index]["sl_points"], min(23.00, float(entry_price) * 0.072)), 2)
     return INDICES_CONFIG[index]["sl_points"]
 
 
@@ -2045,6 +2075,7 @@ def record_closed_trade(
     data_health: str,
     exit_fills=None, booked_gross: float = 0, booked_net: float = 0, market_structure=None,
     ledger_path="paper_trade_ledger.json", initial_risk_points=None, position_key="active_position",
+    peak_net_pnl=None,
 ) -> float:
     if exit_reason in ("ASYMMETRIC_TRAIL_PROFIT", "DAILY_PROFIT_PROTECTION") and exit_price < entry_price:
         exit_price = round(entry_price + (2.50 if idx_name == "NIFTY" else 6.00), 2)
@@ -2094,6 +2125,8 @@ def record_closed_trade(
     ledger.pop(position_key, None)
     if market_structure is not None:
         trade_record["market_structure"] = market_structure
+    if peak_net_pnl is not None and len(exit_fills or []) <= 1:
+        trade_record["exit_diagnostics"] = {"peak_net_pnl": peak_net_pnl}
     ledger["trades"].append(trade_record)
     ledger["total_trades"] = len(ledger["trades"])
 
@@ -2469,7 +2502,7 @@ def run_real_historical_backtest(
     return ledger
 
 
-def daily_target_reached(realized_net, position, bid, target_net=None):
+def daily_target_reached(realized_net, position, bid, target_net=None, *, loss_limit=False):
     """Estimate full-day net on liquidation, including any partial fills once."""
     try:
         if not math.isfinite(bid) or bid <= 0:
@@ -2478,12 +2511,15 @@ def daily_target_reached(realized_net, position, bid, target_net=None):
         gross = sum((float(f["price"]) - entry) * int(f["qty"]) for f in position.get("exit_fills", []))
         gross += (bid - entry) * int(position["qty"])
         fees = 40.0 + int(position["lots"]) * 24.5 + 20.0 * len(position.get("exit_fills", []))
-        return realized_net + gross - fees >= (DAILY_PROFIT_TARGET_RS if target_net is None else target_net)
+        modeled_net = realized_net + gross - fees
+        if loss_limit:
+            return gross < fees and modeled_net <= -target_net
+        return modeled_net >= (DAILY_PROFIT_TARGET_RS if target_net is None else target_net)
     except (KeyError, TypeError, ValueError, OverflowError):
         return False
 
 
-def index_profit_lock_bid(realized_net, position):
+def index_profit_lock_bid(realized_net, position, *, target_net=INDEX_PROFIT_LOCK_RS):
     """
     Raw exit-price floor budgeting fees and 0.1% adverse exit slippage.
     NEVER returns a floor below `entry_price + 2.50` so `DAILY_PROFIT_PROTECTION`
@@ -2495,7 +2531,7 @@ def index_profit_lock_bid(realized_net, position):
         fills = position.get('exit_fills', [])
         booked = sum((float(f['price']) - entry) * int(f['qty']) for f in fills)
         fees = 40.0 + int(position['lots']) * 24.5 + 20.0 * len(fills)
-        needed = entry + (INDEX_PROFIT_LOCK_RS - float(realized_net) - booked + fees) / qty
+        needed = entry + (target_net - float(realized_net) - booked + fees) / qty
         if qty <= 0 or not all(math.isfinite(v) for v in (entry, needed)):
             return None
         needed_fill = math.ceil(needed * 20 - 1e-9) / 20
@@ -2625,18 +2661,45 @@ def record_nifty_entry_observation(path, analysis, candles, chain, as_of):
     return True
 
 
-def index_entry_block_reason(now_time, net_pnl, profit_protected, entries, consecutive_losses, *, runner_reentry=False):
+def nifty_recovery_block_reason(view, direction, now_epoch):
+    """Require a fresh, directional level setup before spending more PAPER risk."""
+    structure = view.get("market_structure") or {}
+    check = (structure.get("direction_checks") or {}).get(direction) or {}
+    if not check.get("allowed") or check.get("trigger_level") not in check.get("oi_confirmed_levels", ()):
+        return "No confirmed price reaction with supportive strike OI"
+    try:
+        age = now_epoch - float(view["snapshot_received_epoch"])
+        rr = float(check["structure_rr"])
+        room = float(check["room_points"])
+        sign = 1 if direction == "BUY_CE" else -1
+        impulse = sign * float(view["d_spot_5m"])
+        trend = sign * float(view["d_spot_15m"]) if view.get("trend_15m_ready") else 0.0
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return "Recovery market evidence unavailable"
+    if not all(math.isfinite(x) for x in (age, rr, room, impulse, trend)) or not 0 <= age <= 8:
+        return "Recovery market evidence stale or invalid"
+    if rr < 1.5 or room < 20:
+        return "Insufficient room or structural reward-to-risk"
+    if impulse < 6.5 and trend < 15:
+        return "Spot momentum does not confirm the recovery direction"
+    return None
+
+
+def index_entry_block_reason(now_time, net_pnl, profit_protected, entries, consecutive_losses, *,
+                             runner_reentry=False, paper_retry=None, shared_loss_limit=False):
     if not SESSION_START_TIME <= now_time <= LAST_ENTRY_TIME:
         return "Outside index entry window"
-    if net_pnl <= DAILY_MAX_LOSS_RS:
-        return f"Daily max loss breaker hit (Rs.{net_pnl:+.2f} <= Rs.{DAILY_MAX_LOSS_RS:+.2f})"
-    if net_pnl >= DAILY_PROFIT_TARGET_RS:
+    loss_floor = paper_retry["loss_floor"] if paper_retry else DAILY_MAX_LOSS_RS
+    if not shared_loss_limit and net_pnl <= loss_floor:
+        return f"Daily max loss breaker hit (Rs.{net_pnl:+.2f} <= Rs.{loss_floor:+.2f})"
+    if not shared_loss_limit and net_pnl >= DAILY_PROFIT_TARGET_RS:
         return "Daily index profit target reached"
-    if (profit_protected or net_pnl >= INDEX_PROFIT_LOCK_RS) and not runner_reentry:
+    if not shared_loss_limit and (profit_protected or net_pnl >= INDEX_PROFIT_LOCK_RS) and not runner_reentry:
         return "Daily index profit protection active"
-    if entries >= MAX_TRADES_PER_DAY:
+    entry_cap = min(MAX_TRADES_PER_DAY, paper_retry["entry_cap"]) if paper_retry else MAX_TRADES_PER_DAY
+    if entries >= entry_cap:
         return "Daily index entry cap reached"
-    if consecutive_losses >= MAX_CONSECUTIVE_LOSSES_PER_DAY:
+    if not shared_loss_limit and consecutive_losses >= MAX_CONSECUTIVE_LOSSES_PER_DAY and not paper_retry:
         return "Consecutive-loss limit reached"
     return None
 
@@ -2690,6 +2753,11 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
     today_trades_list = [t for t in ledger.get("trades", []) if str(t.get("timestamp", "")).startswith(today_str)]
     day_trades = len(today_trades_list)
     day_entries = index_entries_today(ledger, today_str)
+    retry_settings = ledger.get("paper_nifty_retry") or {}
+    paper_nifty_retry = retry_settings if not live_mode and retry_settings.get("date") == today_str else None
+    if paper_nifty_retry:
+        logger.info("[PAPER NIFTY RETRY] Up to %d total entries today, subject to combined loss limit",
+                    paper_nifty_retry["entry_cap"])
     day_net_pnl = round(sum(float(t.get("net_pnl", 0.0)) for t in today_trades_list), 2)
     profit_protected = (
         day_net_pnl >= INDEX_PROFIT_LOCK_RS or
@@ -2768,6 +2836,8 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
     opening_responses = set()
     last_scan_only_reason = None
     prioritized_calls = set()
+    last_recovery_decision = None
+    channel_chain_cache = {}
 
     while True:
         now = datetime.now()
@@ -2785,6 +2855,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
             jobs.extend((None, index) for index in selected_indices)
         position_key, idx_name = jobs[cycle % len(jobs)]
         cycle += 1
+        priority_call = None
         # Give fresh channel calls the next scan turn while still servicing held positions.
         if position_key is None and channel_slot_open and now.time() < EOD_SQUAREOFF_TIME:
             consumed = ledger.get("telegram_call_entries", [])
@@ -2796,6 +2867,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
             if fresh_calls:
                 call = max(fresh_calls, key=lambda item: item.get("activation_epoch", item["posted_epoch"]))
                 idx_name = call["index"]
+                priority_call = call
                 prioritized_calls.add(call["key"])
                 eligible_epoch = call.get("activation_epoch", call["posted_epoch"])
                 logger.info("[CHANNEL QUOTE PRIORITY] %s | %s | %.2fs since eligibility",
@@ -2818,17 +2890,32 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
         opening_request = idx_name not in opening_responses
         if opening_request:
             logger.info('[OPENING DATA REQUEST] %s | %s', idx_name, datetime.now().isoformat(timespec='milliseconds'))
-        raw_oc = (dhan.fetch_held_channel_quote(active_pos) if held_channel else
-                  dhan.fetch_option_chain(cfg["security_id"], cfg["exchange_segment"], expiry))
-        chain_received_epoch = time.time()
+        direct_call_quote = None
+        if priority_call and expiry:
+            quote = prepared_channel_entry_quote(
+                dhan, priority_call, channel_chain_cache.get(idx_name), expiry, cfg["lot_size"], time.time()
+            )
+            if quote:
+                checked_view, reason = channel_entry_view({"index": idx_name}, quote["oc"], priority_call,
+                                               expiry, quote["received_epoch"], time.time())
+                logger.info("[CHANNEL DIRECT QUOTE] %s | %s", priority_call["source_url"], reason)
+                if checked_view is not None:
+                    direct_call_quote = quote
+        raw_oc = (direct_call_quote or (dhan.fetch_held_channel_quote(active_pos) if held_channel else
+                  dhan.fetch_option_chain(cfg["security_id"], cfg["exchange_segment"], expiry)))
+        chain_received_epoch = direct_call_quote["received_epoch"] if direct_call_quote else time.time()
+        if raw_oc and not held_channel and not direct_call_quote:
+            channel_chain_cache[idx_name] = {
+                "expiry": expiry, "received": chain_received_epoch, "chain": raw_oc.get("oc", {}),
+            }
         if opening_request and raw_oc:
             opening_responses.add(idx_name)
             logger.info('[OPENING DATA RESPONSE] %s | %s', idx_name, datetime.now().isoformat(timespec='milliseconds'))
 
         if raw_oc:
-            view = (dict(telemetry_state['indices'].get(idx_name, {})) if held_channel else
+            view = (dict(telemetry_state['indices'].get(idx_name, {})) if held_channel or direct_call_quote else
                     analyzer.evaluate_chain(idx_name, raw_oc, expiry=expiry))
-            if idx_name == "NIFTY" and not held_channel:
+            if idx_name == "NIFTY" and not held_channel and not direct_call_quote:
                 if time.time() - last_oi_log >= 30:
                     oi = view["oi_analysis"]
                     reg = view.get("regime_info") or {}
@@ -2924,7 +3011,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
 
                 bid_for_protection = float(node.get('top_bid_price', 0) or 0)
                 floor = index_profit_lock_bid(day_net_pnl, active_pos)
-                if floor is not None and math.isfinite(bid_for_protection) and bid_for_protection >= floor:
+                if idx_name != "NIFTY" and floor is not None and math.isfinite(bid_for_protection) and bid_for_protection >= floor:
                     active_pos['current_sl'] = max(active_pos['current_sl'], floor)
                     active_pos['profit_floor_armed'] = True
                     if not profit_protected:
@@ -2956,14 +3043,51 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     exit_reason = "EOD_SQUAREOFF"
 
                 executable_bid = float(node.get("top_bid_price", 0) or 0)
+                if (not live_mode and not channel_position and not active_pos.get("exit_fills")
+                        and math.isfinite(executable_bid) and executable_bid > 0
+                        and float(node.get("top_bid_quantity") or 0) >= active_pos["qty"]):
+                    modeled_fill = math.floor(executable_bid * .999 * 20 + 1e-9) / 20
+                    fees = 40 + 24.5 * active_pos["lots"]
+                    modeled_net = (modeled_fill - active_pos["entry_price"]) * active_pos["qty"] - fees
+                    peak_net = max(active_pos.get("peak_net_pnl", modeled_net), modeled_net)
+                    active_pos["peak_net_pnl"] = peak_net
+                    feedback = (active_pos.get("market_structure") or {}).get("adaptive_feedback")
+                    learned_floor = learned_profit_floor(feedback, peak_net, position_risk * active_pos["qty"])
+                    if not exit_reason and learned_floor is not None and modeled_net <= learned_floor:
+                        exit_reason = "LEARNED_PROFIT_PROTECTION"
+                        curr_ltp = executable_bid
+                if idx_name == "NIFTY" and not exit_reason and executable_bid > 0:
+                    combined_net, _ = combined_paper_loss_state(today_str)
+                    modeled_fill = math.floor(executable_bid * .999 * 20 + 1e-9) / 20
+                    if combined_net is not None and daily_target_reached(
+                        combined_net, active_pos, modeled_fill, COMBINED_PAPER_LOSS_LIMIT_RS, loss_limit=True
+                    ):
+                        exit_reason = "COMBINED_PAPER_LOSS_LIMIT"
+                        curr_ltp = executable_bid
                 runner_hold = False
-                if not channel_position and not exit_reason and active_pos.get("profit_floor_armed") and executable_bid > 0:
+                trade_review_bid = (
+                    index_profit_lock_bid(0, active_pos, target_net=NIFTY_TRADE_PROFIT_REVIEW_RS)
+                    if idx_name == "NIFTY" and not channel_position else None
+                )
+                trade_review = trade_review_bid is not None and (
+                    executable_bid >= trade_review_bid or active_pos.get("trade_runner_active", False)
+                )
+                if not channel_position and not exit_reason and executable_bid > 0 and (
+                    active_pos.get("profit_floor_armed") or trade_review
+                ):
                     assessment = assess_index_runner(view, active_pos, node, now.timestamp(), day_net_pnl)
                     runner_hold = assessment['hold']
                     previous = (active_pos.get('runner_assessment') or {}).get('hold')
                     active_pos['runner_assessment'] = assessment
                     if runner_hold:
                         active_pos['runner_max_hold_minutes'] = INDEX_RUNNER_HOLD_MINUTES
+                        if trade_review:
+                            active_pos['trade_runner_active'] = True
+                            trade_floor = index_profit_lock_bid(
+                                0, active_pos, target_net=NIFTY_TRADE_RUNNER_FLOOR_RS
+                            )
+                            if trade_floor is not None and trade_floor < executable_bid:
+                                active_pos['current_sl'] = max(active_pos['current_sl'], trade_floor)
                     if previous != runner_hold:
                         logger.info('[INDEX RUNNER] %s | %s', idx_name, json.dumps(assessment))
                         ledger[position_key] = {k: v for k, v in active_pos.items() if k != 'entry_dt'}
@@ -2977,7 +3101,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     exit_reason = f"TARGET_{int(pos_target_pts)}_POINTS"
                     if not live_mode and executable_bid > 0:
                         curr_ltp = executable_bid
-                elif not channel_position and not exit_reason and daily_target_reached(
+                elif idx_name != "NIFTY" and not channel_position and not exit_reason and daily_target_reached(
                     day_net_pnl, active_pos, executable_bid,
                     INDEX_RUNNER_TARGET_RS if runner_hold else DAILY_PROFIT_TARGET_RS
                 ):
@@ -3056,6 +3180,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         booked_gross=active_pos.get("partial_gross", 0), booked_net=active_pos.get("partial_net", 0),
                         market_structure=active_pos.get("market_structure"),
                         initial_risk_points=position_risk, position_key=position_key,
+                        peak_net_pnl=active_pos.get("peak_net_pnl"),
                     )
                     day_net_pnl = round(day_net_pnl + float(ledger["trades"][-1]["net_pnl"]), 2)
                     day_trades += 1
@@ -3077,15 +3202,22 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
 
             else:
                 runner_reentry = (
-                    profit_protected and not positions and consec_losses == 0
+                    idx_name != "NIFTY" and profit_protected and not positions and consec_losses == 0
                     and day_net_pnl - INDEX_PROFIT_LOCK_RS >= 84.5 + cfg['lot_size'] * option_stop_points(
                         idx_name, cfg['min_option_premium'])
                     and ledger.get('daily_runner_entry_counts', {}).get(today_str, 0) < MAX_POST_LOCK_RUNNER_ENTRIES
                 )
                 block_reason = index_entry_block_reason(
                     now.time(), day_net_pnl, profit_protected,
-                    day_entries, consec_losses, runner_reentry=runner_reentry
+                    day_entries, consec_losses, runner_reentry=runner_reentry,
+                    paper_retry=paper_nifty_retry if idx_name == "NIFTY" else None,
+                    shared_loss_limit=idx_name == "NIFTY",
                 )
+                if idx_name == "NIFTY" and not block_reason:
+                    combined_net, combined_reached = combined_paper_loss_state(today_str)
+                    if combined_reached or combined_net is None:
+                        block_reason = ("Combined Nifty/stock PAPER loss limit reached" if combined_reached
+                                        else "Combined PAPER profit state unavailable")
 
             if position_key is None and (block_reason or not (native_slot_open or channel_slot_open)):
                 reason = block_reason or "All enabled index position slots occupied"
@@ -3109,6 +3241,8 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             logger.info('[CHANNEL ENTRY STATE] %s | %s', state['source_url'], state['state'])
                             last_call_decision[state['key']] = state['state']
                     channel_candidates = call_feed.candidates(idx_name, time.time(), ledger.get('telegram_call_entries', []))
+                    if direct_call_quote:
+                        channel_candidates = [c for c in channel_candidates if c["key"] == priority_call["key"]]
                     def channel_feedback(call):
                         return adaptive_setup_feedback(
                             {'index': idx_name, 'option_type': call['option_type'],
@@ -3134,11 +3268,22 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             view = channel_view
                             channel_call = candidate
                             break
-                if channel_call is None and not native_slot_open:
-                    view["entry_decision"] = {"action": "HOLD", "reason": "Native index slot occupied; no eligible Telegram call"}
+                if channel_call is None and (not native_slot_open or direct_call_quote):
+                    reason = "Priority channel quote no longer eligible" if direct_call_quote else "Native index slot occupied; no eligible Telegram call"
+                    view["entry_decision"] = {"action": "HOLD", "reason": reason}
                     action_dir, sig = "HOLD", None
                 else:
                     action_dir, sig = index_entry_signal(brain, view, consec_losses, now, cooldown_until, channel_call, ledger['trades'])
+                if idx_name == "NIFTY" and day_net_pnl < 0 and not channel_call and action_dir in ("BUY_CE", "BUY_PE"):
+                    recovery_reason = nifty_recovery_block_reason(view, action_dir, time.time())
+                    recovery_decision = (action_dir, recovery_reason or "Market supports a recovery setup")
+                    if recovery_decision != last_recovery_decision:
+                        logger.info("[PAPER NIFTY RECOVERY] %s | %s | Day net Rs.%+.2f",
+                                    *recovery_decision, day_net_pnl)
+                        last_recovery_decision = recovery_decision
+                    if recovery_reason:
+                        view["entry_decision"] = {"action": "HOLD", "reason": recovery_reason}
+                        action_dir, sig = "HOLD", None
                 if action_dir in ("BUY_CE", "BUY_PE") and sig:
                     is_ce = action_dir == "BUY_CE"
                     opt_type = "CE" if is_ce else "PE"
@@ -3195,6 +3340,8 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                                 day_net_pnl=day_net_pnl,
                             )
                         lots = min(lots, max(0, int((available_cash - 60) // (entry_p * cfg["lot_size"] + 24.5))))
+                        if paper_nifty_retry and idx_name == "NIFTY":
+                            lots = min(lots, 1)
                         qty = lots * cfg["lot_size"]
                         if qty <= 0 or not 0 <= time.time() - chain_received_epoch <= 8:
                             reason = "Insufficient cash or stale executable quote"
@@ -3242,7 +3389,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             if initial_risk <= 0 or ask - bid > .20 * initial_risk:
                                 view["entry_decision"] = {"action": "HOLD", "reason": "Spread too wide for Rs.650 per-lot risk plan"}
                                 continue
-                            held_depth = dhan.fetch_held_channel_quote({
+                            held_depth = direct_call_quote or dhan.fetch_held_channel_quote({
                                 "index": idx_name, "strike": strike_k, "option_type": opt_type,
                                 "security_id": sec_id, "qty": qty,
                             })
@@ -3270,6 +3417,15 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         else:
                             initial_risk = option_stop_points(idx_name, entry_p)
                             init_sl = round(entry_p - initial_risk, 2)
+                            if init_sl <= 0:
+                                view["entry_decision"] = {"action": "HOLD", "reason": "Premium too low for a valid initial stop"}
+                                continue
+                        if paper_nifty_retry and idx_name == "NIFTY":
+                            init_sl = max(init_sl, channel_initial_stop(idx_name, entry_p, cfg["lot_size"], lots))
+                            initial_risk = round(entry_p - init_sl, 2)
+                            if initial_risk <= 0 or bid <= init_sl:
+                                logger.info("[PAPER NIFTY RETRY] Entry rejected by remaining risk or stop distance")
+                                continue
                         view.setdefault("market_structure", {})["entry_quote"] = {
                             "received_epoch": chain_received_epoch, "decision_epoch": time.time(),
                             "modeled_entry_price_basis": "EXECUTABLE_ASK_PLUS_0.1PCT_SLIPPAGE",
@@ -3281,13 +3437,16 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         if channel_call and not TelegramCallFeed.entry_is_fresh(channel_call, time.time()):
                             continue
                         position_key = "active_channel_position" if channel_call else "active_position"
+                        if idx_name == "NIFTY" and not combined_paper_entry_allowed(today_str):
+                            view["entry_decision"] = {"action": "HOLD", "reason": "Combined PAPER loss limit reached or state unavailable"}
+                            continue
                         if not reserve_index_entry(
                             ledger, today_str,
                             {
                                 "index": idx_name, "security_id": sec_id, "option_type": opt_type,
                                 "qty": qty, "entry_ts": now.strftime("%Y-%m-%d %H:%M:%S"),
-                                'post_lock_runner': runner_reentry,
-                                **({'telegram_call_key': channel_call['key']} if channel_call else {})
+                                "post_lock_runner": runner_reentry,
+                                **({"telegram_call_key": channel_call["key"]} if channel_call else {}),
                             },
                             ledger_path, position_key
                         ):

@@ -12,6 +12,7 @@ import time
 from datetime import datetime, timezone, timedelta
 from html.parser import HTMLParser
 from pathlib import Path
+from stock_option_policy import stock_reporting_exclusions
 
 import requests
 
@@ -455,6 +456,8 @@ class TelegramNotifier:
                 table = self._trade_table(list(self._positions.values()))
                 self._events.put(f"[{self.mode}] TRADE ENTRY\n{table}\nEntry time: {position['entry_ts']}")
 
+    stock_reporting_exclusions = staticmethod(stock_reporting_exclusions)
+
     @staticmethod
     def completed_paper_trades(day, directory=None):
         directory = Path(directory) if directory is not None else Path(__file__).resolve().parent
@@ -470,7 +473,9 @@ class TelegramNotifier:
                 trades.extend(t for t in ledger["trades"] if str(t.get("exit_timestamp", ""))[:10] == day)
             except (OSError, ValueError, TypeError, AttributeError):
                 missing.append(segment)
-        return sorted(trades, key=lambda trade: trade["exit_timestamp"]), missing
+        excluded = TelegramNotifier.stock_reporting_exclusions(day, directory)
+        return sorted((trade for trade in trades if trade.get("entry_id") not in excluded),
+                      key=lambda trade: trade["exit_timestamp"]), missing
 
     @staticmethod
     def completed_trade_table(trades, missing=()):
@@ -511,7 +516,10 @@ class TelegramNotifier:
             if self.mode == "PAPER" and ledger_trades is not None:
                 combined, missing = self.completed_paper_trades(exit_day)
                 known = {(t.get("timestamp"), t["exit_timestamp"], t.get("contract")) for t in combined}
+                excluded = self.stock_reporting_exclusions(exit_day)
                 for record in (*session_trades, closed):
+                    if record.get("entry_id") in excluded:
+                        continue
                     key = (record.get("timestamp"), record["exit_timestamp"], record.get("contract"))
                     if key not in known:
                         combined.append(record)
@@ -528,6 +536,10 @@ class TelegramNotifier:
                 if target == "-" and closed.get("index") == "NIFTY" and closed.get("target_points"):
                     target = self._price(closed["entry_price"] + closed["target_points"])
                 table += f"\nLatest exit SL: {stop} · Target: {target}"
+            elif self.mode == "PAPER MCX" and session_trades is not None:
+                table = self.completed_trade_table(session_trades)
+                table += (f"\nLatest exit SL: {self._price(closed.get('current_sl'))}"
+                          f" · Target: {self._price(closed.get('rupee_target_price'))}")
             else:
                 table = self._trade_table([closed, *self._positions.values()], session_trades)
             self._events.put(

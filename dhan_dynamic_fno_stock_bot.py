@@ -23,7 +23,7 @@ from collections import Counter
 from bisect import bisect_left
 from pathlib import Path
 from stock_option_signals import evaluate_stock_setup, scanx_stock_membership, recent_entry_momentum, order_flow_direction
-from stock_option_policy import premium_plan, rank_candidates, DailyTradeGate, stock_reentry_reason, option_chain_request_slot, market_quote_request_slot, single_bot_session, session_open_wait_seconds
+from stock_option_policy import premium_plan, rank_candidates, learned_profit_floor, DailyTradeGate, stock_reentry_reason, option_chain_request_slot, market_quote_request_slot, single_bot_session, session_open_wait_seconds, combined_paper_loss_state, combined_paper_entry_allowed, COMBINED_PAPER_LOSS_LIMIT_RS
 
 IST = timezone(timedelta(hours=5, minutes=30))
 SESSION_START_TIME = dtime(9, 15)  # Market data and opening-range reference
@@ -892,9 +892,9 @@ def shortlist_movers(quotes, cfg):
         if not all(math.isfinite(v) and v>0 for v in (ltp,prev)):
             continue
         change = 100 * (ltp / prev - 1)
-        if change >= cfg.min_day_change_pct:
+        if change + 1e-9 >= 2.0:
             bulls.append((change, str(sec_id), ltp))
-        elif change <= -cfg.min_day_change_pct:
+        elif change - 1e-9 <= -2.0:
             bears.append((change, str(sec_id), ltp))
     return sorted(bulls, reverse=True) + sorted(bears)
 
@@ -919,7 +919,7 @@ def recheck_recent_stock_candidate(client,candidate,cfg,market_quotes,reasons):
     quote=fresh_stock_underlying_quote(client,candidate['eq_security_id'],market_quotes)
     if not 0<=quote_received_age(quote,time.time())<6:return reject('Reused candidate underlying quote stale')
     quote['previous_session_reference']=context['daily_reference']
-    membership=scanx_stock_membership(context['candles'],quote,time.time(),cfg.min_day_change_pct,cfg.ema_period)
+    membership=scanx_stock_membership(context['candles'],quote,time.time())
     if not membership['allowed'] or membership['opt_type']!=candidate['opt_type']:
         return reject('Final scanner membership: '+membership['reason'])
     if not 0<=time.time()-(candidate['signal_timestamp']+300)<cfg.confirm_window_sec:
@@ -947,7 +947,7 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
     if not daily_reference:return reject('Scanner previous-session daily volume unavailable')
     current = fresh_stock_underlying_quote(client,stock_info["eq_security_id"],market_quotes)
     current['previous_session_reference']=daily_reference
-    membership=scanx_stock_membership(candles,current,time.time(),cfg.min_day_change_pct,cfg.ema_period)
+    membership=scanx_stock_membership(candles,current,time.time())
     if not membership['allowed']:
         return reject('Scanner membership: '+membership['reason'])
     client.logger.info('[STOCK SCANNER %s] %s | %s','MATCH',
@@ -1040,7 +1040,7 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
         issue=entry_price_issue(final_spot,time.time())
         if issue:return reject('Final entry check: '+issue)
         final_quote['previous_session_reference']=daily_reference
-        final_membership=scanx_stock_membership(candles,final_quote,time.time(),cfg.min_day_change_pct,cfg.ema_period)
+        final_membership=scanx_stock_membership(candles,final_quote,time.time())
         if not final_membership['allowed'] or final_membership['opt_type']!=sig['opt_type']:
             return reject('Final scanner membership: '+final_membership.get('reason','Direction changed'))
         sig['scanner_membership']=final_membership
@@ -1493,7 +1493,7 @@ def stock_profit_protection_net(peak_net):
     return None
 
 
-def paper_exit(pos, quote, now, cfg, urgent_only=False):
+def paper_exit(pos, quote, now, cfg, urgent_only=False, combined_net=None):
     stamp=now.timestamp()
     monitor=pos.setdefault('exit_monitor',{'checks':0,'unusable_checks':0,'recent_quotes':[]})
     monitor['checks']+=1
@@ -1539,6 +1539,8 @@ def paper_exit(pos, quote, now, cfg, urgent_only=False):
     pos['peak_net_pnl']=max(float(pos.get('peak_net_pnl',net)),net)
     base_target_reached=(not managing_runner and net>=pos.get('net_profit_target',cfg.rupee_target))
     staged_wait=cfg.staged_profit and pos.get('lots',1)>=2 and not pos.get('partial_booked')
+    learned_floor=learned_profit_floor(pos.get('adaptive_feedback'), pos['peak_net_pnl'],
+                                      float(pos.get('learning_risk_rs') or pos.get('expected_net_risk') or 0))
     def protect_net_floor(target):
         if net<target:return
         floor=stock_net_protection_bid(pos,bid,target,cfg)
@@ -1555,8 +1557,13 @@ def paper_exit(pos, quote, now, cfg, urgent_only=False):
         reason = "CASH_LOSS_LIMIT"
     elif bid <= pos["current_sl"]:
         reason = "TRAIL_STOP" if pos["current_sl"] > pos["initial_sl"] else "PREMIUM_STOP"
+    elif (combined_net is not None and net < 0
+          and combined_net + net <= -COMBINED_PAPER_LOSS_LIMIT_RS):
+        reason = "COMBINED_PAPER_LOSS_LIMIT"
     elif urgent_only:
         reason='EOD_SQUAREOFF' if now.time().replace(tzinfo=None)>=SESSION_END_TIME else None
+    elif learned_floor is not None and net <= learned_floor:
+        reason='LEARNED_PROFIT_PROTECTION'
     elif opposing_flow and net > 0 and (base_target_reached or pos.get('base_target_locked')):
         reason='ORDER_FLOW_PROFIT_EXIT'
     elif base_target_reached:
@@ -1582,6 +1589,7 @@ def paper_exit(pos, quote, now, cfg, urgent_only=False):
             'cash_loss_limit':cfg.rupee_max_risk,'cash_limit_overrun':round(max(0,-net-cfg.rupee_max_risk),2),
             'current_stop':pos['current_sl'],'peak_bid':pos['peak_bid'],
             'peak_executable_vwap':pos.get('peak_executable_vwap'),
+            'peak_net_pnl':pos['peak_net_pnl'],
             'breakout_failure':pos.get('breakout_failure'),'estimated_order_flow':exit_flow or None,'monitor':monitor}
     return (price, reason) if reason else None
 
@@ -1685,8 +1693,9 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                     urgent_quote=quotes.get(str(pos["opt_security_id"]),{})
                     try:urgent_bid=float(urgent_quote['depth']['buy'][0]['price'])
                     except (KeyError,TypeError,ValueError,IndexError):continue
-                    urgent=paper_exit(pos,urgent_quote,now,cfg,urgent_only=True)
-                    if urgent and urgent[1] in ("CASH_LOSS_LIMIT","TRAIL_STOP","PREMIUM_STOP","EOD_SQUAREOFF","NO_PROGRESS","TIME_EXIT","RUNNER_NET_TARGET","RUPEE_TARGET_TRAILED","UNDERLYING_BREAKOUT_FAILED"):
+                    combined_net, _ = combined_paper_loss_state(today, Path(__file__).resolve().parent)
+                    urgent=paper_exit(pos,urgent_quote,now,cfg,urgent_only=True,combined_net=combined_net)
+                    if urgent and urgent[1] in ("COMBINED_PAPER_LOSS_LIMIT","CASH_LOSS_LIMIT","TRAIL_STOP","PREMIUM_STOP","EOD_SQUAREOFF","NO_PROGRESS","TIME_EXIT","RUNNER_NET_TARGET","RUPEE_TARGET_TRAILED","UNDERLYING_BREAKOUT_FAILED"):
                         rec=close_paper_position(ledger,pos,*urgent,now)
                         gate.mark_closed(today,rec,pos["slot"])
                         positions.remove(pos)
@@ -1810,9 +1819,13 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                 continue
             outcomes=[] if scan_once else executed_stock_outcomes(ledger,gate)
             completed = [t for t in outcomes if str(t.get("timestamp", "")).startswith(today)]
-            risk_reason=None if scan_once else stock_daily_risk_reason(outcomes,positions,cfg,today)
             consumed = 0 if scan_once else max(gate.count_entries(today), len(completed)+len(positions))
-            scan_only_reason = risk_reason
+            scan_only_reason = None
+            if not scan_once:
+                combined_net, combined_reached = combined_paper_loss_state(today, Path(__file__).resolve().parent)
+                if combined_reached or combined_net is None:
+                    scan_only_reason = ("Combined Nifty/stock PAPER loss limit reached" if combined_reached
+                                        else "Combined PAPER profit state unavailable")
             if consumed >= cfg.max_daily_trades:
                 scan_only_reason = "Daily stock entry cap reached"
             elif len(positions) >= cfg.max_concurrent:
@@ -1913,8 +1926,6 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                 # or its symbol based on a stale scan-start snapshot.
                 outcomes=executed_stock_outcomes(ledger,gate)
                 completed = [t for t in outcomes if str(t.get("timestamp", "")).startswith(today)]
-                if stock_daily_risk_reason(outcomes,positions,cfg,today,best.get("expected_net_risk",0)):
-                    continue
                 consumed = max(gate.count_entries(today), len(completed)+len(positions))
                 if consumed >= cfg.max_daily_trades or len(positions) >= cfg.max_concurrent:
                     break
@@ -1953,11 +1964,7 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                     continue
                 best=refreshed[0]
                 best['selection_comparison']=selection_comparison
-                # Recheck the final sized plan after screening may have serviced
-                # exits or changed available cash/risk.
-                outcomes=executed_stock_outcomes(ledger,gate)
-                if stock_daily_risk_reason(outcomes,positions,cfg,today,best.get('expected_net_risk',0)):
-                    continue
+                # Screening may have changed available cash.
                 available=ledger['virtual_balance_net']-sum(p['entry_price']*p['qty']+p['estimated_costs'] for p in positions)
                 if best['opt_ltp']*best['qty']+best['estimated_costs']>available:
                     continue
@@ -1972,6 +1979,9 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                     "entry_epoch": now.timestamp(), "entry_id": f"STOCK_{today}_{slot}"}
                 update_position_quote(pos,entry_quote,now.timestamp())
                 pos['persisted_quote_epoch']=pos.get('quote_received_epoch',0)
+                if not combined_paper_entry_allowed(today, Path(__file__).resolve().parent):
+                    logger.info("[OPTSTK REJECT] %s | Combined PAPER loss limit reached or state unavailable", symbol)
+                    break
                 if not gate.reserve(today, {"mode": "LIVE" if live_mode else "PAPER", "position": pos}, slot):
                     return
                 entered += 1
@@ -2102,7 +2112,7 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current
                 continue
             snapshots.setdefault(ts+300, {})[sec] = {"last_price": last_close, "ohlc": {"close": prev_close}}
             # Live scans shortlist by day move before evaluating candle history.
-            if abs((last_close/prev_close-1)*100)<cfg.min_day_change_pct:continue
+            if abs((last_close/prev_close-1)*100)+1e-9<2.0:continue
             # The current scanner requests five calendar days from midnight.
             # Do not give its replay an expanding multi-month EMA warmup.
             lower=bisect_left(candles['timestamp'],(dt-timedelta(days=5)).replace(hour=0,minute=0,second=0,microsecond=0).timestamp()) if current_implementation else 0
@@ -2111,7 +2121,7 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current
                                if datetime.fromtimestamp(t,IST).date()==day)
             membership=scanx_stock_membership(prefix,{'last_price':last_close,
                 'ohlc':{'close':prev_close},'volume':session_volume,'received_epoch':ts+300},
-                ts+300,cfg.min_day_change_pct,cfg.ema_period)
+                ts+300)
             if not membership['allowed']:
                 scanner_rejections[membership['reason']]+=1
                 continue

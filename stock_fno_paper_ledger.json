@@ -1,14 +1,14 @@
 {
   "mode": "PAPER",
   "initial_capital": 50000.0,
-  "virtual_balance_gross": 54405.5,
-  "virtual_balance_net": 52547.46,
-  "profit_without_charges": 4405.5,
-  "net_profit_after_charges": 2547.46,
-  "total_trades": 19,
+  "virtual_balance_gross": 52498.0,
+  "virtual_balance_net": 50564.87,
+  "profit_without_charges": 2498.0,
+  "net_profit_after_charges": 564.87,
+  "total_trades": 20,
   "avg_winning_value_rs": 1133.38,
-  "avg_losing_value_rs": 1313.57,
-  "win_to_loss_ratio": 0.86,
+  "avg_losing_value_rs": 1387.81,
+  "win_to_loss_ratio": 0.82,
   "trades": [
     {
       "symbol": "DRREDDY",
@@ -6130,9 +6130,322 @@
           "validation_net_r": 0.7277
         }
       }
+    },
+    {
+      "symbol": "OBEROIRLTY",
+      "contract": "OBEROIRLTY 1800_CE",
+      "opt_type": "CE",
+      "scanner": "CONFIRMED_BREAKOUT_CE",
+      "qty": 350,
+      "entry_price": 38.2,
+      "timestamp": "2026-11-12 10:00:37",
+      "exit_timestamp": "2026-11-12 10:01:04",
+      "lots": 1,
+      "exit_price": 32.75,
+      "gross_pnl": -1907.5,
+      "charges": 75.09,
+      "net_pnl": -1982.59,
+      "r_multiple": -1.91,
+      "exit_reason": "CASH_LOSS_LIMIT",
+      "data_source": "PAPER_BID_ASK",
+      "entry_id": "STOCK_2026-11-12_1",
+      "exit_diagnostics": {
+        "trigger_reason": "CASH_LOSS_LIMIT",
+        "trigger_epoch": 1794457864.317408,
+        "best_bid": 32.8,
+        "executable_vwap": 32.8,
+        "modeled_fill": 32.75,
+        "net_at_exit": -1982.59,
+        "cash_loss_limit": 1000.0,
+        "cash_limit_overrun": 982.59,
+        "current_stop": 35.35,
+        "peak_bid": 37.7,
+        "peak_executable_vwap": 37.6,
+        "breakout_failure": {
+          "failed": false,
+          "assessed_epoch": 1794457841.3728974,
+          "reason": "No confirmed breakout failure"
+        },
+        "estimated_order_flow": null,
+        "monitor": {
+          "checks": 11,
+          "unusable_checks": 0,
+          "recent_quotes": [
+            {
+              "checked_epoch": 1794457841.212341,
+              "bid": 37.6,
+              "available_qty": 6300,
+              "quote_age_seconds": 1.2636184692382812e-05,
+              "received_epoch": 1794457841.2123284,
+              "required_qty": 350,
+              "executable_vwap": 37.6
+            },
+            {
+              "checked_epoch": 1794457841.372986,
+              "bid": 37.6,
+              "available_qty": 6300,
+              "quote_age_seconds": 0.16065764427185059,
+              "received_epoch": 1794457841.2123284,
+              "required_qty": 350,
+              "executable_vwap": 37.6,
+              "seconds_since_previous_usable": 0.1606450080871582
+            },
+            {
+              "checked_epoch": 1794457845.658857,
+              "bid": 37.3,
+              "available_qty": 4900,
+              "quote_age_seconds": 2.0265579223632812e-05,
+              "received_epoch": 1794457845.6588368,
+              "required_qty": 350,
+              "executable_vwap": 37.3,
+              "seconds_since_previous_usable": 4.2858710289001465
+            },
+            {
+              "checked_epoch": 1794457845.658957,
+              "bid": 37.3,
+              "available_qty": 4900,
+              "quote_age_seconds": 0.0001201629638671875,
+              "received_epoch": 1794457845.6588368,
+              "required_qty": 350,
+              "executable_vwap": 37.3,
+              "seconds_since_previous_usable": 9.989738464355469e-05
+            },
+            {
+              "checked_epoch": 1794457850.185534,
+              "bid": 37.0,
+              "available_qty": 5950,
+              "quote_age_seconds": 1.8835067749023438e-05,
+              "received_epoch": 1794457850.1855152,
+              "required_qty": 350,
+              "executable_vwap": 37.0,
+              "seconds_since_previous_usable": 4.526576995849609
+            },
+            {
+              "checked_epoch": 1794457850.185626,
+              "bid": 37.0,
+              "available_qty": 5950,
+              "quote_age_seconds": 0.00011086463928222656,
+              "received_epoch": 1794457850.1855152,
+              "required_qty": 350,
+              "executable_vwap": 37.0,
+              "seconds_since_previous_usable": 9.202957153320312e-05
+            },
+            {
+              "checked_epoch": 1794457854.556663,
+              "bid": 36.75,
+              "available_qty": 3850,
+              "quote_age_seconds": 2.4557113647460938e-05,
+              "received_epoch": 1794457854.5566385,
+              "required_qty": 350,
+              "executable_vwap": 36.75,
+              "seconds_since_previous_usable": 4.371037006378174
+            },
+            {
+              "checked_epoch": 1794457854.556842,
+              "bid": 36.75,
+              "available_qty": 3850,
+              "quote_age_seconds": 0.00020360946655273438,
+              "received_epoch": 1794457854.5566385,
+              "required_qty": 350,
+              "executable_vwap": 36.75,
+              "seconds_since_previous_usable": 0.00017905235290527344
+            },
+            {
+              "checked_epoch": 1794457859.69076,
+              "bid": 36.5,
+              "available_qty": 8750,
+              "quote_age_seconds": 1.6450881958007812e-05,
+              "received_epoch": 1794457859.6907434,
+              "required_qty": 350,
+              "executable_vwap": 36.5,
+              "seconds_since_previous_usable": 5.133917808532715
+            },
+            {
+              "checked_epoch": 1794457859.690867,
+              "bid": 36.5,
+              "available_qty": 8750,
+              "quote_age_seconds": 0.00012350082397460938,
+              "received_epoch": 1794457859.6907434,
+              "required_qty": 350,
+              "executable_vwap": 36.5,
+              "seconds_since_previous_usable": 0.00010704994201660156
+            },
+            {
+              "checked_epoch": 1794457864.317408,
+              "bid": 32.8,
+              "available_qty": 3500,
+              "quote_age_seconds": 2.5272369384765625e-05,
+              "received_epoch": 1794457864.3173828,
+              "required_qty": 350,
+              "executable_vwap": 32.8,
+              "seconds_since_previous_usable": 4.6265411376953125
+            }
+          ],
+          "last_usable_epoch": 1794457864.317408
+        }
+      },
+      "learning_risk_rs": 1000.0,
+      "learning_r_multiple": -1.98259,
+      "entry_diagnostics": {
+        "signal_timestamp": 1794457500,
+        "conf_close": 1790.4,
+        "conf_high": 1790.8,
+        "conf_low": 1782.0,
+        "atr_5m": 7.795038458013297,
+        "day_change_pct": 2.642893997592166,
+        "scanner_membership": {
+          "allowed": true,
+          "reason": "Scanner filters passed",
+          "profile": "PACE_ADJUSTED_VOLUME_PREVIOUS_15M_EMA",
+          "price": 1790.4,
+          "previous_close": 1744.3,
+          "day_change_pct": 2.642893997592166,
+          "session_volume": 86758.0,
+          "previous_session_volume": 413720.0,
+          "previous_ema_15m": 1758.361611262158,
+          "ema_reference_epoch": 1794456900,
+          "previous_session_date": "2026-11-11",
+          "quote_age_seconds": 1.0388238430023193,
+          "volume_pace_ratio": 1.7233397921417495,
+          "minimum_pace_volume": 80548.711654528,
+          "minimum_absolute_volume": 62058.0,
+          "volume_basis": "FULL_SESSION_OR_1.60X_PACE_WITH_15PCT_MINIMUM",
+          "opt_type": "CE"
+        },
+        "entry_price_validation": {
+          "initial_spot": 1790.8,
+          "final_spot": 1790.4,
+          "minimum_advance": -1.010248077099426,
+          "maximum_advance": 5.456526920609308,
+          "trigger_level": 1789.0,
+          "final_signal_age_seconds": 37.88477611541748,
+          "reused_recent_verification": true
+        },
+        "entry_structure_check": {
+          "allowed": true,
+          "entry_path": "DIRECT_BREAKOUT",
+          "spot": 1790.4,
+          "trigger_level": 1789.0,
+          "invalidation_level": 1788.6102480770994,
+          "distance_atr": 0.17960142307712304,
+          "maximum_distance_atr": 1.1,
+          "structural_move_points": 1.7897519229006775,
+          "delta_scenario_risk_points": 1.3844238102205988,
+          "premium_stop_room_points": 2.5500000000000043,
+          "basis": "ENTRY_PROXIMITY_AND_LOCAL_DELTA_SCENARIO",
+          "reason": "Entry proximity and structural-risk scenario fit existing stop"
+        },
+        "cash_price_pressure": "BULLISH_CONFIRMED",
+        "estimated_order_flow": {
+          "candle_start_epoch": 1794457500,
+          "estimated_buy": 0,
+          "estimated_sell": 0,
+          "estimated_delta": 0,
+          "total_candle_volume": 17483,
+          "observed_unclassified": 0,
+          "unclassified_or_unobserved": 17483,
+          "classified_fraction": 0.0,
+          "status": "UNAVAILABLE"
+        },
+        "volume_confirmation": "RISING_CANDLE_VOLUME",
+        "volume_context": {
+          "confirmation_volume": 17483.0,
+          "regular_average": 9069.6,
+          "regular_ratio": 1.9276484078680427,
+          "post_opening_median": null,
+          "required_volume": 10883.52,
+          "opening_peak": 8425.0,
+          "opening_adjustment_used": false
+        },
+        "breakout_continuation": null,
+        "ema10_15m": 1758.361611262158,
+        "ema10_15m_slope": 7.1196419417424295,
+        "higher_timeframe_aligned": true,
+        "vwap": 1773.8923613921077,
+        "bid": 37.7,
+        "opt_ltp": 38.2,
+        "spread_pct": 1.3089005235602091,
+        "quoted_spread_points": 0.5,
+        "spread_fraction_of_initial_risk": 0.17543859649122798,
+        "bid_room_to_initial_stop": 2.3500000000000014,
+        "initial_sl": 35.35,
+        "rupee_target_price": 42.8,
+        "expected_net_rr": 1.510709999999999,
+        "expected_net_risk": 1000.0,
+        "entry_contract_oi": 416850,
+        "size_selection": {
+          "basis": "Smallest qualifying size",
+          "lots": 1
+        },
+        "delta": 0.49416,
+        "theta": -1.96968,
+        "gamma": 0.00399,
+        "iv": 31.484159959133667,
+        "iv_range_low": 28.91900935440298,
+        "iv_range_high": 212.00438265522746,
+        "dte": 11,
+        "quote_age_seconds": 5.435943603515625e-05,
+        "greeks_receipt_age_seconds": 10.54093074798584,
+        "confirmation_age_seconds": 37.97081398963928,
+        "breakout_confirmation": {
+          "trigger_level": 1789.0,
+          "previous_day_high": 1789.0,
+          "previous_day_low": 1733.1,
+          "opening_high": 1757.3,
+          "opening_low": 1740.6,
+          "buffer": 0.3897519229006649,
+          "body_fraction": 0.8636363636363836,
+          "close_strength": 0.9545454545454698,
+          "closed_candle": true,
+          "relative_volume": 1.9276484078680427,
+          "profile": "SCREENSHOT_REFERENCE_CLOSED_BREAKOUT",
+          "entry_path": "DIRECT_BREAKOUT",
+          "pullback": null,
+          "pre_breakout": null
+        },
+        "signal_quality": 70.702,
+        "quality_volume_ratio": 1.9276484078680427,
+        "selection_analysis": {
+          "score": 78.3727,
+          "breakout_quality": 70.702,
+          "learning_adjustment": 2.0535,
+          "execution_bonus": 5.6172,
+          "planned_net_rr": 1.510709999999999,
+          "basis": "CONFIRMED_SETUP_VOLUME_CLOSE_EXECUTION_AND_CLOSED_NET_FEEDBACK"
+        },
+        "selection_comparison": [
+          {
+            "symbol": "OBEROIRLTY",
+            "score": 79.9495,
+            "breakout_quality": 70.702,
+            "learning_adjustment": 2.0535,
+            "execution_bonus": 7.194,
+            "planned_net_rr": 1.5108799999999991,
+            "basis": "CONFIRMED_SETUP_VOLUME_CLOSE_EXECUTION_AND_CLOSED_NET_FEEDBACK"
+          }
+        ],
+        "adaptive_feedback": {
+          "basis": "CLOSED_PAPER_SETUP_WALK_FORWARD",
+          "setup_key": [
+            "STOCK",
+            "DIRECT_BREAKOUT",
+            "CE"
+          ],
+          "closed_trades": 12,
+          "independent_days": 5,
+          "quality_adjustment": 2.0535,
+          "paused": false,
+          "exit_policy": "STANDARD",
+          "reason": "Chronological validation supports adaptation",
+          "training_trades": 8,
+          "validation_trades": 4,
+          "training_net_r": 0.2279,
+          "validation_net_r": 0.753
+        }
+      }
     }
   ],
   "net_avg_winning_value_rs": 1032.91,
-  "net_avg_losing_value_rs": 1406.79,
-  "net_win_to_loss_ratio": 0.73
+  "net_avg_losing_value_rs": 1478.76,
+  "net_win_to_loss_ratio": 0.7
 }

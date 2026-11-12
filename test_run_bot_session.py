@@ -156,6 +156,52 @@ class EngineMaintenanceTests(unittest.TestCase):
         leg['top_bid_price']=160;leg['top_ask_price']=160.1
         self.assertIsNone(engine.channel_entry_view(view,chain,call,'2026-10-27',119,120)[0])
 
+    def test_native_sensex_stop_uses_twenty_point_floor_for_cheap_options(self):
+        from dhan_bot_engine import option_stop_points
+
+        self.assertEqual(option_stop_points("SENSEX", 67.70), 20.0)
+        self.assertEqual(option_stop_points("SENSEX", 150), 20.0)
+        self.assertEqual(option_stop_points("SENSEX", 300), 21.6)
+        self.assertEqual(option_stop_points("SENSEX", 400), 23.0)
+
+    def test_nifty_recovery_needs_fresh_directional_market_evidence(self):
+        from dhan_bot_engine import nifty_recovery_block_reason
+
+        check = {"allowed": True, "trigger_level": 25250, "oi_confirmed_levels": [25250],
+                 "structure_rr": 1.7, "room_points": 28}
+        view = {"snapshot_received_epoch": 100, "d_spot_5m": -8,
+                "market_structure": {"direction_checks": {"BUY_PE": check}}}
+        self.assertIsNone(nifty_recovery_block_reason(view, "BUY_PE", 105))
+        self.assertIn("stale", nifty_recovery_block_reason(view, "BUY_PE", 109))
+        self.assertIn("momentum", nifty_recovery_block_reason(dict(view, d_spot_5m=8), "BUY_PE", 105))
+        self.assertIn("OI", nifty_recovery_block_reason(view, "BUY_CE", 105))
+        check["room_points"] = 19
+        self.assertIn("room", nifty_recovery_block_reason(view, "BUY_PE", 105))
+
+    def test_prepared_channel_quote_reuses_only_current_expiry_and_real_depth(self):
+        import dhan_bot_engine as engine
+
+        client = MagicMock()
+        call = {"index": "SENSEX", "strike": 82000.0, "option_type": "CE"}
+        strike = "82000.000000"
+        cached = {"expiry": "2026-11-12", "received": 100, "chain": {
+            strike: {"ce": {"security_id": 123, "greeks": {"delta": .5, "theta": -1}}},
+        }}
+        client.fetch_held_channel_quote.return_value = {"oc": {strike: {"ce": {
+            "security_id": "123", "top_bid_price": 359, "top_bid_quantity": 20,
+            "best_bid_price": 360, "best_bid_quantity": 40,
+            "top_ask_price": 361, "top_ask_quantity": 60, "depth_received_epoch": 102,
+        }}}}
+        self.assertIsNone(engine.prepared_channel_entry_quote(client, call, cached, "2026-11-19", 20, 101))
+        self.assertIsNone(engine.prepared_channel_entry_quote(client, call, cached, "2026-11-12", 20, 131))
+        client.fetch_held_channel_quote.assert_not_called()
+        quote = engine.prepared_channel_entry_quote(client, call, cached, "2026-11-12", 20, 101)
+        self.assertEqual(quote["received_epoch"], 102)
+        self.assertEqual(quote["oc"][strike]["ce"]["top_bid_price"], 360)
+        self.assertEqual(quote["oc"][strike]["ce"]["top_bid_quantity"], 40)
+        self.assertEqual(quote["oc"][strike]["ce"]["greeks"]["delta"], .5)
+        client.fetch_held_channel_quote.assert_called_once_with({**call, "security_id": "123", "qty": 20})
+
     def test_channel_identity_is_consumed_with_durable_index_slot(self):
         import dhan_bot_engine as engine
         ledger={'trades':[]}

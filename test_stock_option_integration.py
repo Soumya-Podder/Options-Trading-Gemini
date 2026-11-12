@@ -14,6 +14,42 @@ import dhan_dynamic_fno_stock_bot as bot
 
 
 class IntegrationTests(unittest.TestCase):
+    def test_combined_loss_latches_and_excludes_sensex_and_flagged_stock(self):
+        day = "2026-11-12"
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            stock_dir = root / "stock_option_daily_entries"
+            stock_dir.mkdir()
+            (stock_dir / f"{day}.slot1.json").write_text(json.dumps({
+                "state": "closed", "exclude_from_daily_report": True,
+                "close_details": {"entry_id": "excluded"},
+            }), encoding="utf-8")
+
+            def write_ledger(filename, trades):
+                (root / filename).write_text(json.dumps({"mode": "PAPER", "trades": trades}), encoding="utf-8")
+
+            write_ledger("paper_trade_ledger.json", [
+                {"index": "NIFTY", "exit_timestamp": day + " 10:01:00", "net_pnl": -1500},
+                {"index": "SENSEX", "exit_timestamp": day + " 10:02:00", "net_pnl": -2000},
+            ])
+            write_ledger("stock_fno_paper_ledger.json", [
+                {"entry_id": "excluded", "exit_timestamp": day + " 10:00:00", "net_pnl": -1000},
+                {"entry_id": "loss", "exit_timestamp": day + " 10:03:00", "net_pnl": -1100},
+                {"entry_id": "late", "exit_timestamp": day + " 10:04:00", "net_pnl": 200},
+            ])
+            self.assertEqual(bot.combined_paper_loss_state(day, root), (-2400.0, True))
+            self.assertEqual(bot.combined_paper_loss_state("2026-11-13", root), (0.0, False))
+            self.assertFalse(bot.combined_paper_entry_allowed(day, root))
+
+            write_ledger("stock_fno_paper_ledger.json", [
+                {"entry_id": "prior", "exit_timestamp": day + " 10:00:00", "net_pnl": -999},
+            ])
+            (stock_dir / f"{day}.slot2.json").write_text(json.dumps({
+                "state": "reserved", "details": {"position": {"expected_net_risk": 900}},
+            }), encoding="utf-8")
+            self.assertEqual(bot.combined_paper_loss_state(day, root), (-2499.0, False))
+            self.assertTrue(bot.combined_paper_entry_allowed(day, root))
+
     def test_order_flow_counts_trade_volume_once_and_exposes_missing_coverage(self):
         import struct
 
@@ -85,7 +121,7 @@ class IntegrationTests(unittest.TestCase):
             result=bot.verify_live_scanx_and_resolve_stock_option(client,
                 {'symbol':'SONACOMS','eq_security_id':'4684','nearest_expiry':'2026-11-23'},871.65,2.32,cfg,reasons)
         self.assertIsNone(result)
-        self.assertEqual(membership.call_args.args[3:],(cfg.min_day_change_pct,cfg.ema_period))
+        self.assertEqual(membership.call_args.args[3:], ())
         self.assertIn('Session volume not above previous full-session volume',reasons[0])
         evaluate.assert_not_called()
         client.fetch_option_chain.assert_not_called()
@@ -1352,15 +1388,15 @@ class BreakoutContinuationTests(unittest.TestCase):
             self.data[field][-1]=value
         self.assertIsNone(self.signal())
 
-    def test_scanner_uses_full_session_or_pace_volume_and_quote_previous_close(self):
+    def test_scanner_requires_full_session_volume_and_uses_quote_previous_close(self):
         from stock_option_signals import scanx_stock_membership
         quote={'last_price':103,'ohlc':{'close':100},'volume':10000,'received_epoch':self.now}
         result=scanx_stock_membership(self.data,quote,self.now)
         self.assertTrue(result['allowed'])
         self.assertEqual(result['previous_session_volume'],7500)
         self.assertEqual(result['opt_type'],'CE')
-        # Early volume pace can qualify before the full-day total; insufficient absolute volume cannot.
-        self.assertTrue(scanx_stock_membership(self.data,{**quote,'volume':7000},self.now)['allowed'])
+        self.assertFalse(scanx_stock_membership(self.data,{**quote,'volume':7000},self.now)['allowed'])
+        self.assertFalse(scanx_stock_membership(self.data,{**quote,'volume':7500},self.now)['allowed'])
         self.assertFalse(scanx_stock_membership(self.data,{**quote,'volume':1000},self.now)['allowed'])
         self.assertFalse(scanx_stock_membership(self.data,{**quote,'ohlc':{'close':102}},self.now)['allowed'])
 
@@ -1637,48 +1673,24 @@ class RequestedEarlyEntryRunnerPatchTests(unittest.TestCase):
         self.assertGreaterEqual(bot.stock_position_value(pos,decision[0])['net'],bot.stock_profit_protection_net(pos['peak_net_pnl'])-1)
 
 
-class PaceVolumeBoundaryTests(unittest.TestCase):
-    def test_bearish_volume_surge_can_pass_scanner_but_needs_fresh_closed_breakdown(self):
+class ScannerVolumeBoundaryTests(unittest.TestCase):
+    def test_bearish_volume_surge_cannot_bypass_full_session_volume(self):
         from stock_option_signals import scanx_stock_membership
-        fixture=BreakoutContinuationTests()
+        fixture = BreakoutContinuationTests()
         fixture.setUp()
-        data=fixture.data
-        for i in range(len(data['timestamp'])):
-            data['open'][i]=200-data['open'][i]
-            data['close'][i]=200-data['close'][i]
-            data['high'][i],data['low'][i]=200-data['low'][i],200-data['high'][i]
-        now=fixture.now
-        quote={'last_price':97,'ohlc':{'close':100},'volume':1000,'received_epoch':now}
-        data['volume'][-1]=360
-        accepted=scanx_stock_membership(data,quote,now)
-        self.assertTrue(accepted['allowed'])
-        self.assertEqual(accepted['opt_type'],'PE')
-        self.assertEqual(accepted['volume_surge_ratio'],3)
-        for as_of in (now-1,now+300):
-            self.assertFalse(scanx_stock_membership(data,{**quote,'received_epoch':as_of},as_of)['allowed'])
-        self.assertFalse(scanx_stock_membership(data,{**quote,'last_price':98},now)['allowed'])
-        self.assertFalse(scanx_stock_membership(data,{**quote,'last_price':94},now)['allowed'])
-        data['volume'][-1]=359
-        self.assertFalse(scanx_stock_membership(data,quote,now)['allowed'])
-        data['volume'][-1]=360
-        for field,value in zip(data,(now,97,97.2,96.5,96.7,120)):
-            data[field].append(value)
-        next_quote={**quote,'last_price':96.7,'received_epoch':now+300}
-        self.assertTrue(scanx_stock_membership(data,next_quote,now+300)['allowed'])
-        self.assertFalse(scanx_stock_membership(data,{**next_quote,'received_epoch':now+600},now+600)['allowed'])
-
-
-    def test_early_minimum_and_late_full_day_override(self):
-        from stock_option_signals import scanx_stock_membership
-        fixture=BreakoutContinuationTests();fixture.setUp()
-        quote={'last_price':103,'ohlc':{'close':100},'volume':1124,'received_epoch':fixture.now}
-        self.assertFalse(scanx_stock_membership(fixture.data,quote,fixture.now)['allowed'])
-        accepted=scanx_stock_membership(fixture.data,{**quote,'volume':1125},fixture.now)
-        self.assertTrue(accepted['allowed']);self.assertEqual(accepted['minimum_absolute_volume'],1125)
-        self.assertFalse(scanx_stock_membership(fixture.data,{**quote,'volume':1125,'received_epoch':fixture.now+1},fixture.now)['allowed'])
-        late=datetime.fromtimestamp(fixture.now,IST).replace(hour=14,minute=0).timestamp()
-        self.assertFalse(scanx_stock_membership(fixture.data,{**quote,'volume':7400,'received_epoch':late},late)['allowed'])
-        self.assertTrue(scanx_stock_membership(fixture.data,{**quote,'volume':7501,'received_epoch':late},late)['allowed'])
+        data = fixture.data
+        for i in range(len(data["timestamp"])):
+            data["open"][i] = 200 - data["open"][i]
+            data["close"][i] = 200 - data["close"][i]
+            data["high"][i], data["low"][i] = 200 - data["low"][i], 200 - data["high"][i]
+        data["volume"][-1] = 360
+        now = fixture.now
+        quote = {"last_price": 97, "ohlc": {"close": 100}, "volume": 1000, "received_epoch": now}
+        self.assertFalse(scanx_stock_membership(data, quote, now)["allowed"])
+        self.assertFalse(scanx_stock_membership(data, {**quote, "volume": 7500}, now)["allowed"])
+        accepted = scanx_stock_membership(data, {**quote, "volume": 7501}, now)
+        self.assertTrue(accepted["allowed"])
+        self.assertEqual(accepted["opt_type"], "PE")
 
 
 class RequestedExhaustionAndNetTierTests(unittest.TestCase):
@@ -1689,19 +1701,18 @@ class RequestedExhaustionAndNetTierTests(unittest.TestCase):
                 if expected is None:self.assertIsNone(result)
                 else:self.assertAlmostEqual(result,expected)
 
-    def test_scanner_exhaustion_cap_is_symmetric_and_inclusive(self):
+    def test_large_moves_remain_visible_on_both_scanner_sides(self):
         from stock_option_signals import scanx_stock_membership
         fixture=BreakoutContinuationTests();fixture.setUp()
         for sign in (1,-1):
-            for change,allowed in [(5.5,True),(5.5001,False),(7.4,False),(13.15,False)]:
+            for change in (5.5, 5.5001, 7.4, 13.15):
                 quote={'last_price':100*(1+sign*change/100),'ohlc':{'close':100},
                        'volume':10000,'received_epoch':fixture.now}
                 with self.subTest(sign=sign,change=change):
                     # EMA remains on the appropriate side for both directions.
                     with patch('stock_option_signals._ema',return_value=[100]*30):
                         result=scanx_stock_membership(fixture.data,quote,fixture.now)
-                    self.assertEqual(result['allowed'],allowed)
-                    if not allowed:self.assertIn('exhaustion cap',result['reason'])
+                    self.assertTrue(result['allowed'])
 
     def test_closed_signal_cannot_bypass_exhaustion_cap(self):
         fixture=BreakoutContinuationTests();fixture.setUp()

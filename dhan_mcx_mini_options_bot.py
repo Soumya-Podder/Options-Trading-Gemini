@@ -44,13 +44,21 @@ except ImportError:
     IST = timezone(timedelta(hours=5, minutes=30))
 
 try:
-    from stock_option_policy import market_quote_request_slot, option_chain_request_slot
+    from stock_option_policy import (
+        adaptive_setup_feedback, learned_profit_floor, market_quote_request_slot, option_chain_request_slot,
+    )
 except ImportError:
     def option_chain_request_slot():
         return nullcontext()
 
     def market_quote_request_slot():
         return nullcontext()
+
+    def adaptive_setup_feedback(candidate, closed_trades, as_of):
+        return {}
+
+    def learned_profit_floor(feedback, peak_net, risk):
+        return None
 
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -454,8 +462,6 @@ class MCXRegimeAdaptiveBrain:
             req_conv += 1
 
         if conviction < req_conv:
-            return True, 2.0, "Bypassed brain filter for live session execution"
-            return True, 2.0, "Bypassed brain filter for live session execution"
             return False, 0.0, f"Brain filtered {pb_key} (Conv {conviction} < {req_conv}, E[R]={pb_ema_r:+.2f})"
 
         base_prio = MCX_MINI_CONFIG[sym]["base_priority"]
@@ -2158,7 +2164,8 @@ def auto_calibrate_today(brain: MCXRegimeAdaptiveBrain, symbols: List[str], logg
     brain.save()
 
 
-def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger) -> None:
+def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger, *,
+                    extra_entry_date=None, extra_trade_slot_date=None) -> None:
     if live_mode:
         raise RuntimeError("Run in PAPER mode first to validate MCX Mini Option spreads on your account.")
 
@@ -2194,9 +2201,19 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger)
         "active_position": None,
     })
 
+    from telegram_notifier import TelegramNotifier
+
+    telegram = TelegramNotifier(env, logger, "PAPER MCX")
     calibration_attempted = False
 
     today_str = session_now.date().isoformat()
+    trade_cap = MAX_TRADES_PER_DAY
+    if not live_mode and extra_trade_slot_date == today_str:
+        trade_cap += 1
+        logger.info("MCX PAPER daily trade cap for %s: %s", today_str, trade_cap)
+    extra_entry_allowed = extra_entry_date == today_str
+    if extra_entry_allowed:
+        logger.info("MCX PAPER one-entry exception enabled for %s after consecutive losses", today_str)
     today_trades = [t for t in ledger.get("trades", []) if str(t.get("timestamp", "")).startswith(today_str)]
     day_net_pnl = round(sum(float(t.get("net_pnl", 0.0)) for t in today_trades), 2)
     consec_losses = 0
@@ -2334,6 +2351,7 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger)
             if curr_bid <= 0:
                 continue
 
+            quote_received_epoch = now.timestamp()
             active_pos["current_bid"] = curr_bid
             active_pos["highest_bid"] = max(float(active_pos["highest_bid"]), curr_bid)
             qty = int(active_pos["qty"])
@@ -2342,6 +2360,9 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger)
             one_r_pts = float(active_pos["stop_points"])
             fees = 40.0 + 20.0 * lots
             _, open_net, _ = mcx_exit_pnl(active_pos, curr_bid)
+            peak_net = max(active_pos.get("peak_net_pnl", open_net), open_net)
+            active_pos["peak_net_pnl"] = peak_net
+            learned_floor = learned_profit_floor(active_pos.get("adaptive_feedback"), peak_net, one_r_pts * qty)
             peak_r = (float(active_pos["highest_bid"]) - entry_p) / max(one_r_pts, 0.01)
             elapsed_min = (now.timestamp() - float(active_pos["entry_epoch"])) / 60.0
 
@@ -2352,6 +2373,8 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger)
                 exit_reason = "MAX_RUPEE_RISK_CAP"
             elif now.time() >= MCX_EOD_SQUAREOFF_TIME:
                 exit_reason = "MCX_EOD_SQUAREOFF"
+            elif learned_floor is not None and open_net <= learned_floor:
+                exit_reason = "LEARNED_PROFIT_PROTECTION"
             else:
                 lock_r = None
                 if peak_r >= NORMAL_TARGET_R:
@@ -2445,6 +2468,8 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger)
                     "planned_rr": active_pos.get("planned_target_r", NORMAL_TARGET_R),
                     "exit_reason": exit_reason,
                     "setup": active_pos["setup"],
+                    "learning_risk_rs": one_r_pts * qty,
+                    "exit_diagnostics": {"peak_net_pnl": peak_net},
                 }
                 ledger["virtual_balance_gross"] = round(ledger["virtual_balance_gross"] + gross_pnl, 2)
                 ledger["virtual_balance_net"] = round(ledger["virtual_balance_net"] + net_pnl, 2)
@@ -2474,13 +2499,31 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger)
                     "[AUTONOMOUS EXIT] %s (%s) | Entry: %.2f -> Exit: %.2f | Net PnL: Rs.%+.2f (%+.2fR) | Day Net: Rs.%+.2f",
                     trade_rec["contract"], exit_reason, entry_p, curr_bid, net_pnl, r_mult, day_net_pnl
                 )
+                telegram.exited({
+                    **active_pos, **trade_rec,
+                    "rupee_target_price": entry_p + one_r_pts * active_pos.get("active_target_r", active_pos.get("planned_target_r", NORMAL_TARGET_R)),
+                }, ledger_trades=ledger["trades"])
                 active_pos = None
+            else:
+                partial = active_pos.get("partial_exit") or {}
+                partial_qty = partial.get("qty", 0)
+                telegram.position({
+                    **active_pos,
+                    "qty": qty - partial_qty,
+                    "partial_gross": (partial.get("price", entry_p) - entry_p) * partial_qty,
+                    "_partial_fill": partial,
+                    "quote_received_epoch": quote_received_epoch,
+                    "current_ltp": node.get("last_price"),
+                    "current_ask": node.get("top_ask_price"),
+                    "peak_bid": active_pos["highest_bid"],
+                    "rupee_target_price": entry_p + one_r_pts * active_pos.get("active_target_r", active_pos.get("planned_target_r", NORMAL_TARGET_R)),
+                })
 
         elif (
             u_info["is_mini_option"] and u_info["All_futs"][0]["is_exact_mini"]
             and MCX_ENTRY_START_TIME <= now.time() <= MCX_LAST_ENTRY_TIME
-            and len(today_trades) < MAX_TRADES_PER_DAY
-            and consec_losses < MAX_CONSECUTIVE_LOSSES
+            and len(today_trades) < trade_cap
+            and (consec_losses < MAX_CONSECUTIVE_LOSSES or extra_entry_allowed)
             and day_net_pnl > -DAILY_LOSS_LIMIT_RS
             and day_net_pnl < DAILY_PROFIT_TARGET_RS
             and now >= sector_busy_until.get(cfg["sector"], now)
@@ -2508,6 +2551,10 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger)
                 opt_node = view["atm_ce"] if is_ce else view["atm_pe"]
                 bid = float(opt_node.get("top_bid_price") or 0.0)
                 ask = float(opt_node.get("top_ask_price") or opt_node.get("last_price") or 0.0)
+                after_loss_limit = consec_losses >= MAX_CONSECUTIVE_LOSSES
+                if after_loss_limit and (not opt_node.get("top_ask_price") or not 0 < bid < ask
+                                         or view.get("conviction_score", 0) < 6):
+                    continue
                 if ask <= 0:
                     continue
                 if bid <= 0:
@@ -2543,6 +2590,15 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger)
                     and conviction < 5
                 ):
                     lots = min(lots, 3)
+                if after_loss_limit and lots > 0:
+                    lots = 1
+                    tick = cfg["tick_size"]
+                    stop_fill = math.floor(round(ask - stop_pts, 2) * .999 / tick) * tick
+                    planned_loss = (ask - stop_fill) * u_info["multiplier"] + 60
+                    remaining_risk = min(MAX_TOTAL_RISK_RS, DAILY_LOSS_LIMIT_RS + day_net_pnl)
+                    if ask - bid > 0.25 * stop_pts or planned_loss > remaining_risk:
+                        logger.info("[SKIP %s] Additional entry: spread or planned loss exceeds remaining risk", sym)
+                        continue
                 if lots <= 0:
                     continue
 
@@ -2565,6 +2621,9 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger)
                     "planned_target_r": planned_rr,
                     "entry_context": entry_context,
                     "exit_policy": exit_policy,
+                    "adaptive_feedback": adaptive_setup_feedback(
+                        {"symbol": sym, "setup": view["setup"]}, ledger["trades"], now.timestamp()
+                    ),
                     "fat_tail": mcx_fat_tail_entry(view, lots, now.time()),
                     "continuation": mcx_continuation(view, is_ce),
                     "ratchet_armed": False,
@@ -2575,12 +2634,20 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger)
                 }
                 ledger["active_position"] = active_pos
                 atomic_write_json(LEDGER_FILE, ledger)
+                telegram.position({
+                    **active_pos,
+                    "quote_received_epoch": now.timestamp(),
+                    "current_ask": ask,
+                    "rupee_target_price": ask + stop_pts * planned_rr,
+                }, entry=True)
                 logger.info(
                     "[AUTONOMOUS ENTRY] %s %s %s | Lots:%d (Qty:%d) @ Rs.%.2f | SL: Rs.%.2f (1R=%.2f) | Aim: 1:%.0f RR | %s",
                     sym, opt_node["strike"], active_pos["option_type"], lots, qty, ask, init_sl, stop_pts, planned_rr, view["reason"]
                 )
 
         time.sleep(0.2)
+
+    telegram.close()
 
 
 if __name__ == "__main__":
@@ -2599,6 +2666,8 @@ if __name__ == "__main__":
     )
     parser.add_argument("--reset-wallet", action="store_true", help="Reset MCX paper wallet to Rs. 30,000")
     parser.add_argument("--live", action="store_true", help="Enable LIVE order mode")
+    parser.add_argument("--paper-extra-entry-date", help="Allow one extra PAPER entry after two losses on this IST date (YYYY-MM-DD)")
+    parser.add_argument("--paper-extra-trade-slot-date", help="Raise the daily PAPER trade cap by one on this IST date (YYYY-MM-DD)")
     args = parser.parse_args()
 
     if args.reset_wallet and os.path.exists(LEDGER_FILE):
@@ -2612,4 +2681,6 @@ if __name__ == "__main__":
     if args.backtest_days > 0:
         run_mcx_historical_backtest(days=args.backtest_days, symbols=selected, logger=logger)
     else:
-        run_mcx_session(live_mode=args.live, symbols=selected, logger=logger)
+        run_mcx_session(live_mode=args.live, symbols=selected, logger=logger,
+                        extra_entry_date=args.paper_extra_entry_date,
+                        extra_trade_slot_date=args.paper_extra_trade_slot_date)

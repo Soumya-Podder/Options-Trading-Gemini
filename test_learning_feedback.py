@@ -426,6 +426,19 @@ class AdaptiveSetupFeedbackTests(unittest.TestCase):
         self.assertEqual(feedback['exit_policy'],'PROTECT_EARNED_PROFIT')
         self.assertFalse(feedback['paused'])
 
+    def test_mcx_giveback_uses_closed_net_peaks_for_the_same_playbook(self):
+        from stock_option_policy import learned_profit_floor
+        rows = self.trades([1] * 8 + [-.5] * 4)
+        for row in rows:
+            row.update(symbol='GOLDM', setup='MCX_TREND_PULLBACK_PE',
+                       exit_diagnostics={'peak_net_pnl': 1600})
+        feedback = self.feedback(rows, candidate=rows[0])
+        self.assertEqual(feedback['exit_policy'], 'PROTECT_EARNED_PROFIT')
+        self.assertIsNone(learned_profit_floor(feedback, 49, 100))
+        self.assertEqual(learned_profit_floor(feedback, 80, 100), 40)
+        other = self.feedback(rows, candidate={**rows[0], 'symbol': 'SILVERM'})
+        self.assertIsNone(learned_profit_floor(other, 80, 100))
+
     def test_stock_feedback_cannot_arm_before_requested_base_progress(self):
         import argparse
         import dhan_dynamic_fno_stock_bot as stock

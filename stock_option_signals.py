@@ -137,10 +137,10 @@ def _completed_15m_bars(bars: List[dict]) -> List[dict]:
 def scanx_stock_membership(candles, quote, as_of_epoch, min_day_change_pct=2.0, ema_period=10):
     """ScanX-style membership, separate from trade qualification.
 
-    Require session volume or a fresh directional breakout on exceptional
-    five-minute volume. Use only complete reference sessions and candles.
+    Require volume above the previous full session and the matching
+    day-change and completed 15-minute EMA conditions.
     """
-    result={'allowed':False,'reason':'Scanner reference unavailable','profile':'PACE_ADJUSTED_VOLUME_PREVIOUS_15M_EMA'}
+    result={'allowed':False,'reason':'Scanner reference unavailable','profile':'FULL_SESSION_VOLUME_PREVIOUS_15M_EMA'}
     try:
         threshold=float(min_day_change_pct)
         if not isfinite(threshold) or threshold<=0 or ema_period!=10:
@@ -170,47 +170,13 @@ def scanx_stock_membership(candles, quote, as_of_epoch, min_day_change_pct=2.0, 
         if not all(isfinite(v) and v>0 for v in (price,close,volume,prior_volume)):return result
         ema=_ema([b['close'] for b in completed],ema_period)[-1]
         change=(price/close-1)*100
-        direction='CE' if change>=threshold and price>ema else 'PE' if change<=-threshold and price<ema else None
+        direction='CE' if change+1e-9>=threshold and price>ema else 'PE' if change-1e-9<=-threshold and price<ema else None
         result.update(price=price,previous_close=close,day_change_pct=change,
                       session_volume=volume,previous_session_volume=prior_volume,
                       previous_ema_15m=ema,ema_reference_epoch=completed[-1]['timestamp'],
                       previous_session_date=prior[0]['date'].isoformat(),quote_age_seconds=age)
-        now_dt=datetime.fromtimestamp(as_of_epoch,IST)
-        elapsed_m=max(10.0,min(375.0,(now_dt-now_dt.replace(hour=9,minute=15,second=0,microsecond=0)).total_seconds()/60.0))
-        expected_volume=prior_volume*(elapsed_m/375.0)
-        vol_pace_ok=(volume>prior_volume) or (volume>=1.60*expected_volume and volume>=0.15*prior_volume)
-        result.update(volume_pace_ratio=volume/expected_volume,minimum_pace_volume=1.60*expected_volume,
-                      minimum_absolute_volume=0.15*prior_volume,volume_basis='FULL_SESSION_OR_1.60X_PACE_WITH_15PCT_MINIMUM')
-        # A sharp move can start before cumulative volume catches up. Require a
-        # fresh close beyond five contiguous session bars and a live price holding it.
-        surge_ok = False
-        if (not vol_pace_ok and direction
-                and 0 <= as_of_epoch - (bars[-1]['timestamp'] + BAR_SECONDS) < BAR_SECONDS):
-            bullish = direction == 'CE'
-            for end in (len(bars), len(bars)-1):
-                window = bars[max(0, end-6):]
-                recent = window[:6]
-                if (end < 6 or recent[0]['date'] != today
-                        or any(b['timestamp'] - a['timestamp'] != BAR_SECONDS
-                               for a, b in zip(window, window[1:]))):
-                    continue
-                baseline = sum(b['volume'] for b in recent[:-1]) / 5
-                last = recent[-1]
-                level = (max(b['high'] for b in recent[:-1]) if bullish
-                         else min(b['low'] for b in recent[:-1]))
-                directional_break = (last['close'] > max(last['open'], level)
-                                     and min(price, bars[-1]['close']) > level if bullish
-                                     else last['close'] < min(last['open'], level)
-                                     and max(price, bars[-1]['close']) < level)
-                surge_ok = baseline > 0 and last['volume'] >= 3 * baseline and directional_break
-                if surge_ok:
-                    result.update(volume_basis='CLOSED_5M_BREAKOUT_3X_RECENT_VOLUME',
-                                  volume_surge_ratio=last['volume']/baseline, volume_surge_level=level,
-                                  volume_surge_epoch=last['timestamp'])
-                    break
-        if not (vol_pace_ok or surge_ok):
-            result['reason']='Session volume below full-session and pace-adjusted prior volume; no qualifying closed-candle volume surge'
-        elif abs(change)>5.5+1e-9:result['reason']='Day move exceeds 5.5% exhaustion cap (no late top chasing)'
+        if volume <= prior_volume:
+            result['reason']='Session volume not above previous full-session volume'
         elif direction is None:result['reason']='Day change and previous 15-minute EMA do not match a scanner side'
         else:result.update(allowed=True,opt_type=direction,reason='Scanner filters passed')
         return result
