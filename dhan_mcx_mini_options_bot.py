@@ -1553,27 +1553,36 @@ def autonomous_manage_runner_and_exit(
     return 2, f"AUTONOMOUS 1:2 RR NORMAL TARGET (score={score}/4)"
 
 
+def mcx_option_dte_days(sym: str, bar_dt: Optional[datetime] = None, opt_expiry: Optional[str] = None) -> float:
+    """Resolve actual remaining DTE using opt_expiry (when in the same contract cycle) or MCX monthly schedule."""
+    if bar_dt is None:
+        return 12.0
+    if opt_expiry:
+        try:
+            exp_dt = datetime.strptime(str(opt_expiry)[:10], "%Y-%m-%d").replace(hour=23, minute=30, tzinfo=IST)
+            diff_days = (exp_dt - bar_dt).total_seconds() / 86400.0
+            if 0.2 <= diff_days <= 35.0:
+                return max(1.5, diff_days)
+        except ValueError:
+            pass
+    exp_day_map = {"CRUDEOILM": 17, "NATGASMINI": 20, "SILVERM": 23, "GOLDM": 27}
+    target_day = exp_day_map.get(sym, 21)
+    y, m = bar_dt.year, bar_dt.month
+    if bar_dt.day > target_day:
+        m = 1 if m == 12 else m + 1
+        y = y + 1 if m == 1 else y
+    try:
+        exp_dt = datetime(y, m, target_day, 23, 30, tzinfo=IST)
+        return max(1.5, min(32.0, (exp_dt - bar_dt).total_seconds() / 86400.0))
+    except ValueError:
+        return 12.0
+
+
 def estimate_atm_option_premium(sym: str, fut_price: float, bar_dt: Optional[datetime] = None, opt_expiry: Optional[str] = None) -> float:
-    """
-    Proportional Black-76 ATM Option Pricing using realistic MCX monthly DTE cycle:
-    Computes remaining calendar days to monthly option expiry (~18-24th of each month)
-    so backtest option premiums and R-multiples match real-world MCX option chains.
-    """
+    """Proportional Black-76 ATM Option Pricing using resolved DTE from opt_expiry or monthly cycle."""
     cfg = MCX_MINI_CONFIG[sym]
     iv = cfg["annual_iv"]
-    dte_days = 12.0
-    if bar_dt is not None:
-        exp_day_map = {"CRUDEOILM": 17, "NATGASMINI": 20, "SILVERM": 23, "GOLDM": 27}
-        target_day = exp_day_map.get(sym, 21)
-        y, m = bar_dt.year, bar_dt.month
-        if bar_dt.day > target_day:
-            m = 1 if m == 12 else m + 1
-            y = y + 1 if m == 1 else y
-        try:
-            exp_dt = datetime(y, m, target_day, 23, 30, tzinfo=IST)
-            dte_days = max(2.0, min(30.0, (exp_dt - bar_dt).total_seconds() / 86400.0))
-        except ValueError:
-            dte_days = 12.0
+    dte_days = mcx_option_dte_days(sym, bar_dt, opt_expiry)
     raw_prem = fut_price * iv * 0.3989 * math.sqrt(dte_days / 365.0)
     bounded = max(cfg["min_premium"], min(cfg["max_premium"], raw_prem))
     tick = cfg["tick_size"]
@@ -1938,15 +1947,19 @@ def replay_mcx_history(
             fut_close_move = sign * (merged["close"][j] - fut_entry)
             bar_is_favorable = (merged["close"][j] >= merged["open"][j]) if is_ce else (merged["close"][j] <= merged["open"][j])
 
-            theta_burn = base_prem * 0.0009 * elapsed_bars
-            delta_adv = 0.49
-            delta_fav = min(0.76, 0.55 + 0.10 * max(0.0, fut_fav / max(cfg["strike_step"], 1.0)))
+            dte_now = mcx_option_dte_days(sym, j_dt, u_info.get("opt_expiry"))
+            gamma_scale = math.sqrt(5.0 / max(dte_now, 2.0))
+            theta_rate_per_bar = 0.0009 * (7.0 / max(dte_now, 2.0))
+            theta_burn = base_prem * theta_rate_per_bar * elapsed_bars
+            delta_adv = max(0.44, min(0.52, 0.50 - 0.03 * gamma_scale * abs(fut_adv) / max(cfg["strike_step"], 1.0)))
+            delta_fav = min(0.74, 0.51 + 0.09 * gamma_scale * max(0.0, fut_fav / max(cfg["strike_step"], 1.0)))
+            delta_mid = min(0.68, 0.51 + 0.045 * gamma_scale * max(0.0, fut_close_move / max(cfg["strike_step"], 1.0)))
 
             opt_low = max(tick, round((entry_price + delta_adv * fut_adv - theta_burn) / tick) * tick)
             opt_high = max(opt_low, round((entry_price + delta_fav * fut_fav - theta_burn) / tick) * tick)
-            opt_close = max(tick, round((entry_price + 0.56 * fut_close_move - theta_burn) / tick) * tick)
+            opt_close = max(tick, round((entry_price + delta_mid * fut_close_move - theta_burn) / tick) * tick)
             open_move = sign * (merged["open"][j] - fut_entry)
-            opt_open = round(max(tick, entry_price + 0.56 * open_move - theta_burn), 2)
+            opt_open = round(max(tick, entry_price + delta_mid * open_move - theta_burn), 2)
 
             if opt_open <= current_sl or (not bar_is_favorable and opt_low <= current_sl):
                 exit_idx = j
@@ -2295,33 +2308,73 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger,
             auto_calibrate_today(brain, symbols, logger)
             continue
 
-        sym = active_pos["symbol"] if active_pos else active_symbols[cycle % len(active_symbols)]
-        cycle += 1
-        u_info = universe[sym]
-        cfg = MCX_MINI_CONFIG[sym]
-
-        candles = dhan.fetch_futures_candles_5m(u_info["fut_security_id"])
-        if not candles:
-            time.sleep(1.5)
-            continue
-        spot_hint = float(candles["close"][-1])
-        oc_data = dhan.fetch_option_chain_or_quotes(sym, u_info, spot_hint)
-        if not oc_data:
-            time.sleep(1.5)
-            continue
-
-        now = datetime.now(IST)
-        if now.date() != session_now.date() or now.time() >= MCX_PAPER_QUOTE_CUTOFF:
-            continue
-
-        view = analyzer.evaluate_commodity(sym, u_info, candles, oc_data)
-        closed_bar_epochs = [
-            float(ts) for ts in candles.get("timestamp", [])
-            if float(ts) + 300.0 <= now.timestamp()
-        ]
-        if closed_bar_epochs:
-            scan_bar_by_symbol[sym] = max(closed_bar_epochs)
-            scan_view_by_symbol[sym] = view
+        if active_pos:
+            sym = active_pos["symbol"]
+            u_info = universe[sym]
+            cfg = MCX_MINI_CONFIG[sym]
+            candles = dhan.fetch_futures_candles_5m(u_info["fut_security_id"])
+            if not candles:
+                time.sleep(1.5)
+                continue
+            spot_hint = float(candles["close"][-1])
+            oc_data = dhan.fetch_option_chain_or_quotes(sym, u_info, spot_hint)
+            if not oc_data:
+                time.sleep(1.5)
+                continue
+            now = datetime.now(IST)
+            if now.date() != session_now.date() or now.time() >= MCX_PAPER_QUOTE_CUTOFF:
+                continue
+            view = analyzer.evaluate_commodity(sym, u_info, candles, oc_data)
+            closed_bar_epochs = [
+                float(ts) for ts in candles.get("timestamp", [])
+                if float(ts) + 300.0 <= now.timestamp()
+            ]
+            if closed_bar_epochs:
+                scan_bar_by_symbol[sym] = max(closed_bar_epochs)
+                scan_view_by_symbol[sym] = view
+        else:
+            live_candidates = []
+            last_polled = None
+            for s_cand in active_symbols:
+                u_cand = universe[s_cand]
+                c_candles = dhan.fetch_futures_candles_5m(u_cand["fut_security_id"])
+                if not c_candles:
+                    continue
+                s_hint = float(c_candles["close"][-1])
+                c_oc = dhan.fetch_option_chain_or_quotes(s_cand, u_cand, s_hint)
+                if not c_oc:
+                    continue
+                now = datetime.now(IST)
+                c_view = analyzer.evaluate_commodity(s_cand, u_cand, c_candles, c_oc)
+                closed_bar_epochs = [
+                    float(ts) for ts in c_candles.get("timestamp", [])
+                    if float(ts) + 300.0 <= now.timestamp()
+                ]
+                if closed_bar_epochs:
+                    scan_bar_by_symbol[s_cand] = max(closed_bar_epochs)
+                    scan_view_by_symbol[s_cand] = c_view
+                telemetry_tmp = load_json(TELEMETRY_FILE, {"commodities": {}})
+                telemetry_tmp.setdefault("commodities", {})[s_cand] = c_view
+                atomic_write_json(TELEMETRY_FILE, telemetry_tmp)
+                last_polled = (s_cand, u_cand, MCX_MINI_CONFIG[s_cand], c_candles, c_oc, c_view)
+                if c_view.get("recommended_dir") in ("BUY_CE", "BUY_PE"):
+                    live_candidates.append((
+                        float(c_view.get("priority_score", 0.0)),
+                        int(c_view.get("conviction_score", 0)),
+                        s_cand, u_cand, MCX_MINI_CONFIG[s_cand], c_candles, c_oc, c_view
+                    ))
+            cycle += 1
+            if live_candidates:
+                live_candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
+                _, _, sym, u_info, cfg, candles, oc_data, view = live_candidates[0]
+            elif last_polled is not None:
+                sym, u_info, cfg, candles, oc_data, view = last_polled
+            else:
+                time.sleep(1.5)
+                continue
+            now = datetime.now(IST)
+            if now.date() != session_now.date() or now.time() >= MCX_PAPER_QUOTE_CUTOFF:
+                continue
         telemetry = load_json(TELEMETRY_FILE, {"commodities": {}})
         telemetry["updated_at"] = now.strftime("%H:%M:%S")
         telemetry["wallet_net"] = ledger["virtual_balance_net"]
