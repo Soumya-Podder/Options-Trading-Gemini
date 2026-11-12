@@ -1042,13 +1042,13 @@ class MCXMultiRegimeAnalyzer:
         vols = [float(x) for x in candles.get("volume", [1.0] * len(ts_list))]
         ois = [float(x) for x in candles.get("oi", [0.0] * len(ts_list))]
 
-        closed_idx = [i for i, t in enumerate(ts_list) if (t + 300.0) <= now_ts or (oc_data is not None and i == len(ts_list) - 1 and (now_ts - t) >= 60.0)]
+        closed_idx = [i for i, t in enumerate(ts_list) if (t + 300.0) <= now_ts]
         signal_idx = list(closed_idx)
         live_bar_used = False
         live_bar_age: Optional[float] = None
         live_spot_check: Optional[Dict[str, Any]] = None
         live_option_reference_spot: Optional[float] = None
-        if oc_data is not None and ts_list:
+        if False and oc_data is not None and ts_list:
             latest_idx = len(ts_list) - 1
             live_bar_age = now_ts - ts_list[latest_idx]
             if 90.0 <= live_bar_age < 300.0 and latest_idx not in signal_idx and closed_idx:
@@ -1283,7 +1283,7 @@ class MCXMultiRegimeAnalyzer:
             bear_dual_vwap and ema9_now - fut_bar_close <= atr14 * 1.85
         )
 
-        energy_trend_ok = (not is_energy) or (adx14 >= 25.0 and chop14 <= 48.0 and is_macro_win) or (oc_data is not None and adx14 >= 20.0 and chop14 <= 50.0 and (is_macro_win or vol_ratio >= 1.50)) or (oc_data is not None and adx14 >= 20.0 and chop14 <= 50.0 and (is_macro_win or vol_ratio >= 1.50))
+        energy_trend_ok = (not is_energy) or (adx14 >= 25.0 and chop14 <= 48.0 and is_macro_win)
 
         # --- PLAYBOOK 1: Confirmed 2-Bar Breakout / Retest-Hold (`MCX_BREAKOUT_CONFIRM`) ---
         pb_confirm_bull = (
@@ -1291,9 +1291,9 @@ class MCXMultiRegimeAnalyzer:
             and energy_trend_ok
             and closes[c_idx] > opens[c_idx]
             and closes[c_idx] > orb_high
-            and body_frac >= (0.42 if oc_data is not None else 0.56)
-            and close_pos >= (0.62 if oc_data is not None else 0.72)
-            and vol_ratio >= (0.60 if oc_data is not None else cfg["min_vol_ratio"] * 1.08)
+            and body_frac >= 0.56
+            and close_pos >= 0.72
+            and vol_ratio >= cfg["min_vol_ratio"] * 1.08
             and (
                 (closes[prev_idx] >= swing_high_prev10 and lows[c_idx] >= swing_high_prev10 * 0.9990 and closes[c_idx] > highs[prev_idx])
                 or (oc_data is not None and closes[c_idx] > swing_high_prev10 and closes[c_idx] > highs[prev_idx] and adx14 >= 24.0 and chop14 <= 48.0)
@@ -1305,9 +1305,9 @@ class MCXMultiRegimeAnalyzer:
             and energy_trend_ok
             and closes[c_idx] < opens[c_idx]
             and closes[c_idx] < orb_low
-            and body_frac >= (0.42 if oc_data is not None else 0.56)
-            and (1.0 - close_pos) >= (0.62 if oc_data is not None else 0.72)
-            and vol_ratio >= (0.60 if oc_data is not None else cfg["min_vol_ratio"] * 1.08)
+            and body_frac >= 0.56
+            and (1.0 - close_pos) >= 0.72
+            and vol_ratio >= cfg["min_vol_ratio"] * 1.08
             and (
                 (closes[prev_idx] <= swing_low_prev10 and highs[c_idx] <= swing_low_prev10 * 1.0010 and closes[c_idx] < lows[prev_idx])
                 or (oc_data is not None and closes[c_idx] < swing_low_prev10 and closes[c_idx] < lows[prev_idx] and adx14 >= 24.0 and chop14 <= 48.0)
@@ -1325,10 +1325,10 @@ class MCXMultiRegimeAnalyzer:
             and min(lows[prev_idx], lows[c_idx]) >= min(ema21_now, evening_vwap) * 0.9982
             and closes[c_idx] > opens[c_idx]
             and closes[c_idx] > highs[prev_idx]
-            and (oc_data is not None or (efi_13 > 0 and efi_2 > 0))
-            and body_frac >= (0.35 if oc_data is not None else 0.50)
-            and close_pos >= (0.60 if oc_data is not None else 0.70)
-            and vol_ratio >= (0.50 if oc_data is not None else cfg["min_vol_ratio"])
+            and (efi_13 > 0 and efi_2 > 0)
+            and body_frac >= 0.50
+            and close_pos >= 0.70
+            and vol_ratio >= cfg["min_vol_ratio"]
         )
         pb_pullback_bear = (
             (not is_energy)
@@ -1339,10 +1339,10 @@ class MCXMultiRegimeAnalyzer:
             and max(highs[prev_idx], highs[c_idx]) <= max(ema21_now, evening_vwap) * 1.0018
             and closes[c_idx] < opens[c_idx]
             and closes[c_idx] < lows[prev_idx]
-            and (oc_data is not None or (efi_13 < 0 and efi_2 < 0))
-            and body_frac >= (0.35 if oc_data is not None else 0.50)
-            and (1.0 - close_pos) >= (0.60 if oc_data is not None else 0.70)
-            and vol_ratio >= (0.50 if oc_data is not None else cfg["min_vol_ratio"])
+            and (efi_13 < 0 and efi_2 < 0)
+            and body_frac >= 0.50
+            and (1.0 - close_pos) >= 0.70
+            and vol_ratio >= cfg["min_vol_ratio"]
         )
 
 
@@ -1553,14 +1553,28 @@ def autonomous_manage_runner_and_exit(
     return 2, f"AUTONOMOUS 1:2 RR NORMAL TARGET (score={score}/4)"
 
 
-def estimate_atm_option_premium(sym: str, fut_price: float) -> float:
+def estimate_atm_option_premium(sym: str, fut_price: float, bar_dt: Optional[datetime] = None, opt_expiry: Optional[str] = None) -> float:
     """
-    Proportional Black-76 ATM Option Pricing without artificial low ceilings:
-    Scales directly with the real underlying futures price on each historical bar.
+    Proportional Black-76 ATM Option Pricing using realistic MCX monthly DTE cycle:
+    Computes remaining calendar days to monthly option expiry (~18-24th of each month)
+    so backtest option premiums and R-multiples match real-world MCX option chains.
     """
     cfg = MCX_MINI_CONFIG[sym]
     iv = cfg["annual_iv"]
-    raw_prem = fut_price * iv * 0.3989 * math.sqrt(5.0 / 365.0)
+    dte_days = 12.0
+    if bar_dt is not None:
+        exp_day_map = {"CRUDEOILM": 17, "NATGASMINI": 20, "SILVERM": 23, "GOLDM": 27}
+        target_day = exp_day_map.get(sym, 21)
+        y, m = bar_dt.year, bar_dt.month
+        if bar_dt.day > target_day:
+            m = 1 if m == 12 else m + 1
+            y = y + 1 if m == 1 else y
+        try:
+            exp_dt = datetime(y, m, target_day, 23, 30, tzinfo=IST)
+            dte_days = max(2.0, min(30.0, (exp_dt - bar_dt).total_seconds() / 86400.0))
+        except ValueError:
+            dte_days = 12.0
+    raw_prem = fut_price * iv * 0.3989 * math.sqrt(dte_days / 365.0)
     bounded = max(cfg["min_premium"], min(cfg["max_premium"], raw_prem))
     tick = cfg["tick_size"]
     return round(round(bounded / tick) * tick, 2)
@@ -1847,7 +1861,8 @@ def replay_mcx_history(
         fut_entry = merged["open"][entry_idx]
         strike = view["atm_ce"]["strike"] if is_ce else view["atm_pe"]["strike"]
 
-        base_prem = estimate_atm_option_premium(sym, fut_entry)
+        entry_dt_preliminary = datetime.fromtimestamp(merged["timestamp"][entry_idx], IST)
+        base_prem = estimate_atm_option_premium(sym, fut_entry, entry_dt_preliminary, u_info.get("opt_expiry"))
         entry_price = round(math.ceil((base_prem * 1.0012) / tick) * tick, 2)
         entry_dt = datetime.fromtimestamp(merged["timestamp"][entry_idx], IST)
         entry_context = mcx_entry_context(view, entry_dt)
