@@ -455,14 +455,15 @@ class AdaptiveSetupFeedbackTests(unittest.TestCase):
         self.assertEqual(standard['current_sl'],90)
         self.assertEqual(protected['initial_sl'],90)
 
-    def test_channel_feedback_is_source_specific_and_entry_pause_is_enforced(self):
+    def test_channel_feedback_is_source_specific_without_vetoing_entry(self):
         rows=self.trades([-.8]*12)
         for row in rows:
             row.update(index='NIFTY',option_type='CE',market_structure={'telegram_call':{'source':'GrowX'}})
         call={'option_type':'CE','source':'GrowX','key':'fresh-call'}
         view={'index':'NIFTY'}
         result=bot.index_entry_signal(MagicMock(),view,0,self.now,None,call,rows)
-        self.assertEqual(result,('HOLD',None))
+        self.assertEqual(result,('BUY_CE','TELEGRAM_CHANNEL fresh-call'))
+        self.assertTrue(view['market_structure']['adaptive_feedback']['paused'])
         other={**call,'source':'Tradewithsac'}
         self.assertEqual(bot.index_entry_signal(MagicMock(),{'index':'NIFTY'},0,self.now,None,other,rows)[0],'BUY_CE')
 

@@ -677,25 +677,21 @@ class ChannelExitRegressionTests(unittest.TestCase):
                 'current_sl':120.95,'highest_ltp':130.95,'ratchet_armed':False,
                 'market_structure':{'telegram_call':{'targets':[140,160,180]}}}
 
-    def test_observed_move_protects_profit_even_if_exact_target_touch_is_missed(self):
+    def test_channel_keeps_initial_stop_until_target_one_then_can_reach_target_two(self):
         import dhan_bot_engine as engine
         pos=self.position()
-        self.assertIsNone(engine.protect_channel_position(pos,134,1))
-        self.assertEqual(pos['current_sl'],120.95)
-        self.assertIsNone(engine.protect_channel_position(pos,136,2))
-        self.assertGreater(pos['current_sl'],pos['entry_price'])
-        self.assertEqual(pos['highest_ltp'],136)
-        self.assertIsNone(engine.protect_channel_position(pos,139.35,3))
-        self.assertGreater(pos['current_sl'],135)
-        floor=pos['current_sl']
-        self.assertEqual(engine.protect_channel_position(pos,134.75,4),'CHANNEL_PROFIT_PROTECTION')
-        self.assertEqual(pos['highest_ltp'],139.35)
-        self.assertEqual(pos['current_sl'],floor)
-        self.assertIn('exit_observation',pos['market_structure']['telegram_call'])
+        for bid in (134,136,139.35,134.75):
+            self.assertIsNone(engine.protect_channel_position(pos,bid,1))
+            self.assertEqual(pos['current_sl'],120.95)
+        self.assertIsNone(engine.protect_channel_position(pos,140,2))
+        self.assertTrue(pos['target_one_done'])
+        self.assertGreater(pos['current_sl'],130.95)
+        self.assertEqual(engine.protect_channel_position(pos,160,3),'TELEGRAM_CHANNEL_TARGET_2')
 
     def test_target_requires_executable_bid_and_sensex_does_not_use_nifty_stop(self):
         import dhan_bot_engine as engine
         pos=self.position()
+        pos['market_structure']['telegram_call']['targets']=[140]
         self.assertEqual(engine.protect_channel_position(pos,140,1),'TELEGRAM_CHANNEL_TARGET')
         self.assertTrue(pos['channel_exit_observation']['target_observed'])
         pos=self.position();pos.update(index='SENSEX',entry_price=305.35,highest_ltp=305.35,
@@ -704,8 +700,8 @@ class ChannelExitRegressionTests(unittest.TestCase):
         self.assertIsNone(engine.protect_channel_position(pos,314,1))
         self.assertEqual(pos['current_sl'],285.35)
         self.assertIsNone(engine.protect_channel_position(pos,316,2))
-        self.assertGreater(pos['current_sl'],305.35)
-        self.assertEqual(engine.protect_channel_position(pos,280,3),'CHANNEL_PROFIT_PROTECTION')
+        self.assertEqual(pos['current_sl'],285.35)
+        self.assertEqual(engine.protect_channel_position(pos,280,3),'INITIAL_SL_HIT')
         self.assertFalse(pos['channel_exit_observation']['target_observed'])
 
     def test_held_depth_uses_quote_endpoint_and_walks_depth_without_full_chain(self):

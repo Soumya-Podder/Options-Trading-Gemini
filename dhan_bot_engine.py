@@ -115,8 +115,8 @@ MAX_CONSECUTIVE_LOSSES_PER_DAY = 2
 POST_SL_COOLDOWN_MINUTES = 12
 POST_WIN_COOLDOWN_MINUTES = 5
 SESSION_START_TIME = dtime(9, 15)
-LAST_ENTRY_TIME = dtime(14, 30)
 EOD_SQUAREOFF_TIME = dtime(14, 45)
+LAST_ENTRY_TIME = EOD_SQUAREOFF_TIME
 
 
 INDEX_POSITION_KEYS = ("active_position", "active_channel_position")
@@ -275,7 +275,7 @@ def index_entry_signal(brain, view, losses, now, cooldown_until, channel_call=No
         context['market_structure'] = {**(view.get('market_structure') or {}), 'telegram_call': channel_call}
     feedback = adaptive_setup_feedback(context, closed_trades, now.timestamp())
     view.setdefault('market_structure', {})['adaptive_feedback'] = feedback
-    if feedback['paused']:
+    if feedback['paused'] and not channel_call:
         view['entry_decision'] = {'action': 'HOLD', 'reason': 'Validated negative setup feedback; temporary pause', 'rule': sig}
         return 'HOLD', None
     return action, sig
@@ -338,7 +338,8 @@ def protect_channel_position(position, bid, now_epoch):
     gain = peak - entry
     learned_protection = ((position.get('market_structure') or {}).get('adaptive_feedback') or {}).get('exit_policy') == 'PROTECT_EARNED_PROFIT'
     break_even_at, lock_at = (0.4, 0.7) if learned_protection else (0.5, 0.8)
-    if gain >= break_even_at * distance and peak_net > 0:
+    first_target_reached = not targets or position.get('target_one_done') or bid >= targets[0]
+    if first_target_reached and gain >= break_even_at * distance and peak_net > 0:
         protected_net = max(0, 0.5 * peak_net) if gain >= lock_at * distance else 0
         needed = entry + (fees + protected_net - booked) / qty
         floor = math.ceil(needed / .999 * 20 - 1e-9) / 20
@@ -358,11 +359,13 @@ def protect_channel_position(position, bid, now_epoch):
             if len(targets) > 1 and bid >= targets[1]:
                 return 'TELEGRAM_CHANNEL_TARGET_2'
         elif bid >= targets[0]:
-            return (
-                'TELEGRAM_CHANNEL_PARTIAL_TARGET'
-                if len(targets) > 1 and position.get('target_one_qty')
-                else 'TELEGRAM_CHANNEL_TARGET'
-            )
+            if len(targets) == 1:
+                return 'TELEGRAM_CHANNEL_TARGET'
+            if position.get('target_one_qty'):
+                return 'TELEGRAM_CHANNEL_PARTIAL_TARGET'
+            position['target_one_done'] = True
+            if bid >= targets[1]:
+                return 'TELEGRAM_CHANNEL_TARGET_2'
     if bid <= position['current_sl']:
         return 'CHANNEL_PROFIT_PROTECTION' if position['ratchet_armed'] else 'INITIAL_SL_HIT'
     return None
@@ -2350,7 +2353,7 @@ def run_real_historical_backtest(
                     brain.unmute_new_day(day_str)
 
                 d_stat = daily_stats[day_key]
-                if dt.time() < SESSION_START_TIME or dt.time() > LAST_ENTRY_TIME:
+                if dt.time() < SESSION_START_TIME or dt.time() >= LAST_ENTRY_TIME:
                     continue
                 if (
                     d_stat.get("unvalidated_position")
@@ -2392,7 +2395,7 @@ def run_real_historical_backtest(
                 if entry_idx >= n_bars:
                     continue
                 entry_time = datetime.fromtimestamp(leg["timestamp"][entry_idx], IST)
-                if entry_time.date() != dt.date() or entry_time.time() > LAST_ENTRY_TIME:
+                if entry_time.date() != dt.date() or entry_time.time() >= LAST_ENTRY_TIME:
                     continue
                 if not math.isfinite(leg['open'][entry_idx]):
                     continue
@@ -2687,7 +2690,7 @@ def nifty_recovery_block_reason(view, direction, now_epoch):
 
 def index_entry_block_reason(now_time, net_pnl, profit_protected, entries, consecutive_losses, *,
                              runner_reentry=False, paper_retry=None, shared_loss_limit=False):
-    if not SESSION_START_TIME <= now_time <= LAST_ENTRY_TIME:
+    if not SESSION_START_TIME <= now_time < LAST_ENTRY_TIME:
         return "Outside index entry window"
     loss_floor = paper_retry["loss_floor"] if paper_retry else DAILY_MAX_LOSS_RS
     if not shared_loss_limit and net_pnl <= loss_floor:
@@ -3243,20 +3246,8 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     channel_candidates = call_feed.candidates(idx_name, time.time(), ledger.get('telegram_call_entries', []))
                     if direct_call_quote:
                         channel_candidates = [c for c in channel_candidates if c["key"] == priority_call["key"]]
-                    def channel_feedback(call):
-                        return adaptive_setup_feedback(
-                            {'index': idx_name, 'option_type': call['option_type'],
-                             'market_structure': {'telegram_call': call}},
-                            ledger['trades'], time.time()
-                        )
-                    channel_candidates.sort(key=lambda c: (channel_feedback(c)['quality_adjustment'], c['posted_epoch']), reverse=True)
+                    channel_candidates.sort(key=lambda call: call['posted_epoch'], reverse=True)
                     for candidate in channel_candidates:
-                        if channel_feedback(candidate)['paused']:
-                            reason = 'Validated negative channel setup feedback; temporary pause'
-                            if last_call_decision.get(candidate['key']) != reason:
-                                logger.info('[TELEGRAM CALL] %s | %s', candidate['source_url'], reason)
-                                last_call_decision[candidate['key']] = reason
-                            continue
                         channel_view, reason = channel_entry_view(
                             view, raw_oc.get('oc', {}), candidate,
                             expiries.get(idx_name), chain_received_epoch, time.time()
@@ -3327,7 +3318,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             lots = channel_entry_lots(
                                 risk_lots, ledger["virtual_balance_net"], entry_p, cfg['lot_size'],
                                 float(view.get(f'atm_{side}_bid_qty') or 0), float(view.get(f'atm_{side}_ask_qty') or 0),
-                                consec_losses, brain.rules.get(sig, {}).get('last_lot_loss', False)
+                                consec_losses, False
                             )
                         else:
                             lots = brain.compute_lots(

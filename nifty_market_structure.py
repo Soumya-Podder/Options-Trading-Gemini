@@ -262,7 +262,9 @@ def assess_nifty_structure(candles, chain, as_of, spot, direction,
                    and sign*(latest["close"]-level)<=atr)
             if fresh:
                 events.append((abs(spot-level),level,"BREAKOUT_CONFIRMED"))
-            if continued and (held or retest or rejected) and (not enable_breakout_entries or sign*(spot-level)>buffer):
+            # A retest can close below the breakout close while reclaiming the level.
+            confirmed_retest = retest and (continued or enable_breakout_entries)
+            if (confirmed_retest or (continued and (held or rejected))) and (not enable_breakout_entries or sign*(spot-level)>buffer):
                 setup="RETEST_CONFIRMED" if retest else "BREAKOUT_HOLD" if held else "REJECTION_CONFIRMED"
                 events.append((abs(spot-level),level,setup))
         if not events:
