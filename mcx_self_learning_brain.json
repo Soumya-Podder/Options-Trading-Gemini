@@ -1,33 +1,33 @@
 {
   "version": "8.0-high-yield",
-  "updated_at": "2026-11-13 17:00:20",
+  "updated_at": "2026-11-13 19:24:47",
   "commodities": {
     "SILVERM": {
-      "trades": 403,
+      "trades": 404,
       "wins": 162,
-      "losses": 241,
-      "net_pnl": 172074.5,
-      "ema_r": 0.217,
-      "ema_mfe_r": 1.707,
-      "consec_sl": 0
+      "losses": 242,
+      "net_pnl": 171647.0,
+      "ema_r": -0.15,
+      "ema_mfe_r": 1.441,
+      "consec_sl": 1
     },
     "GOLDM": {
-      "trades": 339,
-      "wins": 140,
+      "trades": 340,
+      "wins": 141,
       "losses": 199,
-      "net_pnl": 153621.9,
-      "ema_r": -0.128,
-      "ema_mfe_r": 1.315,
+      "net_pnl": 154221.9,
+      "ema_r": 0.34,
+      "ema_mfe_r": 1.51,
       "consec_sl": 0
     },
     "CRUDEOILM": {
-      "trades": 89,
+      "trades": 90,
       "wins": 46,
-      "losses": 43,
-      "net_pnl": -2999.5,
-      "ema_r": 0.157,
-      "ema_mfe_r": 1.352,
-      "consec_sl": 0
+      "losses": 44,
+      "net_pnl": -3234.5,
+      "ema_r": -0.181,
+      "ema_mfe_r": 1.165,
+      "consec_sl": 1
     },
     "NATGASMINI": {
       "trades": 35,
@@ -41,10 +41,10 @@
   },
   "playbooks": {
     "SILVERM:MCX_BREAKOUT_CONFIRM": {
-      "trades": 154,
+      "trades": 155,
       "wins": 63,
-      "ema_r": 0.071,
-      "net_pnl": 106587.5
+      "ema_r": -0.264,
+      "net_pnl": 106160.0
     },
     "SILVERM:MCX_TREND_PULLBACK": {
       "trades": 249,
@@ -53,10 +53,10 @@
       "net_pnl": 65487.0
     },
     "GOLDM:MCX_BREAKOUT_CONFIRM": {
-      "trades": 14,
-      "wins": 2,
-      "ema_r": 0.478,
-      "net_pnl": 773.2
+      "trades": 15,
+      "wins": 3,
+      "ema_r": 0.813,
+      "net_pnl": 1373.2
     },
     "GOLDM:MCX_TREND_PULLBACK": {
       "trades": 325,
@@ -65,10 +65,10 @@
       "net_pnl": 152848.7
     },
     "CRUDEOILM:MCX_BREAKOUT_CONFIRM": {
-      "trades": 89,
+      "trades": 90,
       "wins": 46,
-      "ema_r": 0.157,
-      "net_pnl": -2999.5
+      "ema_r": -0.181,
+      "net_pnl": -3234.5
     },
     "CRUDEOILM:MCX_TREND_PULLBACK": {
       "trades": 0,
@@ -1477,7 +1477,7 @@
     "complete_for_deployment": true,
     "method": "Modeled discovery with a rolling 30-day shortlist; only earlier completed dates inform entries"
   },
-  "portfolio_consec_sl": 0,
+  "portfolio_consec_sl": 2,
   "trade_journal_episodes": [
     {
       "regime": "REGIME_STRONG_TREND",
@@ -1668,6 +1668,63 @@
       "setup": "MCX_BREAKOUT_CONFIRM_CE",
       "closed_at": "2026-11-12T19:41:53.079281+05:30",
       "net_r": -1.32
+    },
+    {
+      "regime": "REGIME_STRONG_TREND",
+      "weekday": 4,
+      "macro": "US_COMEX_OPEN_WINDOW",
+      "features": [
+        0.6428,
+        0.4532,
+        1.0,
+        0.6633333333333333,
+        -0.9996659454601413,
+        0.09851506279684223,
+        0.6666666666666666,
+        0.26190476190476175
+      ],
+      "symbol": "GOLDM",
+      "setup": "MCX_BREAKOUT_CONFIRM_PE",
+      "closed_at": "2026-11-13T18:51:17.341713+05:30",
+      "net_r": 2.0
+    },
+    {
+      "regime": "REGIME_STRONG_TREND",
+      "weekday": 4,
+      "macro": "US_COMEX_OPEN_WINDOW",
+      "features": [
+        0.6058,
+        0.45530000000000004,
+        1.0,
+        1.0,
+        0.9998412480340334,
+        -0.11343743911617649,
+        0.6666666666666666,
+        0.29761904761904745
+      ],
+      "symbol": "SILVERM",
+      "setup": "MCX_BREAKOUT_CONFIRM_CE",
+      "closed_at": "2026-11-13T19:05:10.475705+05:30",
+      "net_r": -1.45
+    },
+    {
+      "regime": "REGIME_STRONG_TREND",
+      "weekday": 4,
+      "macro": "NYMEX_PIT_OPEN_SURGE",
+      "features": [
+        0.5082,
+        0.4057,
+        1.0,
+        0.7433333333333333,
+        0.9996622305780029,
+        0.36367842764762187,
+        0.6666666666666666,
+        0.33333333333333315
+      ],
+      "symbol": "CRUDEOILM",
+      "setup": "MCX_BREAKOUT_CONFIRM_CE",
+      "closed_at": "2026-11-13T19:24:47.491045+05:30",
+      "net_r": -1.38
     }
   ]
 }

@@ -268,6 +268,24 @@ def index_entry_signal(brain, view, losses, now, cooldown_until, channel_call=No
             view['entry_decision'] = {'action': 'HOLD', 'reason': 'Native signal cooldown active'}
             return 'HOLD', None
         action, sig = brain.select_action(view, losses, bar_time=now.time())
+        if action in ('BUY_CE', 'BUY_PE') and closed_trades:
+            today_iso = now.strftime('%Y-%m-%d')
+            same_idx_today = [t for t in closed_trades if t.get('index') == view.get('index') and str(t.get('exit_timestamp', '')).startswith(today_iso)]
+            if same_idx_today:
+                last_t = same_idx_today[-1]
+                last_side = str(last_t.get('contract', '')).rsplit('_', 1)[-1]
+                if float(last_t.get('net_pnl', 0.0)) <= 0 and last_side == action[4:]:
+                    try:
+                        ex_dt = datetime.strptime(str(last_t['exit_timestamp'])[:19], '%Y-%m-%d %H:%M:%S')
+                        mins_since = (now.replace(tzinfo=None) - ex_dt).total_seconds() / 60.0
+                        req_clear = 12.0 if view.get('index') == 'NIFTY' else 35.0
+                        sign_d = 1.0 if action == 'BUY_CE' else -1.0
+                        spot_clear = sign_d * (float(view.get('spot', 0.0)) - float(last_t.get('spot_at_entry', 0.0)))
+                        if 0 <= mins_since < 25.0 and spot_clear < req_clear:
+                            view['entry_decision'] = {'action': 'HOLD', 'reason': f'Same-side whipsaw guard ({mins_since:.0f}m since {last_t.get("contract")} loss; spot advance {spot_clear:+.1f} < {req_clear:.0f})'}
+                            return 'HOLD', None
+                    except (ValueError, TypeError, KeyError):
+                        pass
     if action not in ('BUY_CE', 'BUY_PE') or not sig:
         return action, sig
     context = {**view, 'option_type': action[4:]}
@@ -338,8 +356,9 @@ def protect_channel_position(position, bid, now_epoch):
     gain = peak - entry
     learned_protection = ((position.get('market_structure') or {}).get('adaptive_feedback') or {}).get('exit_policy') == 'PROTECT_EARNED_PROFIT'
     break_even_at, lock_at = (0.4, 0.7) if learned_protection else (0.5, 0.8)
+    min_gain_pts = 7.5 if position.get('index') == 'NIFTY' else 18.0
     first_target_reached = not targets or position.get('target_one_done') or bid >= targets[0]
-    if first_target_reached and gain >= break_even_at * distance and peak_net > 0:
+    if first_target_reached and gain >= max(min_gain_pts, break_even_at * distance) and peak_net > 0:
         protected_net = max(0, 0.5 * peak_net) if gain >= lock_at * distance else 0
         needed = entry + (fees + protected_net - booked) / qty
         floor = math.ceil(needed / .999 * 20 - 1e-9) / 20

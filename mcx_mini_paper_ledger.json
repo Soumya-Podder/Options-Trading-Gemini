@@ -1,11 +1,11 @@
 {
   "mode": "PAPER",
   "initial_capital": 30000.0,
-  "virtual_balance_gross": 28960.5,
-  "virtual_balance_net": 28340.5,
-  "profit_without_charges": -1039.5,
-  "net_profit_after_charges": -1659.5,
-  "total_trades": 10,
+  "virtual_balance_gross": 29078.0,
+  "virtual_balance_net": 28278.0,
+  "profit_without_charges": -922.0,
+  "net_profit_after_charges": -1722.0,
+  "total_trades": 13,
   "trades": [
     {
       "timestamp": "2026-11-10 21:50:06",
@@ -216,6 +216,81 @@
       "planned_rr": 4.0,
       "exit_reason": "INITIAL_SL_HIT",
       "setup": "MCX_BREAKOUT_CONFIRM_CE"
+    },
+    {
+      "timestamp": "2026-11-13 18:50:17",
+      "exit_timestamp": "2026-11-13 18:51:17",
+      "symbol": "GOLDM",
+      "regime": "REGIME_STRONG_TREND",
+      "contract": "GOLDM_136500_PE",
+      "lots": 1,
+      "qty": 10,
+      "spot_at_entry": 136252.0,
+      "entry_price": 2706.5,
+      "exit_price": 2772.5,
+      "gross_pnl": 660.0,
+      "net_pnl": 600.0,
+      "charges": 60.0,
+      "partial_exit": null,
+      "r_multiple": 2.0,
+      "peak_r": 2.2,
+      "planned_rr": 4.0,
+      "exit_reason": "TRAIL_PROFIT_HIT",
+      "setup": "MCX_BREAKOUT_CONFIRM_PE",
+      "learning_risk_rs": 300.0,
+      "exit_diagnostics": {
+        "peak_net_pnl": 600.0
+      }
+    },
+    {
+      "timestamp": "2026-11-13 19:05:07",
+      "exit_timestamp": "2026-11-13 19:05:10",
+      "symbol": "SILVERM",
+      "regime": "REGIME_STRONG_TREND",
+      "contract": "SILVERM_180000_CE",
+      "lots": 1,
+      "qty": 5,
+      "spot_at_entry": 180881.0,
+      "entry_price": 5101.5,
+      "exit_price": 5028.0,
+      "gross_pnl": -367.5,
+      "net_pnl": -427.5,
+      "charges": 60.0,
+      "partial_exit": null,
+      "r_multiple": -1.45,
+      "peak_r": -0.5,
+      "planned_rr": 4.0,
+      "exit_reason": "INITIAL_SL_HIT",
+      "setup": "MCX_BREAKOUT_CONFIRM_CE",
+      "learning_risk_rs": 295.0,
+      "exit_diagnostics": {
+        "peak_net_pnl": -427.5
+      }
+    },
+    {
+      "timestamp": "2026-11-13 19:20:04",
+      "exit_timestamp": "2026-11-13 19:24:47",
+      "symbol": "CRUDEOILM",
+      "regime": "REGIME_STRONG_TREND",
+      "contract": "CRUDEOILM_8400_CE",
+      "lots": 1,
+      "qty": 10,
+      "spot_at_entry": 8424.0,
+      "entry_price": 177.05,
+      "exit_price": 159.55,
+      "gross_pnl": -175.0,
+      "net_pnl": -235.0,
+      "charges": 60.0,
+      "partial_exit": null,
+      "r_multiple": -1.38,
+      "peak_r": -0.03,
+      "planned_rr": 4.0,
+      "exit_reason": "INITIAL_SL_HIT",
+      "setup": "MCX_BREAKOUT_CONFIRM_CE",
+      "learning_risk_rs": 170.0,
+      "exit_diagnostics": {
+        "peak_net_pnl": -99.0
+      }
     }
   ],
   "active_position": null

@@ -383,6 +383,57 @@ def stock_reentry_reason(symbol, trades, as_of, signal_timestamp=None):
     return None
 
 
+def option_order_book_pressure(quote: Any) -> Dict[str, float]:
+    """Compute live buy/sell order-book value ratio, total quantity imbalance, and traded value."""
+    default = {
+        "buy_qty_total": 0.0,
+        "sell_qty_total": 0.0,
+        "depth_buy_value_rs": 0.0,
+        "depth_sell_value_rs": 0.0,
+        "book_pressure_ratio": 1.0,
+        "traded_value_lakhs": 0.0,
+        "order_book_bonus": 0.0,
+    }
+    if not isinstance(quote, dict):
+        return default
+    try:
+        depth = quote.get("depth") if isinstance(quote.get("depth"), dict) else {}
+        buys = depth.get("buy") if isinstance(depth.get("buy"), list) else []
+        sells = depth.get("sell") if isinstance(depth.get("sell"), list) else []
+        d_buy_val = sum(
+            float(r.get("price", 0) or 0) * float(r.get("quantity", 0) or 0)
+            for r in buys if isinstance(r, dict) and float(r.get("price", 0) or 0) > 0 and float(r.get("quantity", 0) or 0) > 0
+        )
+        d_sell_val = sum(
+            float(r.get("price", 0) or 0) * float(r.get("quantity", 0) or 0)
+            for r in sells if isinstance(r, dict) and float(r.get("price", 0) or 0) > 0 and float(r.get("quantity", 0) or 0) > 0
+        )
+        buy_q = float(quote.get("buy_quantity") or 0.0)
+        sell_q = float(quote.get("sell_quantity") or 0.0)
+        depth_ratio = (d_buy_val / d_sell_val) if d_sell_val > 0 else (1.25 if d_buy_val > 0 else 1.0)
+        qty_ratio = (buy_q / sell_q) if (buy_q > 0 and sell_q > 0) else depth_ratio
+        ratio = max(0.20, min(4.0, 0.65 * depth_ratio + 0.35 * qty_ratio))
+        ltp = float(quote.get("last_price") or (buys[0].get("price") if buys else 0) or 0.0)
+        vol = float(quote.get("volume") or 0.0)
+        turnover_lakhs = round((ltp * vol) / 100000.0, 2) if (ltp > 0 and vol > 0) else 0.0
+        bonus = 0.0
+        if ratio >= 1.15:
+            bonus = min(2.5, (ratio - 1.0) * 2.5)
+        elif ratio <= 0.80:
+            bonus = max(-2.5, (ratio - 1.0) * 3.0)
+        return {
+            "buy_qty_total": round(buy_q, 1),
+            "sell_qty_total": round(sell_q, 1),
+            "depth_buy_value_rs": round(d_buy_val, 2),
+            "depth_sell_value_rs": round(d_sell_val, 2),
+            "book_pressure_ratio": round(ratio, 3),
+            "traded_value_lakhs": turnover_lakhs,
+            "order_book_bonus": round(bonus, 3),
+        }
+    except (TypeError, ValueError, OverflowError, ZeroDivisionError):
+        return default
+
+
 def selection_analysis(candidate):
     """Auditable bounded priority heuristic, never a win probability."""
     quality=signal_quality(candidate)
@@ -390,11 +441,13 @@ def selection_analysis(candidate):
     execution=0.0
     fraction=candidate.get('spread_fraction_of_initial_risk')
     age=candidate.get('confirmation_age_seconds')
+    flow_bonus=_finite_score((candidate.get('option_order_book') or {}).get('order_book_bonus',0.0))
     try:
         if fraction is not None and math.isfinite(float(fraction)) and 0<=float(fraction)<=.4:
             execution+=5*(1-float(fraction)/.4)
         if age is not None and math.isfinite(float(age)) and 0<=float(age)<=600:
             execution+=3*(1-float(age)/600)
+        execution+=max(-2.5,min(2.5,flow_bonus))
     except (TypeError,ValueError,OverflowError):pass
     return {'score':round(quality+learned+execution,4),'breakout_quality':quality,
             'learning_adjustment':learned,'execution_bonus':round(execution,4),

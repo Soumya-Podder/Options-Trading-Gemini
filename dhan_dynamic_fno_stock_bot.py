@@ -23,7 +23,7 @@ from collections import Counter
 from bisect import bisect_left
 from pathlib import Path
 from stock_option_signals import evaluate_stock_setup, scanx_stock_membership, recent_entry_momentum, order_flow_direction
-from stock_option_policy import premium_plan, rank_candidates, learned_profit_floor, DailyTradeGate, stock_reentry_reason, option_chain_request_slot, market_quote_request_slot, single_bot_session, session_open_wait_seconds, combined_paper_loss_state, combined_paper_entry_allowed, COMBINED_PAPER_LOSS_LIMIT_RS
+from stock_option_policy import premium_plan, rank_candidates, learned_profit_floor, DailyTradeGate, stock_reentry_reason, option_chain_request_slot, market_quote_request_slot, single_bot_session, session_open_wait_seconds, combined_paper_loss_state, combined_paper_entry_allowed, COMBINED_PAPER_LOSS_LIMIT_RS, option_order_book_pressure
 
 IST = timezone(timedelta(hours=5, minutes=30))
 SESSION_START_TIME = dtime(9, 15)  # Market data and opening-range reference
@@ -1222,7 +1222,11 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
             last_trade_age = now_epoch - datetime.strptime(quote["last_trade_time"], "%d/%m/%Y %H:%M:%S").replace(tzinfo=IST).timestamp()
         except (KeyError, TypeError, ValueError):
             last_trade_age = None
+        opt_book = option_order_book_pressure(quote)
+        if (opt_book["depth_buy_value_rs"] + opt_book["depth_sell_value_rs"]) > 0 and opt_book["book_pressure_ratio"] < 0.55 and not strong_mover:
+            return reject(f"Option order-book sell value dominates buy value (ratio {opt_book['book_pressure_ratio']:.2f})")
         return {**sig, **plan, "opt_ltp": ask, "bid": bid, "spread_pct": spread,"size_selection":sizing,
+                "option_order_book": opt_book,
                 'entry_structure_check':entry_structure,
                 "quoted_spread_points": ask-bid,
                 "spread_fraction_of_initial_risk": (ask-bid)/(ask-plan["initial_sl"]),
@@ -1410,7 +1414,9 @@ def assess_stock_runner(pos, quote, underlying, chain, now_epoch, cfg):
         needed=max(0,(target-net)/qty)
         horizon=min(remaining,cutoff,15)
         gain=max(0,delta*min(3*atr,2*impulse)-theta*horizon/375-bid*cfg.slippage_pct/100)
-        hold_runner=(gain>=1.2*needed) or (advance>=0.30*atr and impulse>=0.12*atr and delta>=cfg.min_delta)
+        opt_book=option_order_book_pressure(quote)
+        book_bullish=opt_book["book_pressure_ratio"]>=1.18
+        hold_runner=(gain>=1.2*needed) or (advance>=0.30*atr and impulse>=0.12*atr and delta>=cfg.min_delta) or (book_bullish and advance>=0.22*atr and impulse>=0.10*atr and delta>=cfg.min_delta)
         result.update(hold=hold_runner,current_net=round(net,2),
                       oi_regime='OI_UNCHANGED' if current_oi==old_oi else 'LONG_BUILDUP' if current_oi>old_oi else 'SHORT_COVERING',
                       underlying_impulse_5m=round(impulse,4),
@@ -1489,7 +1495,8 @@ def stock_profit_protection_net(peak_net):
     if not math.isfinite(peak):return None
     if peak>=1800:return 0.75*peak
     if peak>=1200:return 0.60*peak
-    if peak>=750:return 100.0
+    if peak>=750:return 260.0
+    if peak>=520:return 120.0
     return None
 
 
@@ -1565,6 +1572,10 @@ def paper_exit(pos, quote, now, cfg, urgent_only=False, combined_net=None):
     elif learned_floor is not None and net <= learned_floor:
         reason='LEARNED_PROFIT_PROTECTION'
     elif opposing_flow and net > 0 and (base_target_reached or pos.get('base_target_locked')):
+        reason='ORDER_FLOW_PROFIT_EXIT'
+    elif not managing_runner and net >= 350.0 and pos.get('peak_net_pnl', 0) >= 480.0 and (
+        opposing_flow or (option_order_book_pressure(quote)["book_pressure_ratio"] < 0.56 and bid <= pos["peak_bid"] - 0.35 * pos["opt_1r"])
+    ):
         reason='ORDER_FLOW_PROFIT_EXIT'
     elif base_target_reached:
         reason='RUPEE_TARGET'
