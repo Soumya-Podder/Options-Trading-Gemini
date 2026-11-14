@@ -15,9 +15,13 @@ from contextlib import contextmanager
 from time import time as request_clock, sleep as request_sleep
 from datetime import date, datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_CEILING, ROUND_FLOOR
+from pathlib import Path
+from typing import Any, Callable, Dict, Iterable, Optional
 
 
 COMBINED_PAPER_LOSS_LIMIT_RS = 2500.0
+SUPPORTED_COMBINED_INDICES = frozenset({"NIFTY", "SENSEX", "BANKNIFTY", "BANKEX"})
+TICK = Decimal("0.05")
 
 
 def stock_reporting_exclusions(day, directory=None):
@@ -36,18 +40,23 @@ def stock_reporting_exclusions(day, directory=None):
 
 
 def combined_paper_loss_state(day, directory=None):
-    """Read completed Nifty and stock PAPER exits and latch the realised loss limit for the day."""
+    """Read completed Index (Nifty/Sensex/BankNifty/Bankex) and Stock PAPER exits and latch the realisedRs.2,500 loss limit."""
     directory = Path(directory) if directory is not None else Path(__file__).resolve().parent
     excluded = stock_reporting_exclusions(day, directory)
     trades = []
     try:
         for filename, index_only in (("paper_trade_ledger.json", True), ("stock_fno_paper_ledger.json", False)):
-            ledger = json.loads((directory / filename).read_text(encoding="utf-8-sig"))
+            ledger_path = directory / filename
+            if not ledger_path.exists():
+                continue
+            ledger = json.loads(ledger_path.read_text(encoding="utf-8-sig"))
             if ledger.get("mode") != "PAPER":
                 return None, False
-            for trade in ledger["trades"]:
+            for trade in ledger.get("trades", []):
                 exit_time = str(trade.get("exit_timestamp", ""))
-                if exit_time[:10] != day or (index_only and trade.get("index") != "NIFTY"):
+                if exit_time[:10] != day:
+                    continue
+                if index_only and str(trade.get("index", "NIFTY")).upper() not in SUPPORTED_COMBINED_INDICES:
                     continue
                 if not index_only and trade.get("entry_id") in excluded:
                     continue
@@ -66,95 +75,119 @@ def combined_paper_loss_state(day, directory=None):
 
 
 def combined_paper_entry_allowed(day, directory=None):
-    """Allow entries until the shared realised loss breaker has tripped."""
+    """Allow entries until the shared realised Rs.2,500 loss breaker has tripped."""
     net, reached = combined_paper_loss_state(day, directory)
     return net is not None and not reached
 
 
+def combined_remaining_loss_budget(day, directory=None) -> Optional[float]:
+    """Return remaining rupee loss room before hitting -COMBINED_PAPER_LOSS_LIMIT_RS (-2500)."""
+    net, reached = combined_paper_loss_state(day, directory)
+    if net is None or reached:
+        return 0.0
+    return max(0.0, round(COMBINED_PAPER_LOSS_LIMIT_RS + net, 2))
+
+
 def session_open_wait_seconds(now, opening_time):
     """Shorten the last pre-open sleep to the remaining wall-clock interval."""
-    opening=now.replace(hour=opening_time.hour,minute=opening_time.minute,
-                        second=opening_time.second,microsecond=0)
-    return min(1.0,max(0.0,(opening-now).total_seconds()))
-
-from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Optional
-
-
-TICK = Decimal("0.05")
+    opening = now.replace(
+        hour=opening_time.hour,
+        minute=opening_time.minute,
+        second=opening_time.second,
+        microsecond=0,
+    )
+    return min(1.0, max(0.0, (opening - now).total_seconds()))
 
 
 def single_bot_session(role):
     """Windows process-lifetime mutex; duplicates cannot own the same ledger."""
     from functools import wraps
+
     def decorate(function):
         @wraps(function)
-        def guarded(*args,**kwargs):
+        def guarded(*args, **kwargs):
             if os.name != "nt":
-                return function(*args,**kwargs)
+                return function(*args, **kwargs)
             import ctypes
             import hashlib
-            identity=hashlib.sha256(str(Path(__file__).resolve().parent).lower().encode()).hexdigest()[:20]
-            kernel=ctypes.WinDLL("kernel32",use_last_error=True)
-            kernel.CreateMutexW.argtypes=[ctypes.c_void_p,ctypes.c_int,ctypes.c_wchar_p]
-            kernel.CreateMutexW.restype=ctypes.c_void_p
-            kernel.CloseHandle.argtypes=[ctypes.c_void_p]
-            kernel.ReleaseMutex.argtypes=[ctypes.c_void_p]
-            handle=kernel.CreateMutexW(None,True,"Local\\DhanBot_"+identity+"_"+role)
-            error=ctypes.get_last_error()
-            if not handle:raise OSError(error,"Cannot acquire bot session mutex")
-            if error==183:
+
+            identity = hashlib.sha256(str(Path(__file__).resolve().parent).lower().encode()).hexdigest()[:20]
+            kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+            kernel.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
+            kernel.CreateMutexW.restype = ctypes.c_void_p
+            kernel.CloseHandle.argtypes = [ctypes.c_void_p]
+            kernel.ReleaseMutex.argtypes = [ctypes.c_void_p]
+            handle = kernel.CreateMutexW(None, True, "Local\\DhanBot_" + identity + "_" + role)
+            error = ctypes.get_last_error()
+            if not handle:
+                raise OSError(error, "Cannot acquire bot session mutex")
+            if error == 183:
                 kernel.CloseHandle(handle)
-                raise RuntimeError("An existing "+role+" session owns this project; duplicate startup refused")
-            try:return function(*args,**kwargs)
+                raise RuntimeError("An existing " + role + " session owns this project; duplicate startup refused")
+            try:
+                return function(*args, **kwargs)
             finally:
                 kernel.ReleaseMutex(handle)
                 kernel.CloseHandle(handle)
+
         return guarded
+
     return decorate
 
 
 @contextmanager
 def option_chain_request_slot(minimum_gap=3.05, lock_path=None, *, pace_from_completion=True):
     """Serialize both bots' option-chain requests, including their HTTP wait."""
-    path=Path(lock_path) if lock_path else Path(__file__).resolve().parent/'dhan_hist_cache'/'oc_global_lock.txt'
-    path.parent.mkdir(parents=True,exist_ok=True)
-    descriptor=os.open(str(path),os.O_CREAT|os.O_RDWR,0o600)
-    with os.fdopen(descriptor,'r+b',buffering=0) as stream:
-        if os.name=='nt':
+    path = Path(lock_path) if lock_path else Path(__file__).resolve().parent / "dhan_hist_cache" / "oc_global_lock.txt"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(str(path), os.O_CREAT | os.O_RDWR, 0o600)
+    with os.fdopen(descriptor, "r+b", buffering=0) as stream:
+        if os.name == "nt":
             import msvcrt
+
             while True:
                 try:
-                    stream.seek(0);msvcrt.locking(stream.fileno(),msvcrt.LK_NBLCK,1)
+                    stream.seek(0)
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
                     break
                 except OSError as error:
-                    if error.errno not in (11,13,36):raise
+                    if error.errno not in (11, 13, 36):
+                        raise
                     request_sleep(0.05)
         else:
             import fcntl
-            fcntl.flock(stream.fileno(),fcntl.LOCK_EX)
+
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
         try:
             stream.seek(0)
-            try:last=float(stream.read(64).decode('ascii').strip() or '0')
-            except (ValueError,UnicodeError):last=request_clock()
-            now=request_clock()
-            if not math.isfinite(last):last=now
-            wait=max(0.0,minimum_gap-(now-min(last,now)))
-            if wait:request_sleep(wait)
+            try:
+                last = float(stream.read(64).decode("ascii").strip() or "0")
+            except (ValueError, UnicodeError):
+                last = request_clock()
+            now = request_clock()
+            if not math.isfinite(last):
+                last = now
+            wait = max(0.0, minimum_gap - (now - min(last, now)))
+            if wait:
+                request_sleep(wait)
+
             def stamp():
                 stream.seek(0)
-                stream.write(f'{request_clock():.6f}'.ljust(64).encode('ascii'))
+                stream.write(f"{request_clock():.6f}".ljust(64).encode("ascii"))
                 stream.truncate(64)
+
             stamp()
-            try:yield
+            try:
+                yield
             finally:
                 if pace_from_completion:
                     stamp()
         finally:
-            if os.name=='nt':
-                stream.seek(0);msvcrt.locking(stream.fileno(),msvcrt.LK_UNLCK,1)
+            if os.name == "nt":
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
             else:
-                fcntl.flock(stream.fileno(),fcntl.LOCK_UN)
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
 
 def market_quote_request_slot():
@@ -179,13 +212,7 @@ def _percentage_plan(
     slippage_pct: float = 0.1,
     cash_loss_limit=None,
 ) -> Optional[Dict[str, float]]:
-    """Return a tick-rounded plan only if estimated net reward/risk qualifies.
-
-    Percentages refer to option premium. Target rounds down and stop rounds up,
-    keeping their distances within the requested limits. Charges are round-trip
-    estimates from ``charge_fn(entry, exit, quantity)``. Each scenario also
-    budgets adverse exit slippage as a percentage of its intended exit price.
-    """
+    """Return a tick-rounded plan only if estimated net reward/risk qualifies."""
     try:
         price = _decimal(entry)
         quantity = _decimal(qty)
@@ -248,94 +275,122 @@ def _percentage_plan(
         return None
 
 
-def premium_plan(entry, qty, charge_fn, target_pct=3.0, stop_pct=0.5,
-                 min_net_rr=3.0, slippage_pct=0.1, rupee_target=0,
-                 max_lots=1, rupee_max_risk=float("inf"), extend_rupee_target=False,
-                 max_target_price=None, risk_per_lot=False, min_lots=1,
-                 cash_loss_limit=None):
-    """Choose the smallest lot count reaching the net rupee target within limits.
-
-    qty is the exchange lot size. Rupee target prices include estimated fees
-    and adverse exit slippage; these estimates cannot guarantee execution.
-    """
-    if (not isinstance(max_lots, int) or isinstance(max_lots, bool) or max_lots < 1
-            or not math.isfinite(rupee_target) or rupee_target < 0
-            or math.isnan(rupee_max_risk) or rupee_max_risk <= 0):
+def premium_plan(
+    entry,
+    qty,
+    charge_fn,
+    target_pct=3.0,
+    stop_pct=0.5,
+    min_net_rr=3.0,
+    slippage_pct=0.1,
+    rupee_target=0,
+    max_lots=1,
+    rupee_max_risk=float("inf"),
+    extend_rupee_target=False,
+    max_target_price=None,
+    risk_per_lot=False,
+    min_lots=1,
+    cash_loss_limit=None,
+):
+    """Choose the smallest lot count reaching the net rupee target within limits."""
+    if (
+        not isinstance(max_lots, int)
+        or isinstance(max_lots, bool)
+        or max_lots < 1
+        or not math.isfinite(rupee_target)
+        or rupee_target < 0
+        or math.isnan(rupee_max_risk)
+        or rupee_max_risk <= 0
+    ):
         return None
     if cash_loss_limit is not None:
         try:
-            if isinstance(cash_loss_limit,bool) or not math.isfinite(float(cash_loss_limit)) or float(cash_loss_limit)<=0:return None
-        except (TypeError,ValueError,OverflowError):return None
-    if not isinstance(extend_rupee_target,bool) or not isinstance(risk_per_lot,bool):return None
-    if isinstance(min_lots,bool) or not isinstance(min_lots,int) or not 1<=min_lots<=max_lots:return None
+            if (
+                isinstance(cash_loss_limit, bool)
+                or not math.isfinite(float(cash_loss_limit))
+                or float(cash_loss_limit) <= 0
+            ):
+                return None
+        except (TypeError, ValueError, OverflowError):
+            return None
+    if not isinstance(extend_rupee_target, bool) or not isinstance(risk_per_lot, bool):
+        return None
+    if isinstance(min_lots, bool) or not isinstance(min_lots, int) or not 1 <= min_lots <= max_lots:
+        return None
     if max_target_price is not None:
         try:
-            if not math.isfinite(float(max_target_price)) or float(max_target_price)<=float(entry):return None
-            max_target_price=float(max_target_price)
-        except (ValueError,TypeError,OverflowError):return None
+            if not math.isfinite(float(max_target_price)) or float(max_target_price) <= float(entry):
+                return None
+            max_target_price = float(max_target_price)
+        except (ValueError, TypeError, OverflowError):
+            return None
     if extend_rupee_target:
         try:
-            if isinstance(target_pct,bool) or not math.isfinite(float(target_pct)) or not 0<float(target_pct)<=100:return None
-            target_pct=float(target_pct)
-        except (ValueError,TypeError,OverflowError):return None
+            if isinstance(target_pct, bool) or not math.isfinite(float(target_pct)) or not 0 < float(target_pct) <= 100:
+                return None
+            target_pct = float(target_pct)
+        except (ValueError, TypeError, OverflowError):
+            return None
     for lots in range(min_lots, max_lots + 1):
         risk_budget = rupee_max_risk * lots if risk_per_lot else rupee_max_risk
         if isinstance(qty, bool):
             return None
         units = qty * lots
-        # In explicit rupee-target mode, a percentage booking preference must
-        # not force extra lots or veto an achievable cash target. Still bound
-        # target search to at most a doubling of premium; executable Greeks and
-        # underlying move feasibility are checked during qualification.
-        ceiling_pct=min(25.0,max(target_pct,18.0)) if extend_rupee_target and rupee_target else target_pct
-        plan = _percentage_plan(entry, units, charge_fn, ceiling_pct, stop_pct,
-                                min_net_rr, slippage_pct, cash_loss_limit)
+        ceiling_pct = min(25.0, max(target_pct, 18.0)) if extend_rupee_target and rupee_target else target_pct
+        plan = _percentage_plan(
+            entry, units, charge_fn, ceiling_pct, stop_pct, min_net_rr, slippage_pct, cash_loss_limit
+        )
         if not plan or plan["expected_net_reward"] < rupee_target or plan["expected_net_risk"] > risk_budget:
             continue
         target_price = plan["hard_target_price"]
         if extend_rupee_target and max_target_price is not None:
-            target_price=min(target_price,math.floor(max_target_price*20+1e-9)/20)
+            target_price = min(target_price, math.floor(max_target_price * 20 + 1e-9) / 20)
         if rupee_target:
-            stop_fill = math.floor(plan["initial_sl"]*(1-slippage_pct/100)*20 + 1e-9)/20
-            risk = (entry-stop_fill)*units + charge_fn(entry,stop_fill,units)
-            plan['planned_premium_stop_risk'] = risk
-            if cash_loss_limit is not None:risk=min(risk,float(cash_loss_limit))
+            stop_fill = math.floor(plan["initial_sl"] * (1 - slippage_pct / 100) * 20 + 1e-9) / 20
+            risk = (entry - stop_fill) * units + charge_fn(entry, stop_fill, units)
+            plan["planned_premium_stop_risk"] = risk
+            if cash_loss_limit is not None:
+                risk = min(risk, float(cash_loss_limit))
             if risk <= 0 or risk > risk_budget:
                 continue
             plan["expected_net_risk"] = risk
             required_reward = max(rupee_target, min_net_rr * risk)
-            # Integer tick bisection avoids a slow linear search for expensive options.
             lo = math.floor(entry / float(TICK)) + 1
             hi = round(target_price / float(TICK))
-            if hi<lo:
+            if hi < lo:
                 continue
             while lo < hi:
                 mid = (lo + hi) // 2
                 price = mid * float(TICK)
-                fill = math.floor(price * (1 - slippage_pct / 100)*20 + 1e-9)/20
+                fill = math.floor(price * (1 - slippage_pct / 100) * 20 + 1e-9) / 20
                 net = (fill - entry) * units - charge_fn(entry, fill, units)
                 if net >= required_reward:
                     hi = mid
                 else:
                     lo = mid + 1
             target_price = round(lo * float(TICK), 2)
-            fill = math.floor(target_price * (1 - slippage_pct / 100)*20 + 1e-9)/20
-            reward = (fill-entry)*units - charge_fn(entry, fill, units)
+            fill = math.floor(target_price * (1 - slippage_pct / 100) * 20 + 1e-9) / 20
+            reward = (fill - entry) * units - charge_fn(entry, fill, units)
             if reward < required_reward:
                 continue
-            plan.update(expected_net_reward=reward, expected_net_rr=reward/plan["expected_net_risk"])
+            plan.update(expected_net_reward=reward, expected_net_rr=reward / plan["expected_net_risk"])
             plan["net_profit_target"] = required_reward
-            plan["trail_jump"] = max(float(TICK), round((target_price-entry)*0.25 / float(TICK))*float(TICK))
+            plan["trail_jump"] = max(float(TICK), round((target_price - entry) * 0.25 / float(TICK)) * float(TICK))
             if extend_rupee_target:
-                plan.update(hard_target_price=target_price,min_rr_target_price=target_price,
-                            target_pct_reference=target_pct,
-                            target_estimated_costs=charge_fn(entry,fill,units)+(target_price-fill)*units)
-                plan['estimated_costs']=max(plan['target_estimated_costs'],plan['stop_estimated_costs'])
+                plan.update(
+                    hard_target_price=target_price,
+                    min_rr_target_price=target_price,
+                    target_pct_reference=target_pct,
+                    target_estimated_costs=charge_fn(entry, fill, units) + (target_price - fill) * units,
+                )
+                plan["estimated_costs"] = max(plan["target_estimated_costs"], plan["stop_estimated_costs"])
         plan.update(lots=lots, qty=units, rupee_target_price=target_price)
         if risk_per_lot:
-            plan.update(risk_limit_per_lot=rupee_max_risk,
-                        total_risk_limit=risk_budget,
-                        expected_net_risk_per_lot=plan['expected_net_risk']/lots)
+            plan.update(
+                risk_limit_per_lot=rupee_max_risk,
+                total_risk_limit=risk_budget,
+                expected_net_risk_per_lot=plan["expected_net_risk"] / lots,
+            )
         return plan
     return None
 
@@ -354,32 +409,39 @@ def signal_quality(candidate: Dict[str, Any]) -> float:
 
 
 def stock_reentry_reason(symbol, trades, as_of, signal_timestamp=None):
-    """A loss need not blacklist a symbol all day; require a fresh setup after 15m.
-
-    Inspect closing time before outcome, so replay never uses a future P&L.
-    Daily slot caps and open-position checks are enforced independently.
-    """
-    ist=timezone(timedelta(hours=5,minutes=30));day=datetime.fromtimestamp(as_of,ist).date()
-    closed=[]
+    """A loss need not blacklist a symbol all day; require a fresh setup after 15m."""
+    ist = timezone(timedelta(hours=5, minutes=30))
+    day = datetime.fromtimestamp(as_of, ist).date()
+    closed = []
     for trade in trades:
-        if trade.get('symbol')!=symbol:continue
+        if trade.get("symbol") != symbol:
+            continue
         try:
-            entered=datetime.fromisoformat(trade['timestamp'])
-            if entered.tzinfo is None:entered=entered.replace(tzinfo=ist)
-            if entered.date()!=day or entered.timestamp()>as_of:continue
-            exited=datetime.fromisoformat(trade['exit_timestamp'])
-            if exited.tzinfo is None:exited=exited.replace(tzinfo=ist)
-            if exited.timestamp()>as_of:return 'Earlier symbol position has not closed'
-            net=float(trade['net_pnl'])
-            if not math.isfinite(net):return 'Earlier symbol outcome is invalid'
-            if net>=0:return 'Profit or breakeven already booked for this symbol today'
+            entered = datetime.fromisoformat(trade["timestamp"])
+            if entered.tzinfo is None:
+                entered = entered.replace(tzinfo=ist)
+            if entered.date() != day or entered.timestamp() > as_of:
+                continue
+            exited = datetime.fromisoformat(trade["exit_timestamp"])
+            if exited.tzinfo is None:
+                exited = exited.replace(tzinfo=ist)
+            if exited.timestamp() > as_of:
+                return "Earlier symbol position has not closed"
+            net = float(trade["net_pnl"])
+            if not math.isfinite(net):
+                return "Earlier symbol outcome is invalid"
+            if net >= 0:
+                return "Profit or breakeven already booked for this symbol today"
             closed.append(exited.timestamp())
-        except (KeyError,ValueError,TypeError,OverflowError):return 'Earlier symbol trade needs reconciliation'
-    if not closed:return None
-    last_exit=max(closed)
-    if as_of-last_exit<900:return '15-minute cooldown after the previous net loss'
-    if signal_timestamp is not None and signal_timestamp<=last_exit:
-        return 'Re-entry needs a new confirmation candle after the loss'
+        except (KeyError, ValueError, TypeError, OverflowError):
+            return "Earlier symbol trade needs reconciliation"
+    if not closed:
+        return None
+    last_exit = max(closed)
+    if as_of - last_exit < 900:
+        return "15-minute cooldown after the previous net loss"
+    if signal_timestamp is not None and signal_timestamp <= last_exit:
+        return "Re-entry needs a new confirmation candle after the loss"
     return None
 
 
@@ -400,16 +462,20 @@ def option_order_book_pressure(quote: Any) -> Dict[str, float]:
         depth = quote.get("depth") if isinstance(quote.get("depth"), dict) else {}
         buys = depth.get("buy") if isinstance(depth.get("buy"), list) else []
         sells = depth.get("sell") if isinstance(depth.get("sell"), list) else []
+        buy_q = float(quote.get("buy_quantity") or 0.0)
+        sell_q = float(quote.get("sell_quantity") or 0.0)
+        if buy_q <= 0 and sell_q <= 0 and len(buys) <= 1 and len(sells) <= 1:
+            return default
         d_buy_val = sum(
             float(r.get("price", 0) or 0) * float(r.get("quantity", 0) or 0)
-            for r in buys if isinstance(r, dict) and float(r.get("price", 0) or 0) > 0 and float(r.get("quantity", 0) or 0) > 0
+            for r in buys
+            if isinstance(r, dict) and float(r.get("price", 0) or 0) > 0 and float(r.get("quantity", 0) or 0) > 0
         )
         d_sell_val = sum(
             float(r.get("price", 0) or 0) * float(r.get("quantity", 0) or 0)
-            for r in sells if isinstance(r, dict) and float(r.get("price", 0) or 0) > 0 and float(r.get("quantity", 0) or 0) > 0
+            for r in sells
+            if isinstance(r, dict) and float(r.get("price", 0) or 0) > 0 and float(r.get("quantity", 0) or 0) > 0
         )
-        buy_q = float(quote.get("buy_quantity") or 0.0)
-        sell_q = float(quote.get("sell_quantity") or 0.0)
         depth_ratio = (d_buy_val / d_sell_val) if d_sell_val > 0 else (1.25 if d_buy_val > 0 else 1.0)
         qty_ratio = (buy_q / sell_q) if (buy_q > 0 and sell_q > 0) else depth_ratio
         ratio = max(0.20, min(4.0, 0.65 * depth_ratio + 0.35 * qty_ratio))
@@ -436,28 +502,33 @@ def option_order_book_pressure(quote: Any) -> Dict[str, float]:
 
 def selection_analysis(candidate):
     """Auditable bounded priority heuristic, never a win probability."""
-    quality=signal_quality(candidate)
-    learned=_finite_score(candidate.get('learning_feedback',{}).get('quality_adjustment',0))
-    execution=0.0
-    fraction=candidate.get('spread_fraction_of_initial_risk')
-    age=candidate.get('confirmation_age_seconds')
-    flow_bonus=_finite_score((candidate.get('option_order_book') or {}).get('order_book_bonus',0.0))
+    quality = signal_quality(candidate)
+    learned = _finite_score(candidate.get("learning_feedback", {}).get("quality_adjustment", 0))
+    execution = 0.0
+    fraction = candidate.get("spread_fraction_of_initial_risk")
+    age = candidate.get("confirmation_age_seconds")
+    flow_bonus = _finite_score((candidate.get("option_order_book") or {}).get("order_book_bonus", 0.0))
     try:
-        if fraction is not None and math.isfinite(float(fraction)) and 0<=float(fraction)<=.4:
-            execution+=5*(1-float(fraction)/.4)
-        if age is not None and math.isfinite(float(age)) and 0<=float(age)<=600:
-            execution+=3*(1-float(age)/600)
-        execution+=max(-2.5,min(2.5,flow_bonus))
-    except (TypeError,ValueError,OverflowError):pass
-    return {'score':round(quality+learned+execution,4),'breakout_quality':quality,
-            'learning_adjustment':learned,'execution_bonus':round(execution,4),
-            'planned_net_rr':_finite_score(candidate.get('expected_net_rr',0)),
-            'basis':'CONFIRMED_SETUP_VOLUME_CLOSE_EXECUTION_AND_CLOSED_NET_FEEDBACK'}
+        if fraction is not None and math.isfinite(float(fraction)) and 0 <= float(fraction) <= 0.4:
+            execution += 5 * (1 - float(fraction) / 0.4)
+        if age is not None and math.isfinite(float(age)) and 0 <= float(age) <= 600:
+            execution += 3 * (1 - float(age) / 600)
+        execution += max(-2.5, min(2.5, flow_bonus))
+    except (TypeError, ValueError, OverflowError):
+        pass
+    return {
+        "score": round(quality + learned + execution, 4),
+        "breakout_quality": quality,
+        "learning_adjustment": learned,
+        "execution_bonus": round(execution, 4),
+        "planned_net_rr": _finite_score(candidate.get("expected_net_rr", 0)),
+        "basis": "CONFIRMED_SETUP_VOLUME_CLOSE_EXECUTION_AND_CLOSED_NET_FEEDBACK",
+    }
 
 
 def learned_profit_floor(feedback, peak_net, risk):
     """Protect half of a meaningful net peak for validated giveback patterns."""
-    if (feedback or {}).get('exit_policy') != 'PROTECT_EARNED_PROFIT':
+    if (feedback or {}).get("exit_policy") != "PROTECT_EARNED_PROFIT":
         return None
     if math.isfinite(peak_net) and math.isfinite(risk) and risk > 0 and peak_net >= 0.5 * risk:
         return 0.5 * peak_net
@@ -465,122 +536,186 @@ def learned_profit_floor(feedback, peak_net, risk):
 
 
 def adaptive_setup_feedback(candidate, closed_trades, as_of):
-    """Walk-forward PAPER feedback across symbols, with chronological validation.
-
-    No code/threshold rewriting: only bounded ranking, temporary setup pauses
-    and earlier fee-aware profit protection. Insufficient evidence is neutral.
-    """
+    """Walk-forward PAPER feedback across symbols, with chronological validation."""
     def key(record):
-        diagnostics=record.get('entry_diagnostics') or record
-        structure=record.get('market_structure') or {}
-        call=structure.get('telegram_call') or {}
-        if record.get('index') in ('NIFTY','SENSEX'):
-            if not call.get('source') and not structure.get('setup'):return None
-            family=('CHANNEL:'+str(call['source']) if call.get('source') else
-                    'NATIVE:'+str(structure.get('setup','UNKNOWN')))
-            side=record.get('option_type')
+        diagnostics = record.get("entry_diagnostics") or record
+        structure = record.get("market_structure") or {}
+        call = structure.get("telegram_call") or {}
+        if record.get("index") in ("NIFTY", "SENSEX", "BANKNIFTY", "BANKEX"):
+            if not call.get("source") and not structure.get("setup"):
+                return None
+            family = (
+                "CHANNEL:" + str(call["source"])
+                if call.get("source")
+                else "NATIVE:" + str(structure.get("setup", "UNKNOWN"))
+            )
+            side = record.get("option_type")
             if not side:
-                suffix=str(record.get('contract','')).rsplit('_',1)[-1]
-                side=suffix if suffix in ('CE','PE') else None
-            if side not in ('CE','PE'):return None
-            return (record['index'],family,side)
-        if str(record.get('setup') or '').startswith('MCX_') and record.get('symbol'):
-            return ('MCX', record['symbol'], record['setup'])
-        family=(diagnostics.get('breakout_confirmation') or {}).get('entry_path')
-        if not family:family=record.get('scanner')
-        return ('STOCK',family,record.get('opt_type')) if family and record.get('opt_type') in ('CE','PE') else None
-    result={'basis':'CLOSED_PAPER_SETUP_WALK_FORWARD','setup_key':key(candidate),
-            'closed_trades':0,'independent_days':0,'quality_adjustment':0.0,'paused':False,
-            'exit_policy':'STANDARD','reason':'Insufficient independent closed outcomes'}
-    wanted=result['setup_key']
-    if wanted is None:return result
-    cutoff=datetime.fromtimestamp(as_of,timezone.utc);samples=[];seen=set()
+                suffix = str(record.get("contract", "")).rsplit("_", 1)[-1]
+                side = suffix if suffix in ("CE", "PE") else None
+            if side not in ("CE", "PE"):
+                return None
+            return (record["index"], family, side)
+        if str(record.get("setup") or "").startswith("MCX_") and record.get("symbol"):
+            return ("MCX", record["symbol"], record["setup"])
+        family = (diagnostics.get("breakout_confirmation") or {}).get("entry_path")
+        if not family:
+            family = record.get("scanner")
+        return ("STOCK", family, record.get("opt_type")) if family and record.get("opt_type") in ("CE", "PE") else None
+
+    result = {
+        "basis": "CLOSED_PAPER_SETUP_WALK_FORWARD",
+        "setup_key": key(candidate),
+        "closed_trades": 0,
+        "independent_days": 0,
+        "quality_adjustment": 0.0,
+        "paused": False,
+        "exit_policy": "STANDARD",
+        "reason": "Insufficient independent closed outcomes",
+    }
+    wanted = result["setup_key"]
+    if wanted is None:
+        return result
+    cutoff = datetime.fromtimestamp(as_of, timezone.utc)
+    samples = []
+    seen = set()
     for trade in closed_trades:
         try:
-            if key(trade)!=wanted:continue
-            origin=str(trade.get('data_source',trade.get('data_health',''))).upper()
-            if any(s in origin for s in ('BACKTEST','HISTOR','ROLLING')) or trade.get('mode','PAPER')!='PAPER':continue
-            exited=datetime.fromisoformat(trade['exit_timestamp'])
-            if exited.tzinfo is None:exited=exited.replace(tzinfo=timezone(timedelta(hours=5,minutes=30)))
-            if not timedelta(0)<=cutoff-exited<=timedelta(days=60):continue
-            identity=trade.get('entry_id') or (trade.get('timestamp'),trade.get('symbol',trade.get('index')),trade.get('contract'))
-            if identity in seen:continue
-            risk=float(trade.get('learning_risk_rs',0) or 0)
-            if risk<=0:risk=float(trade.get('initial_risk_points',0))*float(trade.get('qty',0))
-            net=float(trade['net_pnl'])
-            if risk<=0 or not all(math.isfinite(v) for v in (net,risk)):continue
-            reward=max(-3.0,min(3.0,net/risk))
-            diag=trade.get('exit_diagnostics') or {}
-            peak=diag.get('peak_executable_vwap',(((trade.get('market_structure') or {}).get('telegram_call') or {}).get('exit_observation') or {}).get('peak_bid'));giveback=None
-            peak_net=diag.get('peak_net_pnl')
-            if peak_net is None and peak is not None and len(trade.get('exit_fills') or [])<=1:
-                peak_net=(float(peak)-float(trade['entry_price']))*float(trade['qty'])-(float(trade['gross_pnl'])-net)
-            if isinstance(peak_net,(float,int)) and math.isfinite(peak_net) and peak_net>=0.5*risk:
-                giveback=net<0.5*peak_net
-            seen.add(identity);samples.append((exited,reward,giveback))
-        except (KeyError,TypeError,ValueError,OverflowError):continue
-    samples=sorted(samples,key=lambda x:x[0])[-40:]
-    days=len({s[0].astimezone(timezone(timedelta(hours=5,minutes=30))).date() for s in samples})
-    result.update(closed_trades=len(samples),independent_days=days)
-    if len(samples)<8 or days<3:return result
-    split=max(5,len(samples)*2//3);train=samples[:split];validation=samples[split:]
-    if len(validation)<3:return result
-    train_r=sum(s[1] for s in train)/len(train);valid_r=sum(s[1] for s in validation)/len(validation)
-    same_direction=train_r*valid_r>0
-    adjustment=max(-5.0,min(5.0,5*valid_r*len(samples)/(len(samples)+10))) if same_direction else 0.0
-    paused=(len(samples)>=12 and train_r<-.25 and valid_r<-.15
-            and all(s[1]<0 for s in samples[-3:]) and cutoff-samples[-1][0]<timedelta(days=1))
-    givebacks=[s[2] for s in validation if s[2] is not None]
-    protect=(len(givebacks)>=3 and sum(givebacks)/len(givebacks)>=.5 and valid_r<train_r)
-    result.update(training_trades=len(train),validation_trades=len(validation),
-                  training_net_r=round(train_r,4),validation_net_r=round(valid_r,4),
-                  quality_adjustment=round(adjustment,4),paused=paused,
-                  exit_policy='PROTECT_EARNED_PROFIT' if protect else 'STANDARD',
-                  reason='Chronological validation supports adaptation' if same_direction or protect else 'Validation disagrees; retain standard policy')
+            if key(trade) != wanted:
+                continue
+            origin = str(trade.get("data_source", trade.get("data_health", ""))).upper()
+            if any(s in origin for s in ("BACKTEST", "HISTOR", "ROLLING")) or trade.get("mode", "PAPER") != "PAPER":
+                continue
+            exited = datetime.fromisoformat(trade["exit_timestamp"])
+            if exited.tzinfo is None:
+                exited = exited.replace(tzinfo=timezone(timedelta(hours=5, minutes=30)))
+            if not timedelta(0) <= cutoff - exited <= timedelta(days=60):
+                continue
+            identity = trade.get("entry_id") or (
+                trade.get("timestamp"),
+                trade.get("symbol", trade.get("index")),
+                trade.get("contract"),
+            )
+            if identity in seen:
+                continue
+            risk = float(trade.get("learning_risk_rs", 0) or 0)
+            if risk <= 0:
+                risk = float(trade.get("initial_risk_points", 0)) * float(trade.get("qty", 0))
+            net = float(trade["net_pnl"])
+            if risk <= 0 or not all(math.isfinite(v) for v in (net, risk)):
+                continue
+            reward = max(-3.0, min(3.0, net / risk))
+            diag = trade.get("exit_diagnostics") or {}
+            peak = diag.get(
+                "peak_executable_vwap",
+                (((trade.get("market_structure") or {}).get("telegram_call") or {}).get("exit_observation") or {}).get(
+                    "peak_bid"
+                ),
+            )
+            giveback = None
+            peak_net = diag.get("peak_net_pnl")
+            if peak_net is None and peak is not None and len(trade.get("exit_fills") or []) <= 1:
+                peak_net = (float(peak) - float(trade["entry_price"])) * float(trade["qty"]) - (
+                    float(trade["gross_pnl"]) - net
+                )
+            if isinstance(peak_net, (float, int)) and math.isfinite(peak_net) and peak_net >= 0.5 * risk:
+                giveback = net < 0.5 * peak_net
+            seen.add(identity)
+            samples.append((exited, reward, giveback))
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+    samples = sorted(samples, key=lambda x: x[0])[-40:]
+    days = len({s[0].astimezone(timezone(timedelta(hours=5, minutes=30))).date() for s in samples})
+    result.update(closed_trades=len(samples), independent_days=days)
+    if len(samples) < 8 or days < 3:
+        return result
+    split = max(5, len(samples) * 2 // 3)
+    train = samples[:split]
+    validation = samples[split:]
+    if len(validation) < 3:
+        return result
+    train_r = sum(s[1] for s in train) / len(train)
+    valid_r = sum(s[1] for s in validation) / len(validation)
+    same_direction = train_r * valid_r > 0
+    adjustment = max(-5.0, min(5.0, 5 * valid_r * len(samples) / (len(samples) + 10))) if same_direction else 0.0
+    paused = (
+        len(samples) >= 12
+        and train_r < -0.25
+        and valid_r < -0.15
+        and all(s[1] < 0 for s in samples[-3:])
+        and cutoff - samples[-1][0] < timedelta(days=1)
+    )
+    givebacks = [s[2] for s in validation if s[2] is not None]
+    protect = len(givebacks) >= 3 and sum(givebacks) / len(givebacks) >= 0.5 and valid_r < train_r
+    result.update(
+        training_trades=len(train),
+        validation_trades=len(validation),
+        training_net_r=round(train_r, 4),
+        validation_net_r=round(valid_r, 4),
+        quality_adjustment=round(adjustment, 4),
+        paused=paused,
+        exit_policy="PROTECT_EARNED_PROFIT" if protect else "STANDARD",
+        reason="Chronological validation supports adaptation"
+        if same_direction or protect
+        else "Validation disagrees; retain standard policy",
+    )
     return result
 
 
 def rank_candidates(candidates: Iterable[Dict[str, Any]], closed_trades=(), as_of=None) -> list[Dict[str, Any]]:
-    """Rank quality with bounded feedback from this symbol/setup's closed net outcomes.
-
-    Feedback never increases size or relaxes entry checks. Use only outcomes known
-    at decision time, including during replay. Unknown/legacy risk is not invented.
-    """
-    candidates=[dict(c) for c in candidates]
-    closed_trades=list(closed_trades)
+    """Rank quality with bounded feedback from this symbol/setup's closed net outcomes."""
+    candidates = [dict(c) for c in candidates]
+    closed_trades = list(closed_trades)
     if as_of is not None:
-        cutoff=datetime.fromtimestamp(as_of,timezone.utc)
+        cutoff = datetime.fromtimestamp(as_of, timezone.utc)
         for candidate in candidates:
-            outcomes=[]
+            outcomes = []
             for trade in closed_trades:
-                if any(trade.get(k)!=candidate.get(k) for k in ('symbol','scanner','opt_type')):
+                if any(trade.get(k) != candidate.get(k) for k in ("symbol", "scanner", "opt_type")):
                     continue
                 try:
-                    exited=datetime.fromisoformat(trade['exit_timestamp'])
-                    if exited.tzinfo is None:exited=exited.replace(tzinfo=timezone(timedelta(hours=5,minutes=30)))
-                    if exited>cutoff:continue
-                    net=float(trade['net_pnl']);risk=float(trade.get('learning_risk_rs',0))
-                    if risk<=0 or not all(math.isfinite(v) for v in (net,risk)):continue
-                    outcomes.append((exited,net/risk,net))
-                except (KeyError,TypeError,ValueError,OverflowError):continue
-            outcomes=sorted(outcomes,key=lambda r:r[0])[-20:]
-            count=len(outcomes)
-            expectancy=sum(r[1] for r in outcomes)/count if count else 0.
-            adjustment=max(-10.,min(10.,10*expectancy*count/(count+5))) if count>=3 else 0.
-            paused=(count>=5 and expectancy<0 and all(r[2]<0 for r in outcomes[-3:])
-                    and cutoff-outcomes[-1][0]<timedelta(days=5))
-            candidate['learning_feedback']={'closed_trades':count,'net_expectancy_r':round(expectancy,4),
-                'quality_adjustment':round(adjustment,4),'paused':paused,'basis':'CLOSED_NET_PNL_SAME_SYMBOL_SCANNER_SIDE'}
-            pooled=adaptive_setup_feedback(candidate,closed_trades,as_of)
-            candidate['adaptive_feedback']=pooled
-            candidate['learning_feedback']['quality_adjustment']=max(-10.0,min(10.0,adjustment+pooled['quality_adjustment']))
-            candidate['learning_feedback']['paused']=paused or pooled['paused']
-        candidates=[c for c in candidates if not c['learning_feedback']['paused']]
-        for candidate in candidates:candidate['selection_analysis']=selection_analysis(candidate)
+                    exited = datetime.fromisoformat(trade["exit_timestamp"])
+                    if exited.tzinfo is None:
+                        exited = exited.replace(tzinfo=timezone(timedelta(hours=5, minutes=30)))
+                    if exited > cutoff:
+                        continue
+                    net = float(trade["net_pnl"])
+                    risk = float(trade.get("learning_risk_rs", 0))
+                    if risk <= 0 or not all(math.isfinite(v) for v in (net, risk)):
+                        continue
+                    outcomes.append((exited, net / risk, net))
+                except (KeyError, TypeError, ValueError, OverflowError):
+                    continue
+            outcomes = sorted(outcomes, key=lambda r: r[0])[-20:]
+            count = len(outcomes)
+            expectancy = sum(r[1] for r in outcomes) / count if count else 0.0
+            adjustment = max(-10.0, min(10.0, 10 * expectancy * count / (count + 5))) if count >= 3 else 0.0
+            paused = (
+                count >= 5
+                and expectancy < 0
+                and all(r[2] < 0 for r in outcomes[-3:])
+                and cutoff - outcomes[-1][0] < timedelta(days=5)
+            )
+            candidate["learning_feedback"] = {
+                "closed_trades": count,
+                "net_expectancy_r": round(expectancy, 4),
+                "quality_adjustment": round(adjustment, 4),
+                "paused": paused,
+                "basis": "CLOSED_NET_PNL_SAME_SYMBOL_SCANNER_SIDE",
+            }
+            pooled = adaptive_setup_feedback(candidate, closed_trades, as_of)
+            candidate["adaptive_feedback"] = pooled
+            candidate["learning_feedback"]["quality_adjustment"] = max(
+                -10.0, min(10.0, adjustment + pooled["quality_adjustment"])
+            )
+            candidate["learning_feedback"]["paused"] = paused or pooled["paused"]
+        candidates = [c for c in candidates if not c["learning_feedback"]["paused"]]
+        for candidate in candidates:
+            candidate["selection_analysis"] = selection_analysis(candidate)
     return sorted(
         candidates,
         key=lambda candidate: (
-            -selection_analysis(candidate)['score'],
+            -selection_analysis(candidate)["score"],
             -_finite_score(candidate.get("expected_net_rr", 0.0)),
             str(candidate.get("symbol", "")).upper(),
         ),
@@ -588,13 +723,7 @@ def rank_candidates(candidates: Iterable[Dict[str, Any]], closed_trades=(), as_o
 
 
 class DailyTradeGate:
-    """Persist capped consumed entries per calendar day across processes/restarts.
-
-    Call ``reserve`` immediately before entry. A reservation is never released,
-    even for failed or ambiguous submissions. ``mark_closed`` records an outcome
-    without making that day available again. The caller supplies the trading
-    date in its exchange timezone as an ISO date, e.g. ``2026-10-22``.
-    """
+    """Persist capped consumed entries per calendar day across processes/restarts."""
 
     def __init__(self, path: os.PathLike[str] | str, max_entries: int = 1):
         if not 1 <= max_entries <= 4:
@@ -613,7 +742,6 @@ class DailyTradeGate:
         return self.path / f"{day}.slot{slot}.json"
 
     def has_entry(self, day: str) -> bool:
-        # Even a truncated file consumes the date: an order may have been sent.
         return self.count_entries(day) >= self.max_entries
 
     def count_entries(self, day: str) -> int:
@@ -633,7 +761,6 @@ class DailyTradeGate:
             descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError:
             return False
-        # Do not unlink on a write failure: preserving a consumed date is safer.
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(encoded)
             stream.flush()

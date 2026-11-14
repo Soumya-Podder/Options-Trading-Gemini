@@ -1495,8 +1495,7 @@ def stock_profit_protection_net(peak_net):
     if not math.isfinite(peak):return None
     if peak>=1800:return 0.75*peak
     if peak>=1200:return 0.60*peak
-    if peak>=750:return 260.0
-    if peak>=520:return 120.0
+    if peak>=750:return 100.0
     return None
 
 
@@ -1560,11 +1559,27 @@ def paper_exit(pos, quote, now, cfg, urgent_only=False, combined_net=None):
         if managing_runner and net>=pos.get('net_profit_target',cfg.rupee_target):
             pos['base_target_locked']=True
     reason = None
-    if net <= -cfg.rupee_max_risk:
+    if combined_net is not None:
+        rem_budget = COMBINED_PAPER_LOSS_LIMIT_RS + float(combined_net)
+        if rem_budget <= 0 or (net < 0 and combined_net + net <= -COMBINED_PAPER_LOSS_LIMIT_RS):
+            reason = "COMBINED_PAPER_LOSS_LIMIT"
+        elif rem_budget < cfg.rupee_max_risk:
+            lo_c, hi_c = 1, math.ceil(pos["entry_price"] * 20)
+            while lo_c < hi_c:
+                mid_c = (lo_c + hi_c) // 2
+                fill_c = math.floor(max(0.05, mid_c / 20 * (1 - cfg.slippage_pct / 100)) * 20 + 1e-9) / 20
+                if -stock_position_value(pos, fill_c)["net"] <= rem_budget:
+                    hi_c = mid_c
+                else:
+                    lo_c = mid_c + 1
+            comb_stop_px = lo_c / 20
+            if comb_stop_px < bid - 1e-9:
+                pos["current_sl"] = max(pos["current_sl"], comb_stop_px)
+    if reason is None and net <= -cfg.rupee_max_risk:
         reason = "CASH_LOSS_LIMIT"
-    elif bid <= pos["current_sl"]:
-        reason = "TRAIL_STOP" if pos["current_sl"] > pos["initial_sl"] else "PREMIUM_STOP"
-    elif (combined_net is not None and net < 0
+    elif reason is None and bid <= pos["current_sl"]:
+        reason = "COMBINED_PAPER_LOSS_LIMIT" if (combined_net is not None and net < 0 and combined_net + net <= -COMBINED_PAPER_LOSS_LIMIT_RS + 25.0) else ("TRAIL_STOP" if pos["current_sl"] > pos["initial_sl"] else "PREMIUM_STOP")
+    elif reason is None and (combined_net is not None and net < 0
           and combined_net + net <= -COMBINED_PAPER_LOSS_LIMIT_RS):
         reason = "COMBINED_PAPER_LOSS_LIMIT"
     elif urgent_only:
@@ -1626,14 +1641,8 @@ def stock_daily_risk_reason(outcomes, positions, cfg, today, additional_risk=0):
     trades=sorted((t for t in outcomes if str(t.get("timestamp","")).startswith(today)),
                   key=lambda t:t.get("exit_timestamp",t.get("timestamp","")))
     net=sum(float(t["net_pnl"]) for t in trades)
-    losses=0
-    for trade in reversed(trades):
-        if float(trade["net_pnl"])>0:break
-        losses+=1
-    if losses>=cfg.max_consec_losses:return "Consecutive net-loss limit reached"
-    reserved=sum(float(p.get("expected_net_risk",p.get("opt_1r",0)*p.get("qty",0))) for p in positions)
-    if net-reserved-float(additional_risk)<-cfg.daily_loss_limit or net<=-cfg.daily_loss_limit:
-        return "Daily loss budget including open-position risk exhausted"
+    if net <= -COMBINED_PAPER_LOSS_LIMIT_RS or net <= -cfg.daily_loss_limit:
+        return "Daily realised loss limit reached"
     return None
 
 
@@ -1766,7 +1775,8 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                         logger.info('[PAPER OPTSTK PARTIAL] %s | %d units @ %.2f | booked net Rs.%+.2f',
                             pos['contract'],partial['qty'],partial['price'],partial['booked_net'])
                         if telegram:telegram.partial(pos, partial, position_key=pos["slot"])
-                    decision = paper_exit(pos, quotes.get(str(pos["opt_security_id"]), {}), now, cfg)
+                    combined_net_now, _ = combined_paper_loss_state(today, Path(__file__).resolve().parent)
+                    decision = paper_exit(pos, quotes.get(str(pos["opt_security_id"]), {}), now, cfg, combined_net=combined_net_now)
                     if decision:
                         rec = close_paper_position(ledger, pos, *decision, now)
                         gate.mark_closed(today, rec, pos["slot"])
@@ -1986,7 +1996,7 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                     "contract": f"{best['symbol']} {best['strike']:g}_{best['opt_type']}",
                     "entry_price": best["opt_ltp"], "current_ltp": None,
                     "peak_bid": best.get('bid',0.0),"initial_bid":best.get('bid',best['opt_ltp']),
-                    "current_sl": best["initial_sl"], "entry_ts": now.strftime("%Y-%m-%d %H:%M:%S"),
+                    "current_sl": max(float(best["initial_sl"]), float(best.get("cash_loss_stop_price", 0.0))), "entry_ts": now.strftime("%Y-%m-%d %H:%M:%S"),
                     "entry_epoch": now.timestamp(), "entry_id": f"STOCK_{today}_{slot}"}
                 update_position_quote(pos,entry_quote,now.timestamp())
                 pos['persisted_quote_epoch']=pos.get('quote_received_epoch',0)

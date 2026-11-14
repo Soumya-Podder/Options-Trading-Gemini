@@ -16,7 +16,7 @@ Capabilities (A-to-Z Intraday Adaptation):
    - Engine 5 (`FAST_SCALP_10_15`): Captures quick +11 to +15 point bursts on low-IV / range days.
 2. Daily Profit Goal (`DAILY_PROFIT_TARGET_RS = 3000.0`, `INDEX_PROFIT_LOCK_RS = 1200.0`):
    - Designed to trade every session and average >= Rs. 1,200+ net/day while keeping the
-     strict 1-Lot Capital Shield (`MAX_LOSS_PER_TRADE_RS = 650.0`, `DAILY_MAX_LOSS_RS = -1100.0`).
+     strict 1-Lot Capital Shield (`MAX_LOSS_PER_TRADE_RS = 650.0`, `DAILY_MAX_LOSS_RS = -2500.0`).
 """
 
 import os
@@ -101,7 +101,7 @@ MAX_POST_LOCK_RUNNER_ENTRIES = 2
 
 # --- HARD ANTI-DRAWDOWN CIRCUIT BREAKERS ---
 MAX_LOSS_PER_TRADE_RS = 650.0            # Never risk more than Rs. 650 net per lot on a standard trade
-DAILY_MAX_LOSS_RS = -1100.0              # Hard daily kill-switch if net P&L hits -Rs. 1,100
+DAILY_MAX_LOSS_RS = -2500.0              # Hard daily kill-switch if net P&L hits -Rs. 1,100
 HOUSE_MONEY_SCALE_THRESHOLD_RS = 1200.0  # Only allow >1 lot when today's realized net PnL >= +Rs. 1,200
 
 NIFTY_TARGET_POINTS = 25.0               # Default ceiling; dynamically overridden per regime (12 / 18 / 25 / 36 pts)
@@ -3075,17 +3075,29 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     active_pos["peak_net_pnl"] = peak_net
                     feedback = (active_pos.get("market_structure") or {}).get("adaptive_feedback")
                     learned_floor = learned_profit_floor(feedback, peak_net, position_risk * active_pos["qty"])
-                    if not exit_reason and learned_floor is not None and modeled_net <= learned_floor:
+                    if not exit_reason and learned_floor is not None and peak_net >= 480.0 and modeled_net <= learned_floor:
                         exit_reason = "LEARNED_PROFIT_PROTECTION"
                         curr_ltp = executable_bid
-                if idx_name == "NIFTY" and not exit_reason and executable_bid > 0:
+                if executable_bid > 0:
                     combined_net, _ = combined_paper_loss_state(today_str)
                     modeled_fill = math.floor(executable_bid * .999 * 20 + 1e-9) / 20
-                    if combined_net is not None and daily_target_reached(
-                        combined_net, active_pos, modeled_fill, COMBINED_PAPER_LOSS_LIMIT_RS, loss_limit=True
-                    ):
-                        exit_reason = "COMBINED_PAPER_LOSS_LIMIT"
-                        curr_ltp = executable_bid
+                    if combined_net is not None:
+                        rem_budget = COMBINED_PAPER_LOSS_LIMIT_RS + float(combined_net)
+                        if rem_budget > 0:
+                            entry_px = float(active_pos["entry_price"])
+                            qty_open = int(active_pos["qty"])
+                            fills_done = active_pos.get("exit_fills", [])
+                            booked_g = sum((float(f["price"]) - entry_px) * int(f["qty"]) for f in fills_done)
+                            fees_est = 40.0 + int(active_pos["lots"]) * 24.5 + 20.0 * len(fills_done)
+                            min_fill_needed = entry_px - (rem_budget + booked_g - fees_est) / max(qty_open, 1)
+                            comb_stop_bid = math.ceil(max(0.05, min_fill_needed) / 0.999 * 20 - 1e-9) / 20
+                            if comb_stop_bid < executable_bid - 1e-9:
+                                active_pos["current_sl"] = max(float(active_pos["current_sl"]), round(comb_stop_bid, 2))
+                        if not exit_reason and daily_target_reached(
+                            combined_net, active_pos, modeled_fill, COMBINED_PAPER_LOSS_LIMIT_RS, loss_limit=True
+                        ):
+                            exit_reason = "COMBINED_PAPER_LOSS_LIMIT"
+                            curr_ltp = executable_bid
                 runner_hold = False
                 trade_review_bid = (
                     index_profit_lock_bid(0, active_pos, target_net=NIFTY_TRADE_PROFIT_REVIEW_RS)
@@ -3233,12 +3245,12 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     now.time(), day_net_pnl, profit_protected,
                     day_entries, consec_losses, runner_reentry=runner_reentry,
                     paper_retry=paper_nifty_retry if idx_name == "NIFTY" else None,
-                    shared_loss_limit=idx_name == "NIFTY",
+                    shared_loss_limit=True,
                 )
-                if idx_name == "NIFTY" and not block_reason:
+                if not block_reason:
                     combined_net, combined_reached = combined_paper_loss_state(today_str)
                     if combined_reached or combined_net is None:
-                        block_reason = ("Combined Nifty/stock PAPER loss limit reached" if combined_reached
+                        block_reason = ("Combined PAPER loss limit (Rs.2,500) reached" if combined_reached
                                         else "Combined PAPER profit state unavailable")
 
             if position_key is None and (block_reason or not (native_slot_open or channel_slot_open)):
@@ -3447,7 +3459,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         if channel_call and not TelegramCallFeed.entry_is_fresh(channel_call, time.time()):
                             continue
                         position_key = "active_channel_position" if channel_call else "active_position"
-                        if idx_name == "NIFTY" and not combined_paper_entry_allowed(today_str):
+                        if not combined_paper_entry_allowed(today_str):
                             view["entry_decision"] = {"action": "HOLD", "reason": "Combined PAPER loss limit reached or state unavailable"}
                             continue
                         if not reserve_index_entry(
