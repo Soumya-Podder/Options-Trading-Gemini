@@ -14,7 +14,7 @@ Capabilities (A-to-Z Intraday Adaptation):
    - Engine 4 (`VWAP_TREND_CONTINUATION`): Captures 15 to 20 points on daily intraday VWAP
      trend days without requiring rare 10-day structural breakouts.
    - Engine 5 (`FAST_SCALP_10_15`): Captures quick +11 to +15 point bursts on low-IV / range days.
-2. Daily Profit Goal (`DAILY_PROFIT_TARGET_RS = 3000.0`, `INDEX_PROFIT_LOCK_RS = 1200.0`):
+2. Daily Profit Goal (`DAILY_PROFIT_TARGET_RS = 3000.0`, `INDEX_PROFIT_LOCK_RS = 1800.0`):
    - Designed to trade every session and average >= Rs. 1,200+ net/day while keeping the
      strict 1-Lot Capital Shield (`MAX_LOSS_PER_TRADE_RS = 650.0`, `DAILY_MAX_LOSS_RS = -2500.0`).
 """
@@ -92,7 +92,7 @@ INDICES_CONFIG = {
 PRUNE_COOLDOWN_DAYS = 5
 MAX_PRUNE_CYCLES = 3
 DAILY_PROFIT_TARGET_RS = 3000.0
-INDEX_PROFIT_LOCK_RS = 1200.0            # Locks daily session once realized net >= Rs. 1,200+
+INDEX_PROFIT_LOCK_RS = 1800.0            # Locks daily session once realized net >= Rs. 1,200+
 INDEX_RUNNER_TARGET_RS = 3500.0
 NIFTY_TRADE_PROFIT_REVIEW_RS = 1000.0
 NIFTY_TRADE_RUNNER_FLOOR_RS = 750.0
@@ -110,7 +110,7 @@ MIN_STRUCTURE_ROOM_POINTS = 25.0
 MIN_STRUCTURE_RR = 1.50
 MIN_STRUCTURE_RR_AFTER_LOSS = 1.95
 MIN_STRUCTURE_RR_RETEST = 1.90
-MAX_TRADES_PER_DAY = 5
+MAX_TRADES_PER_DAY = 8
 MAX_CONSECUTIVE_LOSSES_PER_DAY = 2
 POST_SL_COOLDOWN_MINUTES = 12
 POST_WIN_COOLDOWN_MINUTES = 5
@@ -3054,6 +3054,10 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     )
                 elif not exit_reason and ((curr_ltp - active_pos["entry_price"]) * active_pos["qty"] - (40.0 + active_pos["lots"] * 24.5)) <= -(MAX_LOSS_PER_TRADE_RS * active_pos["lots"]):
                     exit_reason = "MAX_RUPEE_LOSS_CAP_HIT"
+                elif not exit_reason and elapsed_min >= 6.0 and (active_pos["highest_ltp"] - active_pos["entry_price"]) < (0.25 * position_risk) and (curr_ltp - active_pos["entry_price"]) <= -(0.45 * position_risk):
+                    sign_pos = 1 if active_pos["option_type"] == "CE" else -1
+                    if sign_pos * float(view.get("d_spot_5m", 0.0)) < -4.0 and sign_pos * float(view.get("spot", 0.0) - view.get("session_vwap", 0.0)) < 0:
+                        exit_reason = "SMALL_LOSS_ORDER_FLOW_CUT"
                 elif not exit_reason and elapsed_min >= 12.0 and (active_pos["highest_ltp"] - active_pos["entry_price"]) < (0.45 * position_risk) and curr_ltp <= active_pos["entry_price"]:
                     exit_reason = "THETA_TIME_STOP"
                 elif not exit_reason and elapsed_min >= float(active_pos.get(
@@ -3253,7 +3257,11 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         block_reason = ("Combined PAPER loss limit (Rs.2,500) reached" if combined_reached
                                         else "Combined PAPER profit state unavailable")
 
-            if position_key is None and (block_reason or not (native_slot_open or channel_slot_open)):
+            channel_has_fresh_candidate = bool(
+                channel_slot_open and call_feed and call_feed.candidates(idx_name, time.time(), ledger.get("telegram_call_entries", []))
+                and combined_paper_entry_allowed(today_str)
+            )
+            if position_key is None and ((block_reason and not channel_has_fresh_candidate) or not (native_slot_open or channel_slot_open)):
                 reason = block_reason or "All enabled index position slots occupied"
                 if reason != last_scan_only_reason:
                     logger.info("[INDEX SCAN ONLY] %s. Continuing to scan until session cutoff.", reason)
@@ -3327,8 +3335,8 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     if channel_call:
                         side = 'ce' if channel_call['option_type'] == 'CE' else 'pe'
                         spread = float(view.get(f'atm_{side}_ask') or 0) - float(view.get(f'atm_{side}_bid') or 0)
-                        if spread > 0.20 * (7.8 if idx_name == 'NIFTY' else 20):
-                            view['entry_decision'] = {'action': 'HOLD', 'reason': 'Channel spread consumes more than 20% of initial stop distance'}
+                        if spread > 0.45 * (7.8 if idx_name == 'NIFTY' else 20):
+                            view['entry_decision'] = {'action': 'HOLD', 'reason': 'Channel spread consumes more than 45% of initial stop distance'}
                             continue
                     if channel_call and (not TelegramCallFeed.entry_is_fresh(channel_call, time.time())
                                          or entry_p > TelegramCallFeed.entry_bounds(channel_call)[1]):
@@ -3424,15 +3432,13 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             except (TypeError, ValueError, OverflowError):
                                 held_bid = held_ask = held_ask_qty = 0
                                 held_age = math.inf
-                            if not (
-                                0 <= held_age <= 8 and held_bid > init_sl
-                                and held_bid >= TelegramCallFeed.entry_bounds(channel_call)[0]
-                                and held_bid <= held_ask <= ask and held_ask_qty >= qty
-                                and held_ask - held_bid <= .20 * initial_risk
+                            if (
+                                0 <= held_age <= 12 and held_bid > init_sl
+                                and held_ask > 0 and held_ask <= TelegramCallFeed.entry_bounds(channel_call)[1] * 1.03
                             ):
-                                view["entry_decision"] = {"action": "HOLD", "reason": "Fresh held-contract depth could not confirm the channel entry"}
-                                logger.info("[CHANNEL RISK HOLD] %s %g %s | held-contract depth did not confirm entry", idx_name, strike_k, opt_type)
-                                continue
+                                entry_p = math.ceil(held_ask * 1.001 * 20 - 1e-9) / 20
+                                init_sl = channel_initial_stop(idx_name, entry_p, cfg["lot_size"], lots)
+                                initial_risk = round(entry_p - init_sl, 2)
                             now = datetime.now()
                             if now.time() >= EOD_SQUAREOFF_TIME or time.time() - chain_received_epoch > 8:
                                 continue

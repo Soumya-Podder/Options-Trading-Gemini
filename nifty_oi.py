@@ -35,7 +35,18 @@ class NiftyOITracker:
                     previous=raw.get('previous_oi')
                     previous=float(previous) if previous is not None else None
                     if previous is not None and (not math.isfinite(previous) or previous<0):previous=None
+                    vol=float(raw.get('volume',0) or 0)
+                    iv=float(raw.get('implied_volatility',0) or 0)
+                    greeks=raw.get('greeks') if isinstance(raw.get('greeks'),dict) else {}
+                    delta=float(greeks.get('delta',raw.get('delta',0)) or 0)
+                    gamma=float(greeks.get('gamma',raw.get('gamma',0)) or 0)
+                    theta=float(greeks.get('theta',raw.get('theta',0)) or 0)
                     nodes[(strike,side)]={'oi':oi,'price':price,'previous_oi':previous,
+                                          'volume':vol if math.isfinite(vol) and vol>=0 else 0.0,
+                                          'iv':iv if math.isfinite(iv) and iv>=0 else 0.0,
+                                          'delta':delta if math.isfinite(delta) else 0.0,
+                                          'gamma':gamma if math.isfinite(gamma) else 0.0,
+                                          'theta':theta if math.isfinite(theta) else 0.0,
                                           'security_id':str(raw.get('security_id',raw.get('securityId','')))}
             except (KeyError,TypeError,ValueError,OverflowError):continue
         eligible=[s for s in self.history if 270<=now-s['time']<=450]
@@ -66,13 +77,26 @@ class NiftyOITracker:
             if abs(strike-spot)>10*self.strike_step:continue
             old=prior['nodes'].get((strike,side)) if prior else None
             same=old and (not node['security_id'] or not old['security_id'] or node['security_id']==old['security_id'])
+            morn_snap=self.history[0] if self.history else None
+            morn_node=morn_snap['nodes'].get((strike,side)) if morn_snap else None
+            morn_oi_diff=(node['oi']-morn_node['oi']) if morn_node else (node['oi']-node['previous_oi'] if node['previous_oi'] is not None else 0.0)
             rows.append({'strike':strike,'side':side,'oi':node['oi'],
+                         'volume':node.get('volume',0.0),'iv':node.get('iv',0.0),
+                         'iv_change_5m':round(node.get('iv',0.0)-old.get('iv',0.0),3) if same else 0.0,
+                         'delta':node.get('delta',0.0),'gamma':node.get('gamma',0.0),'theta':node.get('theta',0.0),
+                         'change_since_morning':morn_oi_diff,
                          'change_from_previous_day':node['oi']-node['previous_oi'] if node['previous_oi'] is not None else None,
                          'change_over_5m':node['oi']-old['oi'] if same else None,
                          'premium_change_over_5m':node['price']-old['price'] if same else None})
         supports=sorted((r for r in rows if r['side']=='pe' and r['strike']<=spot),key=lambda r:r['oi'],reverse=True)[:5]
         resistances=sorted((r for r in rows if r['side']=='ce' and r['strike']>=spot),key=lambda r:r['oi'],reverse=True)[:5]
         totals={side:sum(n['oi'] for (k,s),n in nodes.items() if s==side) for side in ('ce','pe')}
+        vol_totals={side:sum(n.get('volume',0.0) for (k,s),n in nodes.items() if s==side) for side in ('ce','pe')}
+        morn_ce_write=sum(max(0.0, r.get('change_since_morning') or 0.0) for r in rows if r['side']=='ce')
+        morn_pe_write=sum(max(0.0, r.get('change_since_morning') or 0.0) for r in rows if r['side']=='pe')
+        avg_ce_iv=sum(r.get('iv',0.0) for r in rows if r['side']=='ce' and r.get('iv',0)>0)/max(1,sum(1 for r in rows if r['side']=='ce' and r.get('iv',0)>0))
+        avg_pe_iv=sum(r.get('iv',0.0) for r in rows if r['side']=='pe' and r.get('iv',0)>0)/max(1,sum(1 for r in rows if r['side']=='pe' and r.get('iv',0)>0))
+        avg_iv_change_5m=sum(r.get('iv_change_5m',0.0) for r in rows)/max(1,len(rows))
         def building(row):
             return (row['change_over_5m'] or 0)>0 or (row['change_from_previous_day'] or 0)>0
         building_supports=sorted((r for r in rows if r['side']=='pe' and r['strike']<=spot and building(r)),key=lambda r:-r['strike'])
@@ -84,7 +108,7 @@ class NiftyOITracker:
               'comparison':'Same six current strike/side contracts; not a changing ATM basket',
               'oi_units':'Raw Dhan OI units, without lot conversion',
               'previous_oi_meaning':'Previous day OI; separate from five-minute change',
-              'full_chain_pcr':round(totals['pe']/totals['ce'],4) if totals['ce'] else None,
+              'full_chain_pcr':round(totals['pe']/totals['ce'],4) if totals['ce'] else None,'call_volume_total':vol_totals['ce'],'put_volume_total':vol_totals['pe'],'put_call_volume_ratio':round(vol_totals['pe']/vol_totals['ce'],4) if vol_totals['ce']>0 else 1.0,'morning_ce_writing_total':morn_ce_write,'morning_pe_writing_total':morn_pe_write,'dominant_morning_writer':'PUT_WRITERS_BULLISH' if morn_pe_write>morn_ce_write*1.12 else ('CALL_WRITERS_BEARISH' if morn_ce_write>morn_pe_write*1.12 else 'BALANCED'),'avg_ce_iv':round(avg_ce_iv,2),'avg_pe_iv':round(avg_pe_iv,2),'avg_iv_change_5m':round(avg_iv_change_5m,3),
               'support_put_oi':supports,'resistance_call_oi':resistances,
               'nearby_strikes':sorted(rows,key=lambda r:(r['strike'],r['side'])),
               'freshness_limit':'Response receipt time does not establish exchange OI update time'}

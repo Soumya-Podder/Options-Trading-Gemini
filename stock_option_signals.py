@@ -512,9 +512,15 @@ def evaluate_stock_setup(
     # probability. Capping the volume term prevents one spike dominating rank.
     quality_volume_ratio=(prepared['breakout_volume_ratio'] if prepared else
                           latest['volume']/baseline if require_breakout and adjusted_volume and baseline>0 else relative_volume)
+    retest_active = bool((breakout_confirmation or {}).get("entry_path") == "PULLBACK_RETEST")
+    rally_strength = "PARABOLIC_RALLY" if (quality_volume_ratio >= 1.8 and body_ratio >= 0.65 and close_strength >= 0.80) else ("PULLBACK_RETEST_BOUNCE" if retest_active else "STEADY_BREAKOUT")
+    buying_pressure_score = round(min(100.0, 35.0 * min(quality_volume_ratio / 2.5, 1.0) + 35.0 * close_strength + 20.0 * body_ratio + (10.0 if flow_direction == (1 if bullish else -1) else 5.0)), 2)
     signal_quality = (40.0 * min(quality_volume_ratio / 3.0, 1.0)
                       + 30.0 * body_ratio + 20.0 * close_strength + 10.0 * orb_bonus)
     return {
+        "rally_classification": rally_strength,
+        "buying_pressure_score": buying_pressure_score,
+        "is_retracement_retest": retest_active,
         'breakout_confirmation':breakout_confirmation,
         "opt_type": "CE" if bullish else "PE",
         "scanner": ('CONFIRMED_BREAKOUT_CE' if bullish else 'CONFIRMED_BREAKOUT_PE') if breakout_confirmation else (("BREAKOUT_CONTINUATION_CE" if bullish else "BREAKOUT_CONTINUATION_PE") if continuation else ((regime['setup']+('_CE' if bullish else '_PE')) if regime else ("BULLISH_MOMENTUM_CONFIRMATION" if bullish else "BEARISH_MOMENTUM_CONFIRMATION"))),

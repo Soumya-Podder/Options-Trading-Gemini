@@ -89,6 +89,72 @@ def assess_nifty_opening_reclaim(index_bars, ce_contract, pe_contract, as_of, sp
         result['reason']='Malformed opening-reclaim input';return result
 
 
+def compute_multi_timeframe_sr_and_bounces(bars, today, spot, buffer=6.0):
+    """Extract 4H, 15m, and 5m Support/Resistance zones and count multi-bounce/rejection touches."""
+    htf_4h_levels = []
+    mtf_15m_levels = []
+    ltf_5m_levels = []
+    try:
+        # 1. 4-Hour (45 x 5m bars per half-session/4H block)
+        if len(bars) >= 30:
+            chunk = 36
+            for start in range(0, len(bars) - 6, chunk):
+                seg = bars[start:start + chunk]
+                if len(seg) >= 6:
+                    htf_4h_levels.append(round(max(b["high"] for b in seg), 2))
+                    htf_4h_levels.append(round(min(b["low"] for b in seg), 2))
+        # 2. 15-Minute Swings (3 x 5m bars per 15m candle)
+        bars_15m = []
+        for idx in range(0, len(bars) - 2, 3):
+            grp = bars[idx:idx + 3]
+            bars_15m.append({"high": max(b["high"] for b in grp), "low": min(b["low"] for b in grp), "close": grp[-1]["close"]})
+        for i in range(1, len(bars_15m) - 1):
+            if bars_15m[i]["high"] >= max(bars_15m[i - 1]["high"], bars_15m[i + 1]["high"]):
+                mtf_15m_levels.append(round(bars_15m[i]["high"], 2))
+            if bars_15m[i]["low"] <= min(bars_15m[i - 1]["low"], bars_15m[i + 1]["low"]):
+                mtf_15m_levels.append(round(bars_15m[i]["low"], 2))
+        # 3. 5-Minute Intraday Swings
+        for i in range(1, len(today) - 1):
+            if today[i]["high"] >= max(today[i - 1]["high"], today[i + 1]["high"]):
+                ltf_5m_levels.append(round(today[i]["high"], 2))
+            if today[i]["low"] <= min(today[i - 1]["low"], today[i + 1]["low"]):
+                ltf_5m_levels.append(round(today[i]["low"], 2))
+        # Cluster levels within 12 points and count bounce/rejection touches across recent 150 bars
+        raw_candidates = sorted(set(htf_4h_levels[-16:] + mtf_15m_levels[-24:] + ltf_5m_levels[-16:]))
+        clustered = []
+        for lvl in raw_candidates:
+            if not clustered or abs(lvl - clustered[-1]) > 12.0:
+                clustered.append(lvl)
+        recent_bars = bars[-150:]
+        multi_bounce = []
+        for lvl in clustered:
+            bounces_up = 0
+            rejections_dn = 0
+            for b in recent_bars[:-1]:
+                if abs(b["low"] - lvl) <= buffer and b["close"] > lvl + buffer * 0.5:
+                    bounces_up += 1
+                if abs(b["high"] - lvl) <= buffer and b["close"] < lvl - buffer * 0.5:
+                    rejections_dn += 1
+            touches = bounces_up + rejections_dn
+            if touches >= 2:
+                multi_bounce.append({
+                    "level": lvl,
+                    "touches": touches,
+                    "support_bounces": bounces_up,
+                    "resistance_rejections": rejections_dn,
+                    "role": "STRONG_SUPPORT" if bounces_up >= rejections_dn else "STRONG_RESISTANCE",
+                })
+        return {
+            "htf_4h_levels": sorted(set(htf_4h_levels[-12:])),
+            "mtf_15m_levels": sorted(set(mtf_15m_levels[-16:])),
+            "ltf_5m_levels": sorted(set(ltf_5m_levels[-12:])),
+            "multi_bounce_zones": multi_bounce,
+            "multi_bounce_levels": [z["level"] for z in multi_bounce],
+        }
+    except Exception:
+        return {"htf_4h_levels": [], "mtf_15m_levels": [], "ltf_5m_levels": [], "multi_bounce_zones": [], "multi_bounce_levels": []}
+
+
 def assess_nifty_structure(candles, chain, as_of, spot, direction,
                            buffer=3.0, min_room=20.0, min_structure_rr=1.5, trigger_levels=None,
                            include_nearest=False, enable_opening_trend=False, enable_opening_drive=False,
@@ -158,8 +224,10 @@ def assess_nifty_structure(candles, chain, as_of, spot, direction,
         regime=opening_trend(bars,min_gap_pct=0.2 if enable_opening_drive else 0.5,
                              min_drive_pct=0.2,allow_drive=enable_opening_drive,
                              min_body_fraction=min_body,min_close_fraction=min_close) if enable_opening_trend else None
-        # A pivot needs two already-closed candles on each side.
-        swings=[]
+        # A pivot needs two already-closed candles on each side, plus 4H/15m/5m multi-bounce levels.
+        mtf_info = compute_multi_timeframe_sr_and_bounces(bars, today, spot)
+        result["mtf_sr"] = mtf_info
+        swings = list(mtf_info.get("multi_bounce_levels", [])) + list(mtf_info.get("mtf_15m_levels", [])[-8:])
         for i in range(2,len(today)-2):
             window=today[i-2:i+3]
             if today[i]["high"]==max(b["high"] for b in window): swings.append(today[i]["high"])

@@ -53,7 +53,7 @@ class TelegramCallFeed:
     """Public channel candidates only. Broker decisions remain in the PAPER engine."""
     CHANNEL='tradewith_sac'
     SOURCES={-1003882006811:'Tradewithsac',-1002302217039:'GrowX'}
-    MAX_AGE=300
+    MAX_AGE=900
     MAX_PENDING_AGE=1800
 
     def __init__(self, logger, env=None, pending_calls=()):
@@ -96,9 +96,9 @@ class TelegramCallFeed:
             activated=bool(re.search(r'\bTRADE\s+ACTIVATED\b',text))
             cancelled=bool(re.search(r'\bCANCELLED|\bCANCELED',text))
             update={**common,'targets':targets,'activated':activated,'cancelled':cancelled} if targets or activated or cancelled else None
-            entry=re.search(r'\bBUY\s+ABOVE\s*[:\-]*\s*(?:₹|RS\.?|INR)?\s*(\d+(?:\.\d+)?)',text)
-            near=re.search(r'\bBUY\s+NEAR\s*[:\-]*\s*(?:₹|RS\.?|INR)?\s*(\d+(?:\.\d+)?)(?:\s*[-–]\s*(\d+(?:\.\d+)?))?',text)
-            zone=re.search(r'\bNEAR\s+LEVEL\s*--+\s*(\d+(?:\.\d+)?)(?:\s*-\s*(\d+(?:\.\d+)?))?',text)
+            entry=re.search(r'\b(?:BUY|ADD)\s+(?:ABOVE|AT|@)\s*[:\-]*\s*(?:₹|RS\.?|INR)?\s*(\d+(?:\.\d+)?)',text)
+            near=re.search(r'\b(?:BUY\s+NEAR|BUY\s+ZONE|CMP)\s*[:\-]*\s*(?:₹|RS\.?|INR)?\s*(\d+(?:\.\d+)?)(?:\s*[-–/]+\s*(\d+(?:\.\d+)?))?',text)
+            zone=re.search(r'\b(?:NEAR\s+LEVEL|RANGE|BUY)\s*[:\-]*\s*(?:₹|RS\.?|INR)?\s*(\d+(?:\.\d+)?)(?:\s*[-–toTO]+\s*(\d+(?:\.\d+)?))?',text)
             if re.search(r'\b(?:ACTIVATED|HIT|CANCELLED|CANCELED)\b',text):return None,update
             if not entry and not near and not (source=='GrowX' and zone):return None,update
             location=near or zone
@@ -108,7 +108,7 @@ class TelegramCallFeed:
             key=f"{day}:{common['index']}:{common['strike']:g}:{common['option_type']}:{price:g}:CURRENT"
             call={**common,'key':key,'buy_above':price,'expiry':None,'targets':targets,
                   'entry_kind':'ABOVE' if entry else ('RANGE' if upper is not None else 'NEAR'),
-                  'requires_activation':source=='Tradewithsac'}
+                  'requires_activation':False}
             if upper is not None:call['entry_max']=upper
             return call,update
         except (TypeError,ValueError,OverflowError,OSError):return None,None
@@ -117,11 +117,12 @@ class TelegramCallFeed:
     def entry_bounds(call):
         """One bounded zone shared by quote validation and modeled-fill validation."""
         price=float(call['buy_above'])
+        is_nifty=call.get('index')=='NIFTY'
         if call.get('entry_kind')=='NEAR':
-            # One percent around the posted level, capped at 20% of fixed SL.
-            tolerance=min(price*0.01,2.0 if call['index']=='NIFTY' else 4.0)
+            tolerance=max(min(price*0.035, 5.0 if is_nifty else 12.0), 2.0)
             return max(0.05,price-tolerance),price+tolerance
-        return price,float(call.get('entry_max',price*1.02))
+        max_chase=max(price*1.06, price+(6.0 if is_nifty else 15.0))
+        return max(0.05, price-(1.5 if is_nifty else 4.0)), float(call.get('entry_max', max_chase))
 
     @classmethod
     def parse(cls,page,now_epoch):
