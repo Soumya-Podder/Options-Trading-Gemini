@@ -99,7 +99,7 @@ class TelegramCallFeed:
             entry=re.search(r'\b(?:BUY|ADD)\s+(?:ABOVE|AT|@)\s*[:\-]*\s*(?:₹|RS\.?|INR)?\s*(\d+(?:\.\d+)?)',text)
             near=re.search(r'\b(?:BUY\s+NEAR|BUY\s+ZONE|CMP)\s*[:\-]*\s*(?:₹|RS\.?|INR)?\s*(\d+(?:\.\d+)?)(?:\s*[-–/]+\s*(\d+(?:\.\d+)?))?',text)
             zone=re.search(r'\b(?:NEAR\s+LEVEL|RANGE|BUY)\s*[:\-]*\s*(?:₹|RS\.?|INR)?\s*(\d+(?:\.\d+)?)(?:\s*[-–toTO]+\s*(\d+(?:\.\d+)?))?',text)
-            if re.search(r'\b(?:ACTIVATED|HIT|CANCELLED|CANCELED)\b',text):return None,update
+            if re.search(r'\b(?:HIT|CANCELLED|CANCELED)\b',text) or (re.search(r'\bACTIVATED\b',text) and not entry and not near and not zone):return None,update
             if not entry and not near and not (source=='GrowX' and zone):return None,update
             location=near or zone
             price=float(entry[1] if entry else location[1])

@@ -20,7 +20,7 @@ class NiftyOITracker:
             return None,{'ready':False,'reason':'Invalid spot or snapshot time'}
         context=(datetime.fromtimestamp(now,IST).date().isoformat(),expiry)
         if context!=self.context:
-            self.history.clear();self.context=context
+            self.history.clear();self.morning_snapshot=None;self.context=context
         nodes={}
         for key,sides in chain.items():
             try:
@@ -77,7 +77,7 @@ class NiftyOITracker:
             if abs(strike-spot)>10*self.strike_step:continue
             old=prior['nodes'].get((strike,side)) if prior else None
             same=old and (not node['security_id'] or not old['security_id'] or node['security_id']==old['security_id'])
-            morn_snap=self.history[0] if self.history else None
+            morn_snap=getattr(self, "morning_snapshot", None) or (self.history[0] if self.history else None)
             morn_node=morn_snap['nodes'].get((strike,side)) if morn_snap else None
             morn_oi_diff=(node['oi']-morn_node['oi']) if morn_node else (node['oi']-node['previous_oi'] if node['previous_oi'] is not None else 0.0)
             rows.append({'strike':strike,'side':side,'oi':node['oi'],
@@ -119,5 +119,8 @@ class NiftyOITracker:
                 info[side+'_premium_change_5m']=sum(n['price'] for n in current)-reference[side+'_prem']
         if self.history and now<=self.history[-1]['time']:
             self.history.clear();reference=None;info.update(ready=False,reason='Non-increasing snapshot time')
-        self.history.append({'time':now,'spot':spot,'nodes':nodes})
+        snap_obj = {'time':now,'spot':spot,'nodes':nodes}
+        if getattr(self, "morning_snapshot", None) is None and nodes:
+            self.morning_snapshot = snap_obj
+        self.history.append(snap_obj)
         return reference,info
