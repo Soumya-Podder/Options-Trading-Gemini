@@ -500,6 +500,15 @@ def option_order_book_pressure(quote: Any) -> Dict[str, float]:
         return default
 
 
+def underwater_exit_reason(*, elapsed, breached, pressure, adverse_flow, stalled):
+    """Evaluate discretionary exits after the position's hard stops."""
+    if breached and pressure is not None and pressure < 0.45:
+        return "UNDERWATER_STRUCTURE_BREAK"
+    if elapsed >= 420 and stalled and adverse_flow:
+        return "UNDERWATER_MOMENTUM_STALL"
+    return None
+
+
 def selection_analysis(candidate):
     """Auditable bounded priority heuristic, never a win probability."""
     quality = signal_quality(candidate)

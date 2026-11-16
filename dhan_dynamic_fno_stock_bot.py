@@ -8,6 +8,7 @@ import os
 import sys
 import csv
 import math
+from stock_option_policy import underwater_exit_reason
 import time
 import json
 import hashlib
@@ -1594,6 +1595,15 @@ def paper_exit(pos, quote, now, cfg, urgent_only=False, combined_net=None):
         reason='ORDER_FLOW_PROFIT_EXIT'
     elif base_target_reached:
         reason='RUPEE_TARGET'
+    elif (net < 0 and bid < pos['entry_price'] and (underwater_reason := underwater_exit_reason(
+        elapsed=elapsed,
+        breached=bool((pos.get('breakout_failure') or {}).get('failed')
+                      and 0 <= stamp - pos['breakout_failure'].get('assessed_epoch', 0) <= 90),
+        pressure=option_order_book_pressure(quote)['book_pressure_ratio'],
+        adverse_flow=opposing_flow,
+        stalled=pos['peak_bid'] - pos['entry_price'] < 0.25 * pos['opt_1r'],
+    ))):
+        reason=underwater_reason
     elif (pos.get('breakout_failure') or {}).get('failed') and 0<=stamp-pos['breakout_failure'].get('assessed_epoch',0)<=90:
         reason='UNDERLYING_BREAKOUT_FAILED'
     elif (not managing_runner and elapsed >= 300 and -650.0 <= net <= -280.0

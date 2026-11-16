@@ -45,6 +45,7 @@ from stock_option_policy import (
     COMBINED_PAPER_LOSS_LIMIT_RS,
 )
 import requests
+from stock_option_policy import underwater_exit_reason
 
 from telegram_notifier import TelegramNotifier, TelegramCallFeed
 from nifty_market_structure import apply_nifty_level_entry
@@ -3054,11 +3055,25 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     )
                 elif not exit_reason and ((curr_ltp - active_pos["entry_price"]) * active_pos["qty"] - (40.0 + active_pos["lots"] * 24.5)) <= -(MAX_LOSS_PER_TRADE_RS * active_pos["lots"]):
                     exit_reason = "MAX_RUPEE_LOSS_CAP_HIT"
-                elif not exit_reason and elapsed_min >= 6.0 and (active_pos["highest_ltp"] - active_pos["entry_price"]) < (0.25 * position_risk) and (curr_ltp - active_pos["entry_price"]) <= -(0.45 * position_risk):
-                    sign_pos = 1 if active_pos["option_type"] == "CE" else -1
-                    if sign_pos * float(view.get("d_spot_5m", 0.0)) < -4.0 and sign_pos * float(view.get("spot", 0.0) - view.get("session_vwap", 0.0)) < 0:
-                        exit_reason = "SMALL_LOSS_ORDER_FLOW_CUT"
-                elif not exit_reason and elapsed_min >= 12.0 and (active_pos["highest_ltp"] - active_pos["entry_price"]) < (0.45 * position_risk) and curr_ltp <= active_pos["entry_price"]:
+                elif not exit_reason and not channel_position and curr_ltp < active_pos["entry_price"]:
+                    structure = view.get("market_structure") or {}
+                    level = (active_pos.get("market_structure") or {}).get("invalidation_level")
+                    close = structure.get("confirmation_close")
+                    age = structure.get("confirmation_age_seconds")
+                    sign = 1 if active_pos["option_type"] == "CE" else -1
+                    bid_value = curr_ltp * float(node.get("top_bid_quantity") or 0)
+                    ask_value = float(node.get("top_ask_price") or 0) * float(node.get("top_ask_quantity") or 0)
+                    if 0 <= time.time() - chain_received_epoch <= 8 and bid_value > 0 and ask_value > 0:
+                        pressure = bid_value / ask_value
+                        exit_reason = underwater_exit_reason(
+                            elapsed=elapsed_min * 60,
+                            breached=bool(level and close and age is not None and 0 <= age <= 300
+                                          and elapsed_min * 60 >= age and sign * (close - level) < 0),
+                            pressure=pressure,
+                            adverse_flow=pressure < 0.45 and sign * view.get("d_spot_5m", 0) < -4,
+                            stalled=active_pos["highest_ltp"] - active_pos["entry_price"] < 0.25 * position_risk,
+                        )
+                if not exit_reason and elapsed_min >= 12.0 and (active_pos["highest_ltp"] - active_pos["entry_price"]) < (0.45 * position_risk) and curr_ltp <= active_pos["entry_price"]:
                     exit_reason = "THETA_TIME_STOP"
                 elif not exit_reason and elapsed_min >= float(active_pos.get(
                     "runner_max_hold_minutes",
