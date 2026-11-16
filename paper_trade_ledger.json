@@ -1,14 +1,14 @@
 {
   "mode": "PAPER",
   "initial_capital": 40000.0,
-  "virtual_balance_gross": 40250.25,
-  "virtual_balance_net": 39734.25,
-  "profit_without_charges": 250.25,
-  "net_profit_after_charges": -265.75,
-  "total_trades": 8,
+  "virtual_balance_gross": 37829.0,
+  "virtual_balance_net": 37095.0,
+  "profit_without_charges": -2171.0,
+  "net_profit_after_charges": -2905.0,
+  "total_trades": 11,
   "avg_winning_value_rs": 568.75,
-  "avg_losing_value_rs": 506.19,
-  "win_to_loss_ratio": 1.12,
+  "avg_losing_value_rs": 635.14,
+  "win_to_loss_ratio": 0.9,
   "trades": [
     {
       "timestamp": "2026-11-11 12:13:36",
@@ -1146,13 +1146,315 @@
       "exit_diagnostics": {
         "peak_net_pnl": 614.7499999999993
       }
+    },
+    {
+      "timestamp": "2026-11-16 09:17:14",
+      "exit_timestamp": "2026-11-16 09:17:59",
+      "index": "NIFTY",
+      "contract": "25150.0_CE",
+      "lots": 2,
+      "qty": 130,
+      "spot_at_entry": 25238.9,
+      "oi_diff_lakhs": 9.56,
+      "entry_price": 173.4,
+      "exit_price": 163.2,
+      "gross_pnl": -1326.0,
+      "net_pnl": -1415.0,
+      "initial_risk_points": 7.8,
+      "r_multiple": -1.31,
+      "learning_r_multiple": -1.395464,
+      "learning_risk_rs": 1014.0,
+      "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+      "state_vec": [
+        -0.1912,
+        -0.0455,
+        0.0,
+        -0.8,
+        -0.8,
+        -1.5,
+        0.0,
+        0.655,
+        0.0,
+        -0.9814
+      ],
+      "exit_reason": "INITIAL_SL_HIT",
+      "rule_used": "TELEGRAM_CHANNEL 2026-11-16:NIFTY:25150:CE:170:CURRENT",
+      "data_health": "LIVE_CLEAN",
+      "exit_fills": [
+        {
+          "qty": 130,
+          "price": 163.2,
+          "timestamp": "2026-11-16 09:17:59",
+          "reason": "INITIAL_SL_HIT"
+        }
+      ],
+      "market_structure": {
+        "ready": false,
+        "allowed": false,
+        "reason": "Need matched five-minute strike OI",
+        "source": "INDEX_5M_OHLC",
+        "telegram_call": {
+          "index": "NIFTY",
+          "strike": 25150.0,
+          "option_type": "CE",
+          "posted_epoch": 1794800756.0,
+          "source": "GrowX",
+          "source_url": "https://t.me/c/2302217039/88984",
+          "key": "2026-11-16:NIFTY:25150:CE:170:CURRENT",
+          "buy_above": 170.0,
+          "expiry": null,
+          "targets": [
+            205.0,
+            240.0,
+            285.0,
+            320.0,
+            360.0,
+            400.0,
+            440.0,
+            480.0,
+            520.0,
+            600.0
+          ],
+          "entry_kind": "RANGE",
+          "requires_activation": false,
+          "entry_max": 177.0,
+          "first_received_epoch": 1794800762.7981524,
+          "resolved_expiry": "2026-11-17",
+          "expiry_basis": "CURRENT_CHAIN",
+          "stop_target_basis": "CHANNEL_TARGET_USER_FIXED_PREMIUM_STOP",
+          "exit_observation": {
+            "epoch": 1794800879.4082646,
+            "executable_bid": 163.4,
+            "peak_bid": 179.75,
+            "current_stop": 165.6,
+            "first_target": 205.0,
+            "target_observed": false
+          }
+        },
+        "adaptive_feedback": {
+          "basis": "CLOSED_PAPER_SETUP_WALK_FORWARD",
+          "setup_key": [
+            "NIFTY",
+            "CHANNEL:GrowX",
+            "CE"
+          ],
+          "closed_trades": 0,
+          "independent_days": 0,
+          "quality_adjustment": 0.0,
+          "paused": false,
+          "exit_policy": "STANDARD",
+          "reason": "Insufficient independent closed outcomes"
+        },
+        "entry_quote": {
+          "received_epoch": 1794800834.5435398,
+          "decision_epoch": 1794800834.6408195,
+          "modeled_entry_price_basis": "EXECUTABLE_ASK_PLUS_0.1PCT_SLIPPAGE",
+          "last_price": 173,
+          "top_bid_price": 172.65,
+          "top_ask_price": 173.2,
+          "top_bid_quantity": 195,
+          "top_ask_quantity": 585
+        }
+      }
+    },
+    {
+      "timestamp": "2026-11-16 09:18:52",
+      "exit_timestamp": "2026-11-16 09:20:27",
+      "index": "NIFTY",
+      "contract": "25200.0_CE",
+      "lots": 1,
+      "qty": 65,
+      "spot_at_entry": 25261.0,
+      "oi_diff_lakhs": 109.53,
+      "entry_price": 148.6,
+      "exit_price": 140.0,
+      "gross_pnl": -559.0,
+      "net_pnl": -623.5,
+      "initial_risk_points": 7.8,
+      "r_multiple": -1.1,
+      "learning_r_multiple": -1.229783,
+      "learning_risk_rs": 507.0,
+      "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+      "state_vec": [
+        -2.1906,
+        -0.4056,
+        0.0,
+        -0.8,
+        -0.8,
+        1.5,
+        0.0,
+        1.097,
+        0.0,
+        -0.9678
+      ],
+      "exit_reason": "INITIAL_SL_HIT",
+      "rule_used": "TELEGRAM_CHANNEL 2026-11-16:NIFTY:25200:CE:150:CURRENT",
+      "data_health": "LIVE_CLEAN",
+      "market_structure": {
+        "ready": false,
+        "allowed": false,
+        "reason": "Need matched five-minute strike OI",
+        "source": "INDEX_5M_OHLC",
+        "telegram_call": {
+          "index": "NIFTY",
+          "strike": 25200.0,
+          "option_type": "CE",
+          "posted_epoch": 1794800849.0,
+          "source": "Tradewithsac",
+          "source_url": "https://t.me/c/3882006811/1613",
+          "key": "2026-11-16:NIFTY:25200:CE:150:CURRENT",
+          "buy_above": 150.0,
+          "expiry": null,
+          "targets": [],
+          "entry_kind": "NEAR",
+          "requires_activation": false,
+          "first_received_epoch": 1794800855.6077359,
+          "resolved_expiry": "2026-11-17",
+          "expiry_basis": "CURRENT_CHAIN",
+          "stop_target_basis": "CHANNEL_TARGET_USER_FIXED_PREMIUM_STOP",
+          "exit_observation": {
+            "epoch": 1794801027.1900585,
+            "executable_bid": 140.15,
+            "peak_bid": 148.6,
+            "current_stop": 140.8,
+            "first_target": null,
+            "target_observed": false
+          }
+        },
+        "adaptive_feedback": {
+          "basis": "CLOSED_PAPER_SETUP_WALK_FORWARD",
+          "setup_key": [
+            "NIFTY",
+            "CHANNEL:Tradewithsac",
+            "CE"
+          ],
+          "closed_trades": 1,
+          "independent_days": 1,
+          "quality_adjustment": 0.0,
+          "paused": false,
+          "exit_policy": "STANDARD",
+          "reason": "Insufficient independent closed outcomes"
+        },
+        "entry_quote": {
+          "received_epoch": 1794800932.5720623,
+          "decision_epoch": 1794800932.6722972,
+          "modeled_entry_price_basis": "EXECUTABLE_ASK_PLUS_0.1PCT_SLIPPAGE",
+          "last_price": 147.7,
+          "top_bid_price": 147.25,
+          "top_ask_price": 147.7,
+          "top_bid_quantity": 975,
+          "top_ask_quantity": 455
+        }
+      }
+    },
+    {
+      "timestamp": "2026-11-16 09:22:58",
+      "exit_timestamp": "2026-11-16 09:27:04",
+      "index": "NIFTY",
+      "contract": "25100.0_CE",
+      "lots": 1,
+      "qty": 65,
+      "spot_at_entry": 25240.55,
+      "oi_diff_lakhs": 49.95,
+      "entry_price": 198.75,
+      "exit_price": 190.5,
+      "gross_pnl": -536.25,
+      "net_pnl": -600.75,
+      "initial_risk_points": 7.8,
+      "r_multiple": -1.06,
+      "learning_r_multiple": -1.184911,
+      "learning_risk_rs": 507.0,
+      "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+      "state_vec": [
+        -0.999,
+        -0.1708,
+        -2.0,
+        -0.8,
+        0.6,
+        -1.5,
+        -0.334,
+        0.688,
+        -1.0,
+        -0.9336
+      ],
+      "exit_reason": "INITIAL_SL_HIT",
+      "rule_used": "TELEGRAM_CHANNEL 2026-11-16:NIFTY:25100:CE:190:CURRENT",
+      "data_health": "LIVE_CLEAN",
+      "market_structure": {
+        "allowed": false,
+        "ready": false,
+        "reason": "Need prior-session data and four closed session candles",
+        "source": "INDEX_5M_OHLC",
+        "telegram_call": {
+          "index": "NIFTY",
+          "strike": 25100.0,
+          "option_type": "CE",
+          "posted_epoch": 1794800714.0,
+          "source": "GrowX",
+          "source_url": "https://t.me/c/2302217039/88982",
+          "key": "2026-11-16:NIFTY:25100:CE:190:CURRENT",
+          "buy_above": 190.0,
+          "expiry": null,
+          "targets": [
+            240.0,
+            285.0,
+            320.0,
+            360.0,
+            400.0,
+            440.0,
+            480.0,
+            520.0,
+            600.0
+          ],
+          "entry_kind": "RANGE",
+          "requires_activation": false,
+          "entry_max": 200.0,
+          "first_received_epoch": 1794800716.375573,
+          "resolved_expiry": "2026-11-17",
+          "expiry_basis": "CURRENT_CHAIN",
+          "stop_target_basis": "CHANNEL_TARGET_USER_FIXED_PREMIUM_STOP",
+          "exit_observation": {
+            "epoch": 1794801424.6792858,
+            "executable_bid": 190.7,
+            "peak_bid": 215.15,
+            "current_stop": 192.85,
+            "first_target": 240.0,
+            "target_observed": false
+          }
+        },
+        "adaptive_feedback": {
+          "basis": "CLOSED_PAPER_SETUP_WALK_FORWARD",
+          "setup_key": [
+            "NIFTY",
+            "CHANNEL:GrowX",
+            "CE"
+          ],
+          "closed_trades": 1,
+          "independent_days": 1,
+          "quality_adjustment": 0.0,
+          "paused": false,
+          "exit_policy": "STANDARD",
+          "reason": "Insufficient independent closed outcomes"
+        },
+        "entry_quote": {
+          "received_epoch": 1794801178.4435482,
+          "decision_epoch": 1794801178.6389318,
+          "modeled_entry_price_basis": "EXECUTABLE_ASK_PLUS_0.1PCT_SLIPPAGE",
+          "last_price": 199.25,
+          "top_bid_price": 199.2,
+          "top_ask_price": 199.75,
+          "top_bid_quantity": 455,
+          "top_ask_quantity": 390
+        }
+      }
     }
   ],
   "pending_channel_calls": [],
   "daily_entry_counts": {
     "2026-11-11": 2,
     "2026-11-12": 4,
-    "2026-11-13": 2
+    "2026-11-13": 2,
+    "2026-11-16": 3
   },
   "daily_profit_protection": {
     "day": "2026-11-11",
@@ -1165,6 +1467,9 @@
     "loss_floor": -2563.25
   },
   "telegram_call_entries": [
-    "2026-11-13:NIFTY:25200:CE:135:CURRENT"
+    "2026-11-13:NIFTY:25200:CE:135:CURRENT",
+    "2026-11-16:NIFTY:25150:CE:170:CURRENT",
+    "2026-11-16:NIFTY:25200:CE:150:CURRENT",
+    "2026-11-16:NIFTY:25100:CE:190:CURRENT"
   ]
 }

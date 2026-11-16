@@ -1,226 +1,50 @@
 {
-  "mode": "BACKTEST_MCX_V14_REAL_WORLD_MASTER",
+  "mode": "BACKTEST_MCX_V15_1_PROFIT_SHIELD_MASTER",
   "entry_calibration": "WALK_FORWARD",
   "span_days": 60,
   "initial_capital": 30000.0,
-  "virtual_balance_gross": 47730.6,
-  "virtual_balance_net": 41670.6,
-  "profit_without_charges": 17730.6,
-  "net_profit_after_charges": 11670.6,
-  "total_trades": 94,
-  "wins": 42,
-  "losses": 52,
-  "win_rate_pct": 44.7,
-  "avg_winning_net_rs": 829.42,
-  "avg_losing_net_rs": 445.48,
-  "win_to_loss_ratio": 1.86,
-  "trading_days_active": 40,
-  "avg_daily_net_pnl_rs": 291.76,
+  "virtual_balance_gross": 47395.45,
+  "virtual_balance_net": 42915.45,
+  "profit_without_charges": 17395.45,
+  "net_profit_after_charges": 12915.45,
+  "total_trades": 74,
+  "wins": 34,
+  "losses": 40,
+  "win_rate_pct": 45.9,
+  "avg_winning_net_rs": 837.51,
+  "avg_losing_net_rs": 389.0,
+  "win_to_loss_ratio": 2.15,
+  "trading_days_active": 38,
+  "avg_daily_net_pnl_rs": 339.88,
   "by_commodity": {
-    "SILVERM": {
-      "trades": 43,
-      "wins": 19,
-      "losses": 24,
-      "net_pnl": 8307.2
-    },
-    "CRUDEOILM": {
-      "trades": 9,
-      "wins": 6,
-      "losses": 3,
-      "net_pnl": -430.0
-    },
     "GOLDM": {
-      "trades": 38,
-      "wins": 15,
-      "losses": 23,
-      "net_pnl": 3883.4
+      "trades": 40,
+      "wins": 21,
+      "losses": 19,
+      "net_pnl": 7621.8
     },
-    "NATGASMINI": {
-      "trades": 4,
-      "wins": 2,
-      "losses": 2,
-      "net_pnl": -90.0
+    "SILVERM": {
+      "trades": 34,
+      "wins": 13,
+      "losses": 21,
+      "net_pnl": 5293.65
     }
   },
   "by_playbook": {
     "MCX_TREND_PULLBACK": {
-      "trades": 70,
-      "wins": 29,
-      "losses": 41,
-      "net_pnl": 10175.75
+      "trades": 65,
+      "wins": 31,
+      "losses": 34,
+      "net_pnl": 11919.4
     },
     "MCX_BREAKOUT_CONFIRM": {
-      "trades": 24,
-      "wins": 13,
-      "losses": 11,
-      "net_pnl": 1494.85
+      "trades": 9,
+      "wins": 3,
+      "losses": 6,
+      "net_pnl": 996.05
     }
   },
   "trades": [
-    {
-      "timestamp": "2026-09-15 17:20:00",
-      "exit_timestamp": "2026-09-15 17:25:00",
-      "symbol": "SILVERM",
-      "sector": "BULLION",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "SILVERM_233000_CE",
-      "lots": 1,
-      "qty": 5,
-      "spot_at_entry": 233693.0,
-      "entry_price": 3650.0,
-      "exit_price": 3587.0,
-      "gross_pnl": -315.0,
-      "net_pnl": -375.0,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": -1.27,
-      "peak_r": 0.0,
-      "planned_rr": 4.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 1,
-        "macro": "AUTONOMOUS_VOL_SHOCK_DETECTED",
-        "features": [
-          0.6584,
-          0.4903,
-          0.712,
-          0.6,
-          0.9995675716277866,
-          0.0,
-          0.16666666666666666,
-          0.04761904761904745
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 6,
-      "exit_reason": "INITIAL_SL_HIT",
-      "setup": "MCX_TREND_PULLBACK_CE"
-    },
-    {
-      "timestamp": "2026-09-15 21:45:00",
-      "exit_timestamp": "2026-09-15 21:50:00",
-      "symbol": "SILVERM",
-      "sector": "BULLION",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "SILVERM_234000_PE",
-      "lots": 1,
-      "qty": 5,
-      "spot_at_entry": 233360.0,
-      "entry_price": 3604.0,
-      "exit_price": 3541.0,
-      "gross_pnl": -315.0,
-      "net_pnl": -375.0,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": -1.27,
-      "peak_r": 0.0,
-      "planned_rr": 2.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 1,
-        "macro": null,
-        "features": [
-          0.5138,
-          0.5129,
-          0.46399999999999997,
-          0.37666666666666665,
-          -1.0,
-          0.0,
-          0.16666666666666666,
-          0.6785714285714286
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 3,
-      "exit_reason": "INITIAL_SL_HIT",
-      "setup": "MCX_TREND_PULLBACK_PE"
-    },
-    {
-      "timestamp": "2026-09-16 19:35:00",
-      "exit_timestamp": "2026-09-16 19:40:00",
-      "symbol": "SILVERM",
-      "sector": "BULLION",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "SILVERM_236000_PE",
-      "lots": 1,
-      "qty": 5,
-      "spot_at_entry": 235730.0,
-      "entry_price": 3430.0,
-      "exit_price": 3708.76,
-      "gross_pnl": 1393.8,
-      "net_pnl": 1333.8,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": 4.52,
-      "peak_r": 5.8,
-      "planned_rr": 4.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 2,
-        "macro": "US_COMEX_OPEN_WINDOW",
-        "features": [
-          0.5626,
-          0.4572,
-          1.0,
-          0.59,
-          -0.9990489921768962,
-          0.0,
-          0.3333333333333333,
-          0.3690476190476189
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {
-        "SCALP_1_5R": 1.508,
-        "SWING_2_2R": 2.203,
-        "RUNNER_3_8R": 3.814
-      },
-      "conviction": 6,
-      "exit_reason": "TARGET_1_4_RR_SUPER_RUNNER_HIT",
-      "setup": "MCX_BREAKOUT_CONFIRM_PE"
-    },
-    {
-      "timestamp": "2026-09-16 20:30:00",
-      "exit_timestamp": "2026-09-16 20:35:00",
-      "symbol": "CRUDEOILM",
-      "sector": "ENERGY",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "CRUDEOILM_9000_PE",
-      "lots": 2,
-      "qty": 20,
-      "spot_at_entry": 8973.0,
-      "entry_price": 84.0,
-      "exit_price": 89.0,
-      "gross_pnl": 100.0,
-      "net_pnl": 20.0,
-      "charges": 80.0,
-      "partial_exit": null,
-      "r_multiple": 0.08,
-      "peak_r": 1.38,
-      "planned_rr": 4.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 2,
-        "macro": "US_EIA_CRUDE_INVENTORY_WINDOW",
-        "features": [
-          0.6052000000000001,
-          0.44939999999999997,
-          0.596,
-          0.61,
-          -0.9994257512556157,
-          0.0,
-          0.3333333333333333,
-          0.5
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 6,
-      "exit_reason": "TRAIL_PROFIT_HIT",
-      "setup": "MCX_BREAKOUT_CONFIRM_PE"
-    },
     {
       "timestamp": "2026-09-17 17:45:00",
       "exit_timestamp": "2026-09-17 17:50:00",
@@ -316,16 +140,16 @@
       "sector": "BULLION",
       "regime": "REGIME_VOL_EXPANSION",
       "contract": "SILVERM_243000_PE",
-      "lots": 2,
-      "qty": 10,
+      "lots": 1,
+      "qty": 5,
       "spot_at_entry": 242420.0,
       "entry_price": 3016.0,
       "exit_price": 2954.0,
-      "gross_pnl": -620.0,
-      "net_pnl": -700.0,
-      "charges": 80.0,
+      "gross_pnl": -310.0,
+      "net_pnl": -370.0,
+      "charges": 60.0,
       "partial_exit": null,
-      "r_multiple": -1.19,
+      "r_multiple": -1.25,
       "peak_r": 0.0,
       "planned_rr": 3.0,
       "entry_context": {
@@ -396,14 +220,14 @@
       "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
       "contract": "SILVERM_242000_CE",
-      "lots": 2,
-      "qty": 10,
+      "lots": 1,
+      "qty": 5,
       "spot_at_entry": 242479.0,
       "entry_price": 1982.0,
-      "exit_price": 1996.0,
-      "gross_pnl": 140.0,
-      "net_pnl": 60.0,
-      "charges": 80.0,
+      "exit_price": 2000.0,
+      "gross_pnl": 90.0,
+      "net_pnl": 30.0,
+      "charges": 60.0,
       "partial_exit": null,
       "r_multiple": 0.1,
       "peak_r": 1.49,
@@ -436,16 +260,16 @@
       "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
       "contract": "SILVERM_243000_CE",
-      "lots": 3,
-      "qty": 15,
+      "lots": 1,
+      "qty": 5,
       "spot_at_entry": 243630.0,
       "entry_price": 1973.0,
       "exit_price": 1912.0,
-      "gross_pnl": -915.0,
-      "net_pnl": -1015.0,
-      "charges": 100.0,
+      "gross_pnl": -305.0,
+      "net_pnl": -365.0,
+      "charges": 60.0,
       "partial_exit": null,
-      "r_multiple": -1.15,
+      "r_multiple": -1.24,
       "peak_r": 0.0,
       "planned_rr": 4.0,
       "entry_context": {
@@ -516,16 +340,16 @@
       "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
       "contract": "GOLDM_154500_CE",
-      "lots": 2,
-      "qty": 20,
+      "lots": 1,
+      "qty": 10,
       "spot_at_entry": 154777.0,
       "entry_price": 1098.0,
       "exit_price": 1066.0,
-      "gross_pnl": -640.0,
-      "net_pnl": -720.0,
-      "charges": 80.0,
+      "gross_pnl": -320.0,
+      "net_pnl": -380.0,
+      "charges": 60.0,
       "partial_exit": null,
-      "r_multiple": -1.2,
+      "r_multiple": -1.27,
       "peak_r": 0.0,
       "planned_rr": 3.0,
       "entry_context": {
@@ -548,46 +372,6 @@
       "conviction": 5,
       "exit_reason": "INITIAL_SL_HIT",
       "setup": "MCX_TREND_PULLBACK_CE"
-    },
-    {
-      "timestamp": "2026-09-22 21:40:00",
-      "exit_timestamp": "2026-09-22 22:05:00",
-      "symbol": "GOLDM",
-      "sector": "BULLION",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "GOLDM_154500_PE",
-      "lots": 1,
-      "qty": 10,
-      "spot_at_entry": 154415.0,
-      "entry_price": 1092.0,
-      "exit_price": 1060.0,
-      "gross_pnl": -320.0,
-      "net_pnl": -380.0,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": -1.27,
-      "peak_r": 0.13,
-      "planned_rr": 3.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 1,
-        "macro": null,
-        "features": [
-          0.5412,
-          0.4744,
-          0.756,
-          0.3466666666666667,
-          -0.9978173087766194,
-          0.0,
-          0.16666666666666666,
-          0.6666666666666669
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 4,
-      "exit_reason": "INITIAL_SL_HIT",
-      "setup": "MCX_TREND_PULLBACK_PE"
     },
     {
       "timestamp": "2026-09-23 19:15:00",
@@ -634,84 +418,44 @@
       "setup": "MCX_TREND_PULLBACK_PE"
     },
     {
-      "timestamp": "2026-09-23 21:00:00",
-      "exit_timestamp": "2026-09-23 21:10:00",
+      "timestamp": "2026-09-24 17:45:00",
+      "exit_timestamp": "2026-09-24 17:55:00",
       "symbol": "GOLDM",
       "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
-      "contract": "GOLDM_154000_PE",
-      "lots": 3,
-      "qty": 30,
-      "spot_at_entry": 153559.0,
-      "entry_price": 976.0,
-      "exit_price": 945.0,
-      "gross_pnl": -930.0,
-      "net_pnl": -1030.0,
-      "charges": 100.0,
-      "partial_exit": null,
-      "r_multiple": -1.14,
-      "peak_r": 0.93,
-      "planned_rr": 3.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 2,
-        "macro": null,
-        "features": [
-          0.6554000000000001,
-          0.4861,
-          0.266,
-          0.4466666666666667,
-          -0.9998587201345178,
-          0.0,
-          0.3333333333333333,
-          0.5714285714285714
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 4,
-      "exit_reason": "INITIAL_SL_HIT",
-      "setup": "MCX_TREND_PULLBACK_PE"
-    },
-    {
-      "timestamp": "2026-09-24 17:35:00",
-      "exit_timestamp": "2026-09-24 17:40:00",
-      "symbol": "SILVERM",
-      "sector": "BULLION",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "SILVERM_235000_PE",
+      "contract": "GOLDM_153000_CE",
       "lots": 1,
-      "qty": 5,
-      "spot_at_entry": 234721.0,
-      "entry_price": 6900.0,
-      "exit_price": 6834.0,
-      "gross_pnl": -330.0,
-      "net_pnl": -390.0,
+      "qty": 10,
+      "spot_at_entry": 153059.0,
+      "entry_price": 865.0,
+      "exit_price": 874.0,
+      "gross_pnl": 90.0,
+      "net_pnl": 30.0,
       "charges": 60.0,
       "partial_exit": null,
-      "r_multiple": -1.32,
-      "peak_r": 0.0,
+      "r_multiple": 0.1,
+      "peak_r": 1.47,
       "planned_rr": 3.0,
       "entry_context": {
         "regime": "REGIME_STRONG_TREND",
         "weekday": 3,
         "macro": null,
         "features": [
-          0.475,
-          0.5142,
-          0.736,
-          0.45,
-          -0.9997750275490332,
+          0.5132,
+          0.49770000000000003,
+          0.42400000000000004,
+          0.38999999999999996,
+          0.9945993553959831,
           0.0,
           0.5,
-          0.08333333333333316
+          0.10714285714285714
         ]
       },
       "exit_policy": "ADAPTIVE_RUNNER",
       "exit_policy_net_r": {},
       "conviction": 4,
-      "exit_reason": "INITIAL_SL_HIT",
-      "setup": "MCX_TREND_PULLBACK_PE"
+      "exit_reason": "TRAIL_PROFIT_HIT",
+      "setup": "MCX_TREND_PULLBACK_CE"
     },
     {
       "timestamp": "2026-09-24 18:25:00",
@@ -756,44 +500,44 @@
       "setup": "MCX_TREND_PULLBACK_CE"
     },
     {
-      "timestamp": "2026-09-24 20:15:00",
-      "exit_timestamp": "2026-09-24 20:20:00",
-      "symbol": "NATGASMINI",
-      "sector": "ENERGY",
+      "timestamp": "2026-09-24 20:35:00",
+      "exit_timestamp": "2026-09-24 20:40:00",
+      "symbol": "GOLDM",
+      "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
-      "contract": "NATGASMINI_340_CE",
+      "contract": "GOLDM_153000_PE",
       "lots": 1,
-      "qty": 250,
-      "spot_at_entry": 343.2,
-      "entry_price": 21.3,
-      "exit_price": 21.6,
-      "gross_pnl": 75.0,
-      "net_pnl": 15.0,
+      "qty": 10,
+      "spot_at_entry": 152649.0,
+      "entry_price": 847.0,
+      "exit_price": 856.0,
+      "gross_pnl": 90.0,
+      "net_pnl": 30.0,
       "charges": 60.0,
       "partial_exit": null,
-      "r_multiple": 0.05,
-      "peak_r": 1.25,
-      "planned_rr": 4.0,
+      "r_multiple": 0.1,
+      "peak_r": 1.43,
+      "planned_rr": 3.0,
       "entry_context": {
         "regime": "REGIME_STRONG_TREND",
         "weekday": 3,
-        "macro": "US_EIA_NATGAS_STORAGE_WINDOW",
+        "macro": null,
         "features": [
-          0.5714,
-          0.4282,
-          0.828,
-          0.81,
-          0.999752307263468,
+          0.8712000000000001,
+          0.40979999999999994,
+          0.386,
+          0.49,
+          -0.9974944612249799,
           0.0,
           0.5,
-          0.4642857142857143
+          0.5119047619047618
         ]
       },
       "exit_policy": "ADAPTIVE_RUNNER",
       "exit_policy_net_r": {},
-      "conviction": 6,
+      "conviction": 5,
       "exit_reason": "TRAIL_PROFIT_HIT",
-      "setup": "MCX_BREAKOUT_CONFIRM_CE"
+      "setup": "MCX_TREND_PULLBACK_PE"
     },
     {
       "timestamp": "2026-09-25 18:55:00",
@@ -802,16 +546,16 @@
       "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
       "contract": "GOLDM_154000_PE",
-      "lots": 3,
-      "qty": 30,
+      "lots": 1,
+      "qty": 10,
       "spot_at_entry": 153680.0,
       "entry_price": 713.0,
-      "exit_price": 841.0,
-      "gross_pnl": 3840.0,
-      "net_pnl": 3740.0,
-      "charges": 100.0,
+      "exit_price": 844.0,
+      "gross_pnl": 1310.0,
+      "net_pnl": 1250.0,
+      "charges": 60.0,
       "partial_exit": null,
-      "r_multiple": 4.16,
+      "r_multiple": 4.17,
       "peak_r": 5.4,
       "planned_rr": 4.0,
       "entry_context": {
@@ -831,9 +575,9 @@
       },
       "exit_policy": "ADAPTIVE_RUNNER",
       "exit_policy_net_r": {
-        "SCALP_1_5R": 1.522,
-        "SWING_2_2R": 2.222,
-        "RUNNER_3_8R": 3.822
+        "SCALP_1_5R": 1.5,
+        "SWING_2_2R": 2.2,
+        "RUNNER_3_8R": 3.8
       },
       "conviction": 6,
       "exit_reason": "TRAIL_PROFIT_HIT",
@@ -920,46 +664,6 @@
       "setup": "MCX_TREND_PULLBACK_CE"
     },
     {
-      "timestamp": "2026-09-29 17:20:00",
-      "exit_timestamp": "2026-09-29 18:05:00",
-      "symbol": "CRUDEOILM",
-      "sector": "ENERGY",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "CRUDEOILM_8500_PE",
-      "lots": 2,
-      "qty": 20,
-      "spot_at_entry": 8485.0,
-      "entry_price": 274.0,
-      "exit_price": 281.0,
-      "gross_pnl": 140.0,
-      "net_pnl": 60.0,
-      "charges": 80.0,
-      "partial_exit": null,
-      "r_multiple": 0.12,
-      "peak_r": 1.15,
-      "planned_rr": 4.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 1,
-        "macro": "AUTONOMOUS_VOL_SHOCK_DETECTED",
-        "features": [
-          0.8964,
-          0.45549999999999996,
-          1.0,
-          1.0,
-          -0.999840427932733,
-          0.0,
-          0.16666666666666666,
-          0.04761904761904745
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 6,
-      "exit_reason": "TRAIL_PROFIT_HIT",
-      "setup": "MCX_BREAKOUT_CONFIRM_PE"
-    },
-    {
       "timestamp": "2026-09-29 19:35:00",
       "exit_timestamp": "2026-09-29 19:40:00",
       "symbol": "GOLDM",
@@ -1000,46 +704,6 @@
       "conviction": 5,
       "exit_reason": "TRAIL_PROFIT_HIT",
       "setup": "MCX_TREND_PULLBACK_CE"
-    },
-    {
-      "timestamp": "2026-09-29 21:20:00",
-      "exit_timestamp": "2026-09-29 22:15:00",
-      "symbol": "CRUDEOILM",
-      "sector": "ENERGY",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "CRUDEOILM_8500_PE",
-      "lots": 2,
-      "qty": 20,
-      "spot_at_entry": 8477.0,
-      "entry_price": 272.0,
-      "exit_price": 245.0,
-      "gross_pnl": -540.0,
-      "net_pnl": -620.0,
-      "charges": 80.0,
-      "partial_exit": null,
-      "r_multiple": -1.19,
-      "peak_r": 0.35,
-      "planned_rr": 4.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 1,
-        "macro": "AUTONOMOUS_VOL_SHOCK_DETECTED",
-        "features": [
-          0.5242,
-          0.4771,
-          1.0,
-          1.0,
-          -0.999890031376518,
-          0.0,
-          0.16666666666666666,
-          0.6190476190476188
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 6,
-      "exit_reason": "INITIAL_SL_HIT",
-      "setup": "MCX_BREAKOUT_CONFIRM_PE"
     },
     {
       "timestamp": "2026-09-30 17:45:00",
@@ -1202,46 +866,6 @@
       "setup": "MCX_TREND_PULLBACK_CE"
     },
     {
-      "timestamp": "2026-10-05 18:35:00",
-      "exit_timestamp": "2026-10-05 19:35:00",
-      "symbol": "CRUDEOILM",
-      "sector": "ENERGY",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "CRUDEOILM_8550_PE",
-      "lots": 1,
-      "qty": 10,
-      "spot_at_entry": 8544.0,
-      "entry_price": 225.0,
-      "exit_price": 203.0,
-      "gross_pnl": -220.0,
-      "net_pnl": -280.0,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": -1.33,
-      "peak_r": 0.86,
-      "planned_rr": 4.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 0,
-        "macro": "NYMEX_PIT_OPEN_SURGE",
-        "features": [
-          0.6866,
-          0.47619999999999996,
-          1.0,
-          0.5566666666666666,
-          -0.9995679617085,
-          0.0,
-          0.0,
-          0.22619047619047603
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 6,
-      "exit_reason": "INITIAL_SL_HIT",
-      "setup": "MCX_BREAKOUT_CONFIRM_PE"
-    },
-    {
       "timestamp": "2026-10-05 19:05:00",
       "exit_timestamp": "2026-10-05 19:10:00",
       "symbol": "GOLDM",
@@ -1285,76 +909,34 @@
       "setup": "MCX_TREND_PULLBACK_PE"
     },
     {
-      "timestamp": "2026-10-05 21:35:00",
-      "exit_timestamp": "2026-10-05 21:45:00",
-      "symbol": "SILVERM",
-      "sector": "BULLION",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "SILVERM_229000_PE",
-      "lots": 1,
-      "qty": 5,
-      "spot_at_entry": 228480.0,
-      "entry_price": 5281.0,
-      "exit_price": 5352.0,
-      "gross_pnl": 355.0,
-      "net_pnl": 295.0,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": 1.0,
-      "peak_r": 1.81,
-      "planned_rr": 4.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 0,
-        "macro": "AUTONOMOUS_VOL_SHOCK_DETECTED",
-        "features": [
-          0.5792,
-          0.4769,
-          0.9019999999999999,
-          0.5733333333333334,
-          -0.9995207817237888,
-          0.0,
-          0.0,
-          0.6547619047619045
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {
-        "SCALP_1_5R": 1.508
-      },
-      "conviction": 6,
-      "exit_reason": "TRAIL_PROFIT_HIT",
-      "setup": "MCX_TREND_PULLBACK_PE"
-    },
-    {
       "timestamp": "2026-10-06 19:50:00",
       "exit_timestamp": "2026-10-06 19:55:00",
-      "symbol": "SILVERM",
+      "symbol": "GOLDM",
       "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
-      "contract": "SILVERM_229000_PE",
+      "contract": "GOLDM_150000_PE",
       "lots": 1,
-      "qty": 5,
-      "spot_at_entry": 228046.0,
-      "entry_price": 5134.0,
-      "exit_price": 5149.0,
-      "gross_pnl": 75.0,
-      "net_pnl": 15.0,
+      "qty": 10,
+      "spot_at_entry": 149781.0,
+      "entry_price": 2160.0,
+      "exit_price": 2168.0,
+      "gross_pnl": 80.0,
+      "net_pnl": 20.0,
       "charges": 60.0,
       "partial_exit": null,
-      "r_multiple": 0.05,
-      "peak_r": 1.59,
+      "r_multiple": 0.07,
+      "peak_r": 1.33,
       "planned_rr": 4.0,
       "entry_context": {
         "regime": "REGIME_STRONG_TREND",
         "weekday": 1,
         "macro": "US_COMEX_OPEN_WINDOW",
         "features": [
-          1.1518000000000002,
-          0.4019,
-          0.458,
-          0.7799999999999999,
-          -0.9993313171534138,
+          0.7143999999999999,
+          0.45549999999999996,
+          0.374,
+          0.41333333333333333,
+          -0.996239257843625,
           0.0,
           0.16666666666666666,
           0.4047619047619046
@@ -1364,92 +946,46 @@
       "exit_policy_net_r": {},
       "conviction": 6,
       "exit_reason": "TRAIL_PROFIT_HIT",
-      "setup": "MCX_BREAKOUT_CONFIRM_PE"
+      "setup": "MCX_TREND_PULLBACK_PE"
     },
     {
-      "timestamp": "2026-10-06 21:00:00",
-      "exit_timestamp": "2026-10-06 21:05:00",
+      "timestamp": "2026-10-06 21:05:00",
+      "exit_timestamp": "2026-10-06 21:10:00",
       "symbol": "SILVERM",
       "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
-      "contract": "SILVERM_228000_CE",
+      "contract": "SILVERM_229000_CE",
       "lots": 1,
       "qty": 5,
-      "spot_at_entry": 228946.0,
-      "entry_price": 5147.0,
-      "exit_price": 5271.0,
-      "gross_pnl": 620.0,
-      "net_pnl": 560.0,
+      "spot_at_entry": 229266.0,
+      "entry_price": 5154.0,
+      "exit_price": 5089.0,
+      "gross_pnl": -325.0,
+      "net_pnl": -385.0,
       "charges": 60.0,
       "partial_exit": null,
-      "r_multiple": 1.9,
-      "peak_r": 2.81,
+      "r_multiple": -1.31,
+      "peak_r": 0.0,
       "planned_rr": 3.0,
       "entry_context": {
         "regime": "REGIME_STRONG_TREND",
         "weekday": 1,
         "macro": null,
         "features": [
-          0.8338,
-          0.3921,
-          0.356,
-          0.27666666666666667,
-          0.9941224768652693,
+          0.8898,
+          0.3381,
+          0.368,
+          0.5166666666666667,
+          0.9979714186644929,
           0.0,
           0.16666666666666666,
-          0.5714285714285714
+          0.5833333333333331
         ]
       },
       "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {
-        "SCALP_1_5R": 1.508,
-        "SWING_2_2R": 2.203
-      },
-      "conviction": 4,
-      "exit_reason": "TRAIL_PROFIT_HIT",
-      "setup": "MCX_TREND_PULLBACK_CE"
-    },
-    {
-      "timestamp": "2026-10-08 19:20:00",
-      "exit_timestamp": "2026-10-08 19:25:00",
-      "symbol": "SILVERM",
-      "sector": "BULLION",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "SILVERM_223000_CE",
-      "lots": 1,
-      "qty": 5,
-      "spot_at_entry": 223970.0,
-      "entry_price": 4742.0,
-      "exit_price": 4917.0,
-      "gross_pnl": 875.0,
-      "net_pnl": 815.0,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": 2.76,
-      "peak_r": 3.14,
-      "planned_rr": 3.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 3,
-        "macro": "US_COMEX_OPEN_WINDOW",
-        "features": [
-          0.9784,
-          0.5002,
-          0.40199999999999997,
-          0.37999999999999995,
-          0.962900769678548,
-          0.0,
-          0.5,
-          0.33333333333333315
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {
-        "SCALP_1_5R": 1.508,
-        "SWING_2_2R": 2.203
-      },
-      "conviction": 4,
-      "exit_reason": "TRAIL_PROFIT_HIT",
+      "exit_policy_net_r": {},
+      "conviction": 5,
+      "exit_reason": "INITIAL_SL_HIT",
       "setup": "MCX_TREND_PULLBACK_CE"
     },
     {
@@ -1493,59 +1029,17 @@
       "setup": "MCX_TREND_PULLBACK_CE"
     },
     {
-      "timestamp": "2026-10-08 20:10:00",
-      "exit_timestamp": "2026-10-08 21:50:00",
-      "symbol": "NATGASMINI",
-      "sector": "ENERGY",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "NATGASMINI_345_PE",
-      "lots": 1,
-      "qty": 250,
-      "spot_at_entry": 341.1,
-      "entry_price": 14.5,
-      "exit_price": 16.0,
-      "gross_pnl": 375.0,
-      "net_pnl": 315.0,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": 1.05,
-      "peak_r": 1.75,
-      "planned_rr": 4.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 3,
-        "macro": "US_EIA_NATGAS_STORAGE_WINDOW",
-        "features": [
-          1.0122,
-          0.3732,
-          1.0,
-          0.7766666666666667,
-          -0.9994041835100701,
-          0.0,
-          0.5,
-          0.45238095238095255
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {
-        "SCALP_1_5R": 1.55
-      },
-      "conviction": 6,
-      "exit_reason": "TRAIL_PROFIT_HIT",
-      "setup": "MCX_BREAKOUT_CONFIRM_PE"
-    },
-    {
-      "timestamp": "2026-10-09 21:40:00",
-      "exit_timestamp": "2026-10-09 21:45:00",
+      "timestamp": "2026-10-12 17:40:00",
+      "exit_timestamp": "2026-10-12 17:45:00",
       "symbol": "GOLDM",
       "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
-      "contract": "GOLDM_151000_CE",
+      "contract": "GOLDM_150000_PE",
       "lots": 1,
       "qty": 10,
-      "spot_at_entry": 151455.0,
-      "entry_price": 2020.0,
-      "exit_price": 1988.0,
+      "spot_at_entry": 149601.0,
+      "entry_price": 1832.0,
+      "exit_price": 1800.0,
       "gross_pnl": -320.0,
       "net_pnl": -380.0,
       "charges": 60.0,
@@ -1555,62 +1049,62 @@
       "planned_rr": 3.0,
       "entry_context": {
         "regime": "REGIME_STRONG_TREND",
-        "weekday": 4,
+        "weekday": 0,
         "macro": null,
         "features": [
-          0.49439999999999995,
-          0.4633,
-          0.546,
-          0.32,
-          0.9963963229878569,
+          0.9114,
+          0.4336,
+          0.286,
+          0.5,
+          -0.9171821870008504,
           0.0,
-          0.6666666666666666,
-          0.6666666666666669
+          0.0,
+          0.09523809523809541
         ]
       },
       "exit_policy": "ADAPTIVE_RUNNER",
       "exit_policy_net_r": {},
       "conviction": 4,
       "exit_reason": "INITIAL_SL_HIT",
-      "setup": "MCX_TREND_PULLBACK_CE"
+      "setup": "MCX_TREND_PULLBACK_PE"
     },
     {
-      "timestamp": "2026-10-12 17:55:00",
-      "exit_timestamp": "2026-10-12 18:00:00",
+      "timestamp": "2026-10-12 20:25:00",
+      "exit_timestamp": "2026-10-12 20:35:00",
       "symbol": "GOLDM",
       "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
       "contract": "GOLDM_149500_PE",
       "lots": 1,
       "qty": 10,
-      "spot_at_entry": 149470.0,
-      "entry_price": 1830.0,
-      "exit_price": 1798.0,
+      "spot_at_entry": 149432.0,
+      "entry_price": 1823.0,
+      "exit_price": 1791.0,
       "gross_pnl": -320.0,
       "net_pnl": -380.0,
       "charges": 60.0,
       "partial_exit": null,
       "r_multiple": -1.27,
-      "peak_r": 1.03,
+      "peak_r": 0.1,
       "planned_rr": 4.0,
       "entry_context": {
         "regime": "REGIME_STRONG_TREND",
         "weekday": 0,
-        "macro": "AUTONOMOUS_VOL_SHOCK_DETECTED",
+        "macro": "US_COMEX_OPEN_WINDOW",
         "features": [
-          1.0192,
-          0.43729999999999997,
-          1.0,
-          0.7033333333333333,
-          -0.9990916917260596,
+          0.5424,
+          0.4731,
+          0.572,
+          0.3233333333333333,
+          -0.8837680521829164,
           0.0,
           0.0,
-          0.13095238095238113
+          0.48809523809523825
         ]
       },
       "exit_policy": "ADAPTIVE_RUNNER",
       "exit_policy_net_r": {},
-      "conviction": 6,
+      "conviction": 5,
       "exit_reason": "INITIAL_SL_HIT",
       "setup": "MCX_TREND_PULLBACK_PE"
     },
@@ -1732,46 +1226,6 @@
       "exit_policy_net_r": {},
       "conviction": 6,
       "exit_reason": "INITIAL_SL_HIT",
-      "setup": "MCX_BREAKOUT_CONFIRM_PE"
-    },
-    {
-      "timestamp": "2026-10-14 19:50:00",
-      "exit_timestamp": "2026-10-14 22:30:00",
-      "symbol": "NATGASMINI",
-      "sector": "ENERGY",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "NATGASMINI_345_PE",
-      "lots": 1,
-      "qty": 250,
-      "spot_at_entry": 340.7,
-      "entry_price": 10.3,
-      "exit_price": 10.4,
-      "gross_pnl": 25.0,
-      "net_pnl": -35.0,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": -0.12,
-      "peak_r": 0.5,
-      "planned_rr": 4.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 2,
-        "macro": "NYMEX_PIT_OPEN_SURGE",
-        "features": [
-          0.6128,
-          0.33909999999999996,
-          0.534,
-          0.4033333333333333,
-          -0.9493848696781889,
-          0.0,
-          0.3333333333333333,
-          0.4047619047619046
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 5,
-      "exit_reason": "MCX_EOD_SQUAREOFF",
       "setup": "MCX_BREAKOUT_CONFIRM_PE"
     },
     {
@@ -1900,62 +1354,22 @@
       "setup": "MCX_TREND_PULLBACK_PE"
     },
     {
-      "timestamp": "2026-10-15 20:50:00",
-      "exit_timestamp": "2026-10-15 23:15:00",
-      "symbol": "CRUDEOILM",
-      "sector": "ENERGY",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "CRUDEOILM_9100_CE",
-      "lots": 1,
-      "qty": 10,
-      "spot_at_entry": 9117.0,
-      "entry_price": 395.0,
-      "exit_price": 429.0,
-      "gross_pnl": 340.0,
-      "net_pnl": 280.0,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": 0.93,
-      "peak_r": 1.53,
-      "planned_rr": 4.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 3,
-        "macro": "AUTONOMOUS_VOL_SHOCK_DETECTED",
-        "features": [
-          0.7694,
-          0.44049999999999995,
-          0.688,
-          0.6333333333333333,
-          0.9988111768088198,
-          0.0,
-          0.5,
-          0.5476190476190474
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 6,
-      "exit_reason": "MCX_EOD_SQUAREOFF",
-      "setup": "MCX_BREAKOUT_CONFIRM_CE"
-    },
-    {
       "timestamp": "2026-10-16 17:45:00",
       "exit_timestamp": "2026-10-16 17:55:00",
       "symbol": "SILVERM",
       "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
       "contract": "SILVERM_216000_PE",
-      "lots": 2,
-      "qty": 10,
+      "lots": 1,
+      "qty": 5,
       "spot_at_entry": 215249.0,
       "entry_price": 3148.0,
       "exit_price": 3085.0,
-      "gross_pnl": -630.0,
-      "net_pnl": -710.0,
-      "charges": 80.0,
+      "gross_pnl": -315.0,
+      "net_pnl": -375.0,
+      "charges": 60.0,
       "partial_exit": null,
-      "r_multiple": -1.2,
+      "r_multiple": -1.27,
       "peak_r": 0.8,
       "planned_rr": 3.0,
       "entry_context": {
@@ -2069,14 +1483,14 @@
       "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
       "contract": "GOLDM_148000_PE",
-      "lots": 2,
-      "qty": 20,
+      "lots": 1,
+      "qty": 10,
       "spot_at_entry": 147813.0,
       "entry_price": 1333.0,
-      "exit_price": 1421.0,
-      "gross_pnl": 1760.0,
-      "net_pnl": 1680.0,
-      "charges": 80.0,
+      "exit_price": 1423.0,
+      "gross_pnl": 900.0,
+      "net_pnl": 840.0,
+      "charges": 60.0,
       "partial_exit": null,
       "r_multiple": 2.8,
       "peak_r": 3.63,
@@ -2150,46 +1564,6 @@
       "setup": "MCX_TREND_PULLBACK_PE"
     },
     {
-      "timestamp": "2026-10-19 19:35:00",
-      "exit_timestamp": "2026-10-19 19:40:00",
-      "symbol": "GOLDM",
-      "sector": "BULLION",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "GOLDM_147500_PE",
-      "lots": 1,
-      "qty": 10,
-      "spot_at_entry": 147146.0,
-      "entry_price": 1319.0,
-      "exit_price": 1287.0,
-      "gross_pnl": -320.0,
-      "net_pnl": -380.0,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": -1.27,
-      "peak_r": 0.0,
-      "planned_rr": 4.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 0,
-        "macro": "US_COMEX_OPEN_WINDOW",
-        "features": [
-          0.8996,
-          0.4121,
-          0.528,
-          0.5566666666666666,
-          -0.9932312300023889,
-          0.0,
-          0.0,
-          0.3690476190476189
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 6,
-      "exit_reason": "INITIAL_SL_HIT",
-      "setup": "MCX_TREND_PULLBACK_PE"
-    },
-    {
       "timestamp": "2026-10-20 19:50:00",
       "exit_timestamp": "2026-10-20 19:55:00",
       "symbol": "SILVERM",
@@ -2232,86 +1606,6 @@
       "conviction": 6,
       "exit_reason": "TARGET_1_8_RR_SUPER_RUNNER_HIT",
       "setup": "MCX_TREND_PULLBACK_CE"
-    },
-    {
-      "timestamp": "2026-10-20 21:15:00",
-      "exit_timestamp": "2026-10-20 21:20:00",
-      "symbol": "SILVERM",
-      "sector": "BULLION",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "SILVERM_214000_CE",
-      "lots": 1,
-      "qty": 5,
-      "spot_at_entry": 214181.0,
-      "entry_price": 6798.0,
-      "exit_price": 6732.0,
-      "gross_pnl": -330.0,
-      "net_pnl": -390.0,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": -1.32,
-      "peak_r": 0.0,
-      "planned_rr": 4.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 1,
-        "macro": null,
-        "features": [
-          0.6706,
-          0.4252,
-          0.44800000000000006,
-          0.43333333333333335,
-          0.9998386972309687,
-          0.0,
-          0.16666666666666666,
-          0.6071428571428571
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 5,
-      "exit_reason": "INITIAL_SL_HIT",
-      "setup": "MCX_TREND_PULLBACK_CE"
-    },
-    {
-      "timestamp": "2026-10-20 21:50:00",
-      "exit_timestamp": "2026-10-20 22:00:00",
-      "symbol": "GOLDM",
-      "sector": "BULLION",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "GOLDM_146500_PE",
-      "lots": 1,
-      "qty": 10,
-      "spot_at_entry": 146450.0,
-      "entry_price": 1222.0,
-      "exit_price": 1190.0,
-      "gross_pnl": -320.0,
-      "net_pnl": -380.0,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": -1.27,
-      "peak_r": 0.5,
-      "planned_rr": 3.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 1,
-        "macro": null,
-        "features": [
-          0.5234000000000001,
-          0.4792,
-          1.0,
-          0.42,
-          -0.999392724086453,
-          0.0,
-          0.16666666666666666,
-          0.6904761904761904
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 5,
-      "exit_reason": "INITIAL_SL_HIT",
-      "setup": "MCX_TREND_PULLBACK_PE"
     },
     {
       "timestamp": "2026-10-21 17:25:00",
@@ -2474,46 +1768,6 @@
       "setup": "MCX_TREND_PULLBACK_PE"
     },
     {
-      "timestamp": "2026-10-23 19:15:00",
-      "exit_timestamp": "2026-10-23 21:10:00",
-      "symbol": "CRUDEOILM",
-      "sector": "ENERGY",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "CRUDEOILM_9700_CE",
-      "lots": 1,
-      "qty": 10,
-      "spot_at_entry": 9734.0,
-      "entry_price": 368.0,
-      "exit_price": 378.0,
-      "gross_pnl": 100.0,
-      "net_pnl": 40.0,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": 0.13,
-      "peak_r": 1.3,
-      "planned_rr": 4.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 4,
-        "macro": "NYMEX_PIT_OPEN_SURGE",
-        "features": [
-          0.6507999999999999,
-          0.3831,
-          0.542,
-          0.5666666666666667,
-          0.9930626209520489,
-          0.0,
-          0.6666666666666666,
-          0.32142857142857145
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 6,
-      "exit_reason": "TRAIL_PROFIT_HIT",
-      "setup": "MCX_BREAKOUT_CONFIRM_CE"
-    },
-    {
       "timestamp": "2026-10-23 19:45:00",
       "exit_timestamp": "2026-10-23 19:50:00",
       "symbol": "SILVERM",
@@ -2642,46 +1896,6 @@
       "setup": "MCX_TREND_PULLBACK_PE"
     },
     {
-      "timestamp": "2026-10-26 21:55:00",
-      "exit_timestamp": "2026-10-26 23:05:00",
-      "symbol": "NATGASMINI",
-      "sector": "ENERGY",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "NATGASMINI_290_CE",
-      "lots": 1,
-      "qty": 250,
-      "spot_at_entry": 293.8,
-      "entry_price": 17.9,
-      "exit_price": 16.6,
-      "gross_pnl": -325.0,
-      "net_pnl": -385.0,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": -1.28,
-      "peak_r": 0.08,
-      "planned_rr": 4.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 0,
-        "macro": "AUTONOMOUS_VOL_SHOCK_DETECTED",
-        "features": [
-          0.8314,
-          0.4711,
-          0.8099999999999999,
-          0.8466666666666667,
-          0.9996648135406442,
-          0.0,
-          0.0,
-          0.7023809523809526
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 6,
-      "exit_reason": "INITIAL_SL_HIT",
-      "setup": "MCX_BREAKOUT_CONFIRM_CE"
-    },
-    {
       "timestamp": "2026-10-27 18:00:00",
       "exit_timestamp": "2026-10-27 18:05:00",
       "symbol": "SILVERM",
@@ -2765,50 +1979,6 @@
         "SWING_2_2R": 2.2
       },
       "conviction": 5,
-      "exit_reason": "TRAIL_PROFIT_HIT",
-      "setup": "MCX_TREND_PULLBACK_CE"
-    },
-    {
-      "timestamp": "2026-10-27 19:05:00",
-      "exit_timestamp": "2026-10-27 19:10:00",
-      "symbol": "SILVERM",
-      "sector": "BULLION",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "SILVERM_197000_CE",
-      "lots": 1,
-      "qty": 5,
-      "spot_at_entry": 197237.0,
-      "entry_price": 5590.0,
-      "exit_price": 5915.0,
-      "gross_pnl": 1625.0,
-      "net_pnl": 1565.0,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": 5.31,
-      "peak_r": 6.95,
-      "planned_rr": 4.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 1,
-        "macro": "US_COMEX_OPEN_WINDOW",
-        "features": [
-          1.1984000000000001,
-          0.39759999999999995,
-          0.636,
-          0.62,
-          0.9906803073807098,
-          0.0,
-          0.16666666666666666,
-          0.29761904761904745
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {
-        "SCALP_1_5R": 1.508,
-        "SWING_2_2R": 2.203,
-        "RUNNER_3_8R": 3.814
-      },
-      "conviction": 6,
       "exit_reason": "TRAIL_PROFIT_HIT",
       "setup": "MCX_TREND_PULLBACK_CE"
     },
@@ -3347,46 +2517,6 @@
       "setup": "MCX_TREND_PULLBACK_CE"
     },
     {
-      "timestamp": "2026-11-04 18:35:00",
-      "exit_timestamp": "2026-11-04 19:10:00",
-      "symbol": "CRUDEOILM",
-      "sector": "ENERGY",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "CRUDEOILM_8950_PE",
-      "lots": 2,
-      "qty": 20,
-      "spot_at_entry": 8911.0,
-      "entry_price": 244.0,
-      "exit_price": 251.0,
-      "gross_pnl": 140.0,
-      "net_pnl": 60.0,
-      "charges": 80.0,
-      "partial_exit": null,
-      "r_multiple": 0.13,
-      "peak_r": 1.17,
-      "planned_rr": 4.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 2,
-        "macro": "NYMEX_PIT_OPEN_SURGE",
-        "features": [
-          0.8024,
-          0.41729999999999995,
-          0.63,
-          0.5733333333333334,
-          -0.999297517652913,
-          0.0,
-          0.3333333333333333,
-          0.22619047619047603
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 6,
-      "exit_reason": "TRAIL_PROFIT_HIT",
-      "setup": "MCX_BREAKOUT_CONFIRM_PE"
-    },
-    {
       "timestamp": "2026-11-05 17:35:00",
       "exit_timestamp": "2026-11-05 17:40:00",
       "symbol": "SILVERM",
@@ -3427,44 +2557,44 @@
       "setup": "MCX_TREND_PULLBACK_PE"
     },
     {
-      "timestamp": "2026-11-05 18:40:00",
-      "exit_timestamp": "2026-11-05 18:50:00",
-      "symbol": "CRUDEOILM",
-      "sector": "ENERGY",
+      "timestamp": "2026-11-05 18:55:00",
+      "exit_timestamp": "2026-11-05 19:00:00",
+      "symbol": "GOLDM",
+      "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
-      "contract": "CRUDEOILM_8500_CE",
+      "contract": "GOLDM_145000_PE",
       "lots": 1,
       "qty": 10,
-      "spot_at_entry": 8530.0,
-      "entry_price": 225.0,
-      "exit_price": 203.0,
-      "gross_pnl": -220.0,
-      "net_pnl": -280.0,
+      "spot_at_entry": 144623.0,
+      "entry_price": 2137.0,
+      "exit_price": 2104.0,
+      "gross_pnl": -330.0,
+      "net_pnl": -390.0,
       "charges": 60.0,
       "partial_exit": null,
-      "r_multiple": -1.33,
+      "r_multiple": -1.3,
       "peak_r": 0.0,
       "planned_rr": 4.0,
       "entry_context": {
         "regime": "REGIME_STRONG_TREND",
         "weekday": 3,
-        "macro": "NYMEX_PIT_OPEN_SURGE",
+        "macro": "US_COMEX_OPEN_WINDOW",
         "features": [
-          0.5842,
-          0.4607,
-          1.0,
-          1.0,
-          0.9998436199319379,
+          0.5064,
+          0.5,
+          0.47400000000000003,
+          0.32666666666666666,
+          -0.9769998441543146,
           0.0,
           0.5,
-          0.23809523809523828
+          0.273809523809524
         ]
       },
       "exit_policy": "ADAPTIVE_RUNNER",
       "exit_policy_net_r": {},
-      "conviction": 6,
+      "conviction": 5,
       "exit_reason": "INITIAL_SL_HIT",
-      "setup": "MCX_BREAKOUT_CONFIRM_CE"
+      "setup": "MCX_TREND_PULLBACK_PE"
     },
     {
       "timestamp": "2026-11-06 19:30:00",
@@ -3505,86 +2635,6 @@
       "conviction": 5,
       "exit_reason": "TRAIL_PROFIT_HIT",
       "setup": "MCX_TREND_PULLBACK_PE"
-    },
-    {
-      "timestamp": "2026-11-06 21:40:00",
-      "exit_timestamp": "2026-11-06 21:45:00",
-      "symbol": "GOLDM",
-      "sector": "BULLION",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "GOLDM_142000_CE",
-      "lots": 2,
-      "qty": 20,
-      "spot_at_entry": 142211.0,
-      "entry_price": 2048.0,
-      "exit_price": 2015.0,
-      "gross_pnl": -660.0,
-      "net_pnl": -740.0,
-      "charges": 80.0,
-      "partial_exit": null,
-      "r_multiple": -1.23,
-      "peak_r": 0.0,
-      "planned_rr": 3.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 4,
-        "macro": null,
-        "features": [
-          0.5732,
-          0.4736,
-          0.536,
-          0.30333333333333334,
-          0.990860989912191,
-          0.0,
-          0.6666666666666666,
-          0.6666666666666669
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 5,
-      "exit_reason": "INITIAL_SL_HIT",
-      "setup": "MCX_TREND_PULLBACK_CE"
-    },
-    {
-      "timestamp": "2026-11-06 22:25:00",
-      "exit_timestamp": "2026-11-06 22:30:00",
-      "symbol": "GOLDM",
-      "sector": "BULLION",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "GOLDM_142000_CE",
-      "lots": 1,
-      "qty": 10,
-      "spot_at_entry": 142428.0,
-      "entry_price": 2049.0,
-      "exit_price": 2016.0,
-      "gross_pnl": -330.0,
-      "net_pnl": -390.0,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": -1.3,
-      "peak_r": 0.0,
-      "planned_rr": 3.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 4,
-        "macro": null,
-        "features": [
-          0.682,
-          0.4432,
-          0.40599999999999997,
-          0.45333333333333337,
-          0.9989532888781435,
-          0.0,
-          0.6666666666666666,
-          0.773809523809524
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 5,
-      "exit_reason": "INITIAL_SL_HIT",
-      "setup": "MCX_TREND_PULLBACK_CE"
     },
     {
       "timestamp": "2026-11-09 17:50:00",
@@ -3635,16 +2685,16 @@
       "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
       "contract": "SILVERM_189000_PE",
-      "lots": 2,
-      "qty": 10,
+      "lots": 1,
+      "qty": 5,
       "spot_at_entry": 188868.0,
       "entry_price": 3868.0,
       "exit_price": 3805.0,
-      "gross_pnl": -630.0,
-      "net_pnl": -710.0,
-      "charges": 80.0,
+      "gross_pnl": -315.0,
+      "net_pnl": -375.0,
+      "charges": 60.0,
       "partial_exit": null,
-      "r_multiple": -1.2,
+      "r_multiple": -1.27,
       "peak_r": 0.0,
       "planned_rr": 4.0,
       "entry_context": {
@@ -3675,14 +2725,14 @@
       "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
       "contract": "SILVERM_188000_PE",
-      "lots": 2,
-      "qty": 10,
+      "lots": 1,
+      "qty": 5,
       "spot_at_entry": 187163.0,
       "entry_price": 3701.0,
-      "exit_price": 3947.95,
-      "gross_pnl": 2469.5,
-      "net_pnl": 2389.5,
-      "charges": 80.0,
+      "exit_price": 3951.95,
+      "gross_pnl": 1254.75,
+      "net_pnl": 1194.75,
+      "charges": 60.0,
       "partial_exit": null,
       "r_multiple": 4.05,
       "peak_r": 5.07,
@@ -3753,60 +2803,20 @@
       "setup": "MCX_TREND_PULLBACK_PE"
     },
     {
-      "timestamp": "2026-11-10 22:05:00",
-      "exit_timestamp": "2026-11-10 22:10:00",
-      "symbol": "SILVERM",
-      "sector": "BULLION",
-      "regime": "REGIME_STRONG_TREND",
-      "contract": "SILVERM_185000_PE",
-      "lots": 1,
-      "qty": 5,
-      "spot_at_entry": 184526.0,
-      "entry_price": 3625.0,
-      "exit_price": 3562.0,
-      "gross_pnl": -315.0,
-      "net_pnl": -375.0,
-      "charges": 60.0,
-      "partial_exit": null,
-      "r_multiple": -1.27,
-      "peak_r": 0.0,
-      "planned_rr": 3.0,
-      "entry_context": {
-        "regime": "REGIME_STRONG_TREND",
-        "weekday": 1,
-        "macro": null,
-        "features": [
-          1.1248,
-          0.38060000000000005,
-          0.302,
-          0.24,
-          -0.8478704478713548,
-          0.0,
-          0.16666666666666666,
-          0.726190476190476
-        ]
-      },
-      "exit_policy": "ADAPTIVE_RUNNER",
-      "exit_policy_net_r": {},
-      "conviction": 4,
-      "exit_reason": "INITIAL_SL_HIT",
-      "setup": "MCX_TREND_PULLBACK_PE"
-    },
-    {
       "timestamp": "2026-11-11 17:30:00",
       "exit_timestamp": "2026-11-11 17:35:00",
       "symbol": "GOLDM",
       "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
       "contract": "GOLDM_141500_PE",
-      "lots": 2,
-      "qty": 20,
+      "lots": 1,
+      "qty": 10,
       "spot_at_entry": 141125.0,
       "entry_price": 1785.0,
-      "exit_price": 1791.0,
-      "gross_pnl": 120.0,
-      "net_pnl": 40.0,
-      "charges": 80.0,
+      "exit_price": 1793.0,
+      "gross_pnl": 80.0,
+      "net_pnl": 20.0,
+      "charges": 60.0,
       "partial_exit": null,
       "r_multiple": 0.07,
       "peak_r": 1.27,
@@ -3839,16 +2849,16 @@
       "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
       "contract": "GOLDM_141000_PE",
-      "lots": 2,
-      "qty": 20,
+      "lots": 1,
+      "qty": 10,
       "spot_at_entry": 140940.0,
       "entry_price": 1781.0,
       "exit_price": 1749.0,
-      "gross_pnl": -640.0,
-      "net_pnl": -720.0,
-      "charges": 80.0,
+      "gross_pnl": -320.0,
+      "net_pnl": -380.0,
+      "charges": 60.0,
       "partial_exit": null,
-      "r_multiple": -1.2,
+      "r_multiple": -1.27,
       "peak_r": 0.0,
       "planned_rr": 4.0,
       "entry_context": {
@@ -3873,331 +2883,273 @@
       "setup": "MCX_TREND_PULLBACK_PE"
     },
     {
-      "timestamp": "2026-11-11 20:50:00",
-      "exit_timestamp": "2026-11-11 20:55:00",
-      "symbol": "CRUDEOILM",
-      "sector": "ENERGY",
+      "timestamp": "2026-11-11 20:55:00",
+      "exit_timestamp": "2026-11-11 21:00:00",
+      "symbol": "GOLDM",
+      "sector": "BULLION",
       "regime": "REGIME_STRONG_TREND",
-      "contract": "CRUDEOILM_8250_CE",
+      "contract": "GOLDM_140500_PE",
       "lots": 1,
       "qty": 10,
-      "spot_at_entry": 8272.0,
-      "entry_price": 155.0,
-      "exit_price": 190.0,
-      "gross_pnl": 350.0,
-      "net_pnl": 290.0,
+      "spot_at_entry": 140171.0,
+      "entry_price": 1765.0,
+      "exit_price": 1773.0,
+      "gross_pnl": 80.0,
+      "net_pnl": 20.0,
       "charges": 60.0,
       "partial_exit": null,
-      "r_multiple": 1.93,
-      "peak_r": 2.47,
+      "r_multiple": 0.07,
+      "peak_r": 1.47,
       "planned_rr": 4.0,
       "entry_context": {
         "regime": "REGIME_STRONG_TREND",
         "weekday": 2,
-        "macro": "US_EIA_CRUDE_INVENTORY_WINDOW",
+        "macro": "AUTONOMOUS_VOL_SHOCK_DETECTED",
         "features": [
-          0.6779999999999999,
-          0.4054,
-          0.5599999999999999,
-          0.64,
-          0.9994930357951443,
+          0.9351999999999999,
+          0.4525,
+          0.44800000000000006,
+          0.5466666666666666,
+          -0.9943290330169127,
           0.0,
           0.3333333333333333,
-          0.5476190476190474
+          0.5595238095238096
+        ]
+      },
+      "exit_policy": "ADAPTIVE_RUNNER",
+      "exit_policy_net_r": {},
+      "conviction": 6,
+      "exit_reason": "TRAIL_PROFIT_HIT",
+      "setup": "MCX_TREND_PULLBACK_PE"
+    },
+    {
+      "timestamp": "2026-11-12 17:25:00",
+      "exit_timestamp": "2026-11-12 17:35:00",
+      "symbol": "SILVERM",
+      "sector": "BULLION",
+      "regime": "REGIME_STRONG_TREND",
+      "contract": "SILVERM_183000_PE",
+      "lots": 1,
+      "qty": 5,
+      "spot_at_entry": 182810.0,
+      "entry_price": 3333.0,
+      "exit_price": 3270.0,
+      "gross_pnl": -315.0,
+      "net_pnl": -375.0,
+      "charges": 60.0,
+      "partial_exit": null,
+      "r_multiple": -1.27,
+      "peak_r": 0.49,
+      "planned_rr": 3.0,
+      "entry_context": {
+        "regime": "REGIME_STRONG_TREND",
+        "weekday": 3,
+        "macro": null,
+        "features": [
+          0.7672,
+          0.3737,
+          0.386,
+          0.49666666666666665,
+          -0.9986701445903868,
+          0.0,
+          0.5,
+          0.059523809523809694
+        ]
+      },
+      "exit_policy": "ADAPTIVE_RUNNER",
+      "exit_policy_net_r": {},
+      "conviction": 5,
+      "exit_reason": "INITIAL_SL_HIT",
+      "setup": "MCX_TREND_PULLBACK_PE"
+    },
+    {
+      "timestamp": "2026-11-12 18:55:00",
+      "exit_timestamp": "2026-11-12 19:00:00",
+      "symbol": "GOLDM",
+      "sector": "BULLION",
+      "regime": "REGIME_STRONG_TREND",
+      "contract": "GOLDM_137500_PE",
+      "lots": 1,
+      "qty": 10,
+      "spot_at_entry": 137414.0,
+      "entry_price": 1680.0,
+      "exit_price": 1769.0,
+      "gross_pnl": 890.0,
+      "net_pnl": 830.0,
+      "charges": 60.0,
+      "partial_exit": null,
+      "r_multiple": 2.77,
+      "peak_r": 3.57,
+      "planned_rr": 4.0,
+      "entry_context": {
+        "regime": "REGIME_STRONG_TREND",
+        "weekday": 3,
+        "macro": "US_COMEX_OPEN_WINDOW",
+        "features": [
+          0.4704,
+          0.433,
+          0.5559999999999999,
+          0.5766666666666667,
+          -0.9968871704941064,
+          0.0,
+          0.5,
+          0.273809523809524
         ]
       },
       "exit_policy": "ADAPTIVE_RUNNER",
       "exit_policy_net_r": {
-        "SCALP_1_5R": 1.533
+        "SCALP_1_5R": 1.5,
+        "SWING_2_2R": 2.2
+      },
+      "conviction": 5,
+      "exit_reason": "TRAIL_PROFIT_HIT",
+      "setup": "MCX_TREND_PULLBACK_PE"
+    },
+    {
+      "timestamp": "2026-11-12 19:20:00",
+      "exit_timestamp": "2026-11-12 19:25:00",
+      "symbol": "GOLDM",
+      "sector": "BULLION",
+      "regime": "REGIME_STRONG_TREND",
+      "contract": "GOLDM_137000_PE",
+      "lots": 2,
+      "qty": 20,
+      "spot_at_entry": 136898.0,
+      "entry_price": 1673.0,
+      "exit_price": 1824.42,
+      "gross_pnl": 3028.4,
+      "net_pnl": 2948.4,
+      "charges": 80.0,
+      "partial_exit": null,
+      "r_multiple": 4.91,
+      "peak_r": 6.3,
+      "planned_rr": 4.0,
+      "entry_context": {
+        "regime": "REGIME_STRONG_TREND",
+        "weekday": 3,
+        "macro": "US_COMEX_OPEN_WINDOW",
+        "features": [
+          0.8188,
+          0.3578,
+          0.304,
+          0.3133333333333333,
+          -0.9728224010735562,
+          0.0,
+          0.5,
+          0.33333333333333315
+        ]
+      },
+      "exit_policy": "ADAPTIVE_RUNNER",
+      "exit_policy_net_r": {
+        "SCALP_1_5R": 1.5,
+        "SWING_2_2R": 2.2,
+        "RUNNER_3_8R": 3.8
       },
       "conviction": 6,
-      "exit_reason": "TRAIL_PROFIT_HIT",
-      "setup": "MCX_BREAKOUT_CONFIRM_CE"
+      "exit_reason": "TARGET_1_4_RR_SUPER_RUNNER_HIT",
+      "setup": "MCX_TREND_PULLBACK_PE"
+    },
+    {
+      "timestamp": "2026-11-13 18:50:00",
+      "exit_timestamp": "2026-11-13 18:55:00",
+      "symbol": "GOLDM",
+      "sector": "BULLION",
+      "regime": "REGIME_STRONG_TREND",
+      "contract": "GOLDM_136500_PE",
+      "lots": 1,
+      "qty": 10,
+      "spot_at_entry": 136307.0,
+      "entry_price": 1610.0,
+      "exit_price": 1578.0,
+      "gross_pnl": -320.0,
+      "net_pnl": -380.0,
+      "charges": 60.0,
+      "partial_exit": null,
+      "r_multiple": -1.27,
+      "peak_r": 0.0,
+      "planned_rr": 4.0,
+      "entry_context": {
+        "regime": "REGIME_STRONG_TREND",
+        "weekday": 4,
+        "macro": "US_COMEX_OPEN_WINDOW",
+        "features": [
+          0.6428,
+          0.4532,
+          1.0,
+          0.6633333333333333,
+          -0.9996659454601413,
+          0.0,
+          0.6666666666666666,
+          0.26190476190476175
+        ]
+      },
+      "exit_policy": "ADAPTIVE_RUNNER",
+      "exit_policy_net_r": {},
+      "conviction": 6,
+      "exit_reason": "INITIAL_SL_HIT",
+      "setup": "MCX_TREND_PULLBACK_PE"
     }
   ],
   "missing_history_windows": [],
   "history_days_by_symbol": {
-    "GOLDM": 43,
-    "SILVERM": 43,
-    "CRUDEOILM": 43,
-    "NATGASMINI": 43
+    "GOLDM": 42,
+    "SILVERM": 42
   },
   "exit_calibration": {
     "playbooks": {
       "GOLDM:MCX_TREND_PULLBACK": {
-        "samples": 22,
-        "win_rate": 0.4090909090909091,
-        "payoff_ratio": 1.7945326278659612,
-        "baseline_mean_net_r": 0.18,
+        "samples": 20,
+        "win_rate": 0.5,
+        "payoff_ratio": 1.8454258675078863,
+        "baseline_mean_net_r": 0.536,
         "policy_mean_net_r": {
-          "SCALP_1_5R": -0.196,
-          "SWING_2_2R": -0.061,
-          "RUNNER_3_8R": 0.115
+          "SCALP_1_5R": -0.027,
+          "SWING_2_2R": 0.135,
+          "RUNNER_3_8R": 0.408
         },
         "policy_hits": {
           "SCALP_1_5R": 8,
-          "SWING_2_2R": 5,
-          "RUNNER_3_8R": 1
+          "SWING_2_2R": 6,
+          "RUNNER_3_8R": 2
         },
         "optimal_exit_policy": "ADAPTIVE_RUNNER"
       },
       "SILVERM:MCX_TREND_PULLBACK": {
-        "samples": 20,
-        "win_rate": 0.5,
-        "payoff_ratio": 3.0635294117647063,
-        "baseline_mean_net_r": 1.316,
+        "samples": 16,
+        "win_rate": 0.5625,
+        "payoff_ratio": 2.906976744186046,
+        "baseline_mean_net_r": 1.545,
         "policy_mean_net_r": {
-          "SCALP_1_5R": -0.028,
-          "SWING_2_2R": 0.236,
-          "RUNNER_3_8R": 0.704
+          "SCALP_1_5R": 0.103,
+          "SWING_2_2R": 0.389,
+          "RUNNER_3_8R": 0.874
         },
         "policy_hits": {
-          "SCALP_1_5R": 8,
-          "SWING_2_2R": 7,
-          "RUNNER_3_8R": 6
+          "SCALP_1_5R": 7,
+          "SWING_2_2R": 6,
+          "RUNNER_3_8R": 5
         },
         "optimal_exit_policy": "ADAPTIVE_RUNNER"
       },
       "SILVERM:MCX_BREAKOUT_CONFIRM": {
-        "samples": 7,
-        "win_rate": 0.2857142857142857,
-        "payoff_ratio": 2.672143974960876,
-        "baseline_mean_net_r": 0.063,
+        "samples": 3,
+        "win_rate": 0.3333333333333333,
+        "payoff_ratio": 3.13953488372093,
+        "baseline_mean_net_r": 0.49,
         "policy_mean_net_r": {
-          "SCALP_1_5R": -0.482,
-          "SWING_2_2R": -0.283,
-          "RUNNER_3_8R": 0.029
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 2,
-          "SWING_2_2R": 2,
-          "RUNNER_3_8R": 1
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
-      "NATGASMINI:MCX_BREAKOUT_CONFIRM": {
-        "samples": 2,
-        "win_rate": 0.0,
-        "payoff_ratio": 0.0,
-        "baseline_mean_net_r": -0.7,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": -0.7,
-          "SWING_2_2R": -0.7,
-          "RUNNER_3_8R": -0.7
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 0,
-          "SWING_2_2R": 0,
-          "RUNNER_3_8R": 0
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
-      "CRUDEOILM:MCX_BREAKOUT_CONFIRM": {
-        "samples": 5,
-        "win_rate": 0.8,
-        "payoff_ratio": 0.5864661654135338,
-        "baseline_mean_net_r": 0.358,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": 0.279,
-          "SWING_2_2R": 0.358,
-          "RUNNER_3_8R": 0.358
+          "SCALP_1_5R": -0.357,
+          "SWING_2_2R": -0.126,
+          "RUNNER_3_8R": 0.411
         },
         "policy_hits": {
           "SCALP_1_5R": 1,
-          "SWING_2_2R": 0,
-          "RUNNER_3_8R": 0
+          "SWING_2_2R": 1,
+          "RUNNER_3_8R": 1
         },
         "optimal_exit_policy": "ADAPTIVE_RUNNER"
       }
     },
     "contexts": {
-      "GOLDM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:1:REGULAR": {
-        "samples": 2,
-        "win_rate": 0.0,
-        "payoff_ratio": 0.0,
-        "baseline_mean_net_r": -1.27,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": -1.27,
-          "SWING_2_2R": -1.27,
-          "RUNNER_3_8R": -1.27
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 0,
-          "SWING_2_2R": 0,
-          "RUNNER_3_8R": 0
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
-      "SILVERM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:1:US_COMEX_OPEN_WINDOW": {
-        "samples": 5,
-        "win_rate": 0.8,
-        "payoff_ratio": 3.80511811023622,
-        "baseline_mean_net_r": 3.612,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": 0.952,
-          "SWING_2_2R": 1.452,
-          "RUNNER_3_8R": 2.418
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 4,
-          "SWING_2_2R": 3,
-          "RUNNER_3_8R": 3
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
-      "SILVERM:MCX_BREAKOUT_CONFIRM:REGIME_STRONG_TREND:2:US_COMEX_OPEN_WINDOW": {
-        "samples": 1,
-        "win_rate": 0.0,
-        "payoff_ratio": 0.0,
-        "baseline_mean_net_r": -1.27,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": -1.27,
-          "SWING_2_2R": -1.27,
-          "RUNNER_3_8R": -1.27
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 0,
-          "SWING_2_2R": 0,
-          "RUNNER_3_8R": 0
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
-      "NATGASMINI:MCX_BREAKOUT_CONFIRM:REGIME_STRONG_TREND:2:NYMEX_PIT_OPEN_SURGE": {
-        "samples": 1,
-        "win_rate": 0.0,
-        "payoff_ratio": 0.0,
-        "baseline_mean_net_r": -0.12,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": -0.12,
-          "SWING_2_2R": -0.12,
-          "RUNNER_3_8R": -0.12
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 0,
-          "SWING_2_2R": 0,
-          "RUNNER_3_8R": 0
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
-      "SILVERM:MCX_BREAKOUT_CONFIRM:REGIME_STRONG_TREND:2:AUTONOMOUS_VOL_SHOCK_DETECTED": {
-        "samples": 1,
-        "win_rate": 1.0,
-        "payoff_ratio": 0.0,
-        "baseline_mean_net_r": 2.78,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": 1.508,
-          "SWING_2_2R": 2.203,
-          "RUNNER_3_8R": 2.78
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 1,
-          "SWING_2_2R": 1,
-          "RUNNER_3_8R": 0
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
-      "SILVERM:MCX_BREAKOUT_CONFIRM:REGIME_STRONG_TREND:3:US_COMEX_OPEN_WINDOW": {
-        "samples": 1,
-        "win_rate": 0.0,
-        "payoff_ratio": 0.0,
-        "baseline_mean_net_r": -1.27,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": -1.27,
-          "SWING_2_2R": -1.27,
-          "RUNNER_3_8R": -1.27
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 0,
-          "SWING_2_2R": 0,
-          "RUNNER_3_8R": 0
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
-      "GOLDM:MCX_TREND_PULLBACK:REGIME_VOL_EXPANSION:3:US_COMEX_OPEN_WINDOW": {
-        "samples": 1,
-        "win_rate": 1.0,
-        "payoff_ratio": 0.0,
-        "baseline_mean_net_r": 1.93,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": 1.5,
-          "SWING_2_2R": 1.93,
-          "RUNNER_3_8R": 1.93
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 1,
-          "SWING_2_2R": 0,
-          "RUNNER_3_8R": 0
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
-      "CRUDEOILM:MCX_BREAKOUT_CONFIRM:REGIME_STRONG_TREND:3:AUTONOMOUS_VOL_SHOCK_DETECTED": {
-        "samples": 1,
-        "win_rate": 1.0,
-        "payoff_ratio": 0.0,
-        "baseline_mean_net_r": 0.93,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": 0.93,
-          "SWING_2_2R": 0.93,
-          "RUNNER_3_8R": 0.93
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 0,
-          "SWING_2_2R": 0,
-          "RUNNER_3_8R": 0
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
-      "SILVERM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:4:REGULAR": {
-        "samples": 2,
-        "win_rate": 0.5,
-        "payoff_ratio": 1.5833333333333333,
-        "baseline_mean_net_r": 0.35,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": 0.154,
-          "SWING_2_2R": 0.501,
-          "RUNNER_3_8R": 0.35
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 1,
-          "SWING_2_2R": 1,
-          "RUNNER_3_8R": 0
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
-      "GOLDM:MCX_TREND_PULLBACK:REGIME_VOL_EXPANSION:4:US_COMEX_OPEN_WINDOW": {
-        "samples": 1,
-        "win_rate": 1.0,
-        "payoff_ratio": 0.0,
-        "baseline_mean_net_r": 2.77,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": 1.5,
-          "SWING_2_2R": 2.2,
-          "RUNNER_3_8R": 2.77
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 1,
-          "SWING_2_2R": 1,
-          "RUNNER_3_8R": 0
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
-      "SILVERM:MCX_BREAKOUT_CONFIRM:REGIME_STRONG_TREND:4:REGULAR": {
-        "samples": 1,
-        "win_rate": 0.0,
-        "payoff_ratio": 0.0,
-        "baseline_mean_net_r": -1.27,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": -1.27,
-          "SWING_2_2R": -1.27,
-          "RUNNER_3_8R": -1.27
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 0,
-          "SWING_2_2R": 0,
-          "RUNNER_3_8R": 0
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
       "GOLDM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:0:REGULAR": {
         "samples": 2,
         "win_rate": 1.0,
@@ -4218,12 +3170,12 @@
       "SILVERM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:0:US_COMEX_OPEN_WINDOW": {
         "samples": 4,
         "win_rate": 0.5,
-        "payoff_ratio": 3.8795180722891565,
-        "baseline_mean_net_r": 1.792,
+        "payoff_ratio": 3.7734375,
+        "baseline_mean_net_r": 1.775,
         "policy_mean_net_r": {
-          "SCALP_1_5R": 0.132,
-          "SWING_2_2R": 0.479,
-          "RUNNER_3_8R": 1.284
+          "SCALP_1_5R": 0.114,
+          "SWING_2_2R": 0.461,
+          "RUNNER_3_8R": 1.267
         },
         "policy_hits": {
           "SCALP_1_5R": 2,
@@ -4232,37 +3184,20 @@
         },
         "optimal_exit_policy": "ADAPTIVE_RUNNER"
       },
-      "GOLDM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:0:US_COMEX_OPEN_WINDOW": {
-        "samples": 2,
-        "win_rate": 0.0,
+      "SILVERM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:1:US_COMEX_OPEN_WINDOW": {
+        "samples": 3,
+        "win_rate": 1.0,
         "payoff_ratio": 0.0,
-        "baseline_mean_net_r": -1.285,
+        "baseline_mean_net_r": 4.673,
         "policy_mean_net_r": {
-          "SCALP_1_5R": -1.285,
-          "SWING_2_2R": -1.285,
-          "RUNNER_3_8R": -1.285
+          "SCALP_1_5R": 1.508,
+          "SWING_2_2R": 2.109,
+          "RUNNER_3_8R": 3.183
         },
         "policy_hits": {
-          "SCALP_1_5R": 0,
-          "SWING_2_2R": 0,
-          "RUNNER_3_8R": 0
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
-      "SILVERM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:1:REGULAR": {
-        "samples": 2,
-        "win_rate": 0.0,
-        "payoff_ratio": 0.0,
-        "baseline_mean_net_r": -1.295,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": -1.295,
-          "SWING_2_2R": -1.295,
-          "RUNNER_3_8R": -1.295
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 0,
-          "SWING_2_2R": 0,
-          "RUNNER_3_8R": 0
+          "SCALP_1_5R": 3,
+          "SWING_2_2R": 2,
+          "RUNNER_3_8R": 2
         },
         "optimal_exit_policy": "ADAPTIVE_RUNNER"
       },
@@ -4287,11 +3222,11 @@
         "samples": 3,
         "win_rate": 0.0,
         "payoff_ratio": 0.0,
-        "baseline_mean_net_r": -1.257,
+        "baseline_mean_net_r": -1.28,
         "policy_mean_net_r": {
-          "SCALP_1_5R": -1.257,
-          "SWING_2_2R": -1.257,
-          "RUNNER_3_8R": -1.257
+          "SCALP_1_5R": -1.28,
+          "SWING_2_2R": -1.28,
+          "RUNNER_3_8R": -1.28
         },
         "policy_hits": {
           "SCALP_1_5R": 0,
@@ -4301,36 +3236,19 @@
         "optimal_exit_policy": "ADAPTIVE_RUNNER"
       },
       "GOLDM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:3:US_COMEX_OPEN_WINDOW": {
-        "samples": 2,
-        "win_rate": 0.0,
-        "payoff_ratio": 0.0,
-        "baseline_mean_net_r": -1.25,
+        "samples": 5,
+        "win_rate": 0.4,
+        "payoff_ratio": 3.031578947368421,
+        "baseline_mean_net_r": 0.776,
         "policy_mean_net_r": {
-          "SCALP_1_5R": -1.25,
-          "SWING_2_2R": -1.25,
-          "RUNNER_3_8R": -1.25
+          "SCALP_1_5R": -0.16,
+          "SWING_2_2R": 0.12,
+          "RUNNER_3_8R": 0.554
         },
         "policy_hits": {
-          "SCALP_1_5R": 0,
-          "SWING_2_2R": 0,
-          "RUNNER_3_8R": 0
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
-      "CRUDEOILM:MCX_BREAKOUT_CONFIRM:REGIME_STRONG_TREND:4:NYMEX_PIT_OPEN_SURGE": {
-        "samples": 1,
-        "win_rate": 1.0,
-        "payoff_ratio": 0.0,
-        "baseline_mean_net_r": 0.13,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": 0.13,
-          "SWING_2_2R": 0.13,
-          "RUNNER_3_8R": 0.13
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 0,
-          "SWING_2_2R": 0,
-          "RUNNER_3_8R": 0
+          "SCALP_1_5R": 2,
+          "SWING_2_2R": 2,
+          "RUNNER_3_8R": 1
         },
         "optimal_exit_policy": "ADAPTIVE_RUNNER"
       },
@@ -4351,15 +3269,15 @@
         },
         "optimal_exit_policy": "ADAPTIVE_RUNNER"
       },
-      "NATGASMINI:MCX_BREAKOUT_CONFIRM:REGIME_STRONG_TREND:0:AUTONOMOUS_VOL_SHOCK_DETECTED": {
+      "GOLDM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:0:US_COMEX_OPEN_WINDOW": {
         "samples": 1,
         "win_rate": 0.0,
         "payoff_ratio": 0.0,
-        "baseline_mean_net_r": -1.28,
+        "baseline_mean_net_r": -1.3,
         "policy_mean_net_r": {
-          "SCALP_1_5R": -1.28,
-          "SWING_2_2R": -1.28,
-          "RUNNER_3_8R": -1.28
+          "SCALP_1_5R": -1.3,
+          "SWING_2_2R": -1.3,
+          "RUNNER_3_8R": -1.3
         },
         "policy_hits": {
           "SCALP_1_5R": 0,
@@ -4420,14 +3338,14 @@
         "optimal_exit_policy": "ADAPTIVE_RUNNER"
       },
       "SILVERM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:3:REGULAR": {
-        "samples": 1,
+        "samples": 2,
         "win_rate": 0.0,
         "payoff_ratio": 0.0,
-        "baseline_mean_net_r": -1.31,
+        "baseline_mean_net_r": -1.29,
         "policy_mean_net_r": {
-          "SCALP_1_5R": -1.31,
-          "SWING_2_2R": -1.31,
-          "RUNNER_3_8R": -1.31
+          "SCALP_1_5R": -1.29,
+          "SWING_2_2R": -1.29,
+          "RUNNER_3_8R": -1.29
         },
         "policy_hits": {
           "SCALP_1_5R": 0,
@@ -4453,15 +3371,32 @@
         },
         "optimal_exit_policy": "ADAPTIVE_RUNNER"
       },
-      "GOLDM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:4:US_COMEX_OPEN_WINDOW": {
+      "SILVERM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:4:REGULAR": {
         "samples": 1,
         "win_rate": 1.0,
         "payoff_ratio": 0.0,
-        "baseline_mean_net_r": 2.77,
+        "baseline_mean_net_r": 1.9,
         "policy_mean_net_r": {
-          "SCALP_1_5R": 1.5,
-          "SWING_2_2R": 2.2,
-          "RUNNER_3_8R": 2.77
+          "SCALP_1_5R": 1.508,
+          "SWING_2_2R": 2.203,
+          "RUNNER_3_8R": 1.9
+        },
+        "policy_hits": {
+          "SCALP_1_5R": 1,
+          "SWING_2_2R": 1,
+          "RUNNER_3_8R": 0
+        },
+        "optimal_exit_policy": "ADAPTIVE_RUNNER"
+      },
+      "GOLDM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:4:US_COMEX_OPEN_WINDOW": {
+        "samples": 2,
+        "win_rate": 0.5,
+        "payoff_ratio": 2.1811023622047245,
+        "baseline_mean_net_r": 0.75,
+        "policy_mean_net_r": {
+          "SCALP_1_5R": 0.115,
+          "SWING_2_2R": 0.465,
+          "RUNNER_3_8R": 0.75
         },
         "policy_hits": {
           "SCALP_1_5R": 1,
@@ -4504,23 +3439,6 @@
         },
         "optimal_exit_policy": "ADAPTIVE_RUNNER"
       },
-      "CRUDEOILM:MCX_BREAKOUT_CONFIRM:REGIME_STRONG_TREND:2:NYMEX_PIT_OPEN_SURGE": {
-        "samples": 1,
-        "win_rate": 1.0,
-        "payoff_ratio": 0.0,
-        "baseline_mean_net_r": 0.13,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": 0.13,
-          "SWING_2_2R": 0.13,
-          "RUNNER_3_8R": 0.13
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 0,
-          "SWING_2_2R": 0,
-          "RUNNER_3_8R": 0
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
       "SILVERM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:3:AUTONOMOUS_VOL_SHOCK_DETECTED": {
         "samples": 1,
         "win_rate": 0.0,
@@ -4538,42 +3456,8 @@
         },
         "optimal_exit_policy": "ADAPTIVE_RUNNER"
       },
-      "CRUDEOILM:MCX_BREAKOUT_CONFIRM:REGIME_STRONG_TREND:3:NYMEX_PIT_OPEN_SURGE": {
-        "samples": 1,
-        "win_rate": 0.0,
-        "payoff_ratio": 0.0,
-        "baseline_mean_net_r": -1.33,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": -1.33,
-          "SWING_2_2R": -1.33,
-          "RUNNER_3_8R": -1.33
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 0,
-          "SWING_2_2R": 0,
-          "RUNNER_3_8R": 0
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
-      "GOLDM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:4:REGULAR": {
-        "samples": 2,
-        "win_rate": 0.0,
-        "payoff_ratio": 0.0,
-        "baseline_mean_net_r": -1.265,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": -1.265,
-          "SWING_2_2R": -1.265,
-          "RUNNER_3_8R": -1.265
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 0,
-          "SWING_2_2R": 0,
-          "RUNNER_3_8R": 0
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
       "GOLDM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:2:AUTONOMOUS_VOL_SHOCK_DETECTED": {
-        "samples": 1,
+        "samples": 2,
         "win_rate": 1.0,
         "payoff_ratio": 0.0,
         "baseline_mean_net_r": 0.07,
@@ -4588,48 +3472,28 @@
           "RUNNER_3_8R": 0
         },
         "optimal_exit_policy": "ADAPTIVE_RUNNER"
-      },
-      "CRUDEOILM:MCX_BREAKOUT_CONFIRM:REGIME_STRONG_TREND:2:US_EIA_CRUDE_INVENTORY_WINDOW": {
-        "samples": 1,
-        "win_rate": 1.0,
-        "payoff_ratio": 0.0,
-        "baseline_mean_net_r": 1.93,
-        "policy_mean_net_r": {
-          "SCALP_1_5R": 1.533,
-          "SWING_2_2R": 1.93,
-          "RUNNER_3_8R": 1.93
-        },
-        "policy_hits": {
-          "SCALP_1_5R": 1,
-          "SWING_2_2R": 0,
-          "RUNNER_3_8R": 0
-        },
-        "optimal_exit_policy": "ADAPTIVE_RUNNER"
       }
     },
     "top_playbooks": [
       "SILVERM:MCX_TREND_PULLBACK",
-      "CRUDEOILM:MCX_BREAKOUT_CONFIRM",
       "GOLDM:MCX_TREND_PULLBACK",
       "SILVERM:MCX_BREAKOUT_CONFIRM"
     ],
     "version": "10.0",
-    "date": "2026-11-12",
+    "date": "2026-11-16",
     "span_days": 30,
     "symbols": [
-      "CRUDEOILM",
       "GOLDM",
-      "NATGASMINI",
       "SILVERM"
     ],
     "complete_for_deployment": true,
     "method": "Modeled discovery with a rolling 30-day shortlist; only earlier completed dates inform entries"
   },
   "discovery_results": {
-    "total_trades": 94,
-    "wins": 42,
-    "losses": 52,
-    "win_rate_pct": 44.7,
-    "net_profit_after_charges": 11670.6
+    "total_trades": 74,
+    "wins": 34,
+    "losses": 40,
+    "win_rate_pct": 45.9,
+    "net_profit_after_charges": 12915.45
   }
 }

@@ -1,11 +1,11 @@
 {
   "mode": "PAPER",
   "initial_capital": 30000.0,
-  "virtual_balance_gross": 29078.0,
-  "virtual_balance_net": 28278.0,
-  "profit_without_charges": -922.0,
-  "net_profit_after_charges": -1722.0,
-  "total_trades": 13,
+  "virtual_balance_gross": 29068.0,
+  "virtual_balance_net": 28208.0,
+  "profit_without_charges": -932.0,
+  "net_profit_after_charges": -1792.0,
+  "total_trades": 14,
   "trades": [
     {
       "timestamp": "2026-11-10 21:50:06",
@@ -290,6 +290,31 @@
       "learning_risk_rs": 170.0,
       "exit_diagnostics": {
         "peak_net_pnl": -99.0
+      }
+    },
+    {
+      "timestamp": "2026-11-16 17:40:00",
+      "exit_timestamp": "2026-11-16 17:49:21",
+      "symbol": "SILVERM",
+      "regime": "REGIME_STRONG_TREND",
+      "contract": "SILVERM_172000_PE",
+      "lots": 1,
+      "qty": 5,
+      "spot_at_entry": 171746.0,
+      "entry_price": 4490.0,
+      "exit_price": 4488.0,
+      "gross_pnl": -10.0,
+      "net_pnl": -70.0,
+      "charges": 60.0,
+      "partial_exit": null,
+      "r_multiple": -0.24,
+      "peak_r": 1.58,
+      "planned_rr": 3.0,
+      "exit_reason": "TRAIL_PROFIT_HIT",
+      "setup": "MCX_TREND_PULLBACK_PE",
+      "learning_risk_rs": 295.0,
+      "exit_diagnostics": {
+        "peak_net_pnl": 405.0
       }
     }
   ],

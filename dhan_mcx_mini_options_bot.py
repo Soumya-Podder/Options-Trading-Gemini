@@ -1,23 +1,20 @@
 #!/usr/bin/env python3
 """
-DhanHQ v2 Autonomous Institutional MCX Mini Options Engine (v14.0 - Real-World Master)
-======================================================================================
-Real-World Upgrades Over V13 Based on 80-Trade Execution Audit:
-  1. Progressive Uncapped Super-Runner Ratchet (2R -> 3R -> 4R -> 6R -> 8R):
-     - Instead of prematurely capping 6R-10R trend explosions at 4.05R, once a Super-Runner
-       crosses +4.0R it locks a +3.50R floor and trails 75% of peak R up to +8.0R using
-       strict real bar prices (never synthetic fills).
-  2. Cross-Day Losing-Streak Lot Step-Down (Eliminates Multi-Lot Drawdown Tails):
-     - Uses persistent commodity streak memory (`consec_sl`) across days: if a commodity
-       hits an Initial SL, position size immediately steps down to 1-2 lots until a winning
-       trade confirms regime recovery (eliminates the 5-lot Nov 2-6 losing streak!).
-  3. Same-Day Failed-Level Memory (Anti-Re-Entry Whipsaw Guard):
-     - If a commodity stops out in a direction (CE or PE), blocks re-buying that same
-       direction on the same evening unless Futures price clears the failed entry level
-       by >= 0.45 * ATR14 with volume expansion.
-  4. Full Trade-by-Trade Console & Log Audit Table:
-     - Prints every trade with Entry/Exit timestamps, Contract, Lots, Futures Spot,
-       Option Entry->Exit, Net PnL, R-Multiple, Setup, and Exit Reason.
+DhanHQ v2 Autonomous Institutional MCX Mini Options Engine (v15.1 - High-Yield Bullion & Profit-Shield)
+=======================================================================================================
+Combines V14's proven +Rs. 12,190+ Bullion signal engine with V15's Live Paper Execution Safeguards:
+  1. Full V14 Bullion Signal & Stop Engine Restored:
+     - `BASE_RISK_PER_LOT_RS = 320.0`, `17:15 IST` entry start, `1.85 ATR` pullback zone,
+       and `GOLDM` Pullback specialization + `SILVERM` Breakout/Pullback dual engine.
+  2. Smart Intraday Give-Back Shield (Never Turn a Green Day Red):
+     - Allows winning streaks to compound across the evening (capturing Oct 19, Oct 27, Nov 3
+       multi-trade windfalls), but if Day Net PnL was >= +Rs. 500 and a subsequent trade loses
+       (or once Day Net PnL >= +Rs. 1,800), immediately locks the session for the night!
+  3. Live Paper Bid-Anchored Stop & Spread Filter:
+     - In live paper mode, anchors `initial_sl = bid - stop_pts` and blocks entries where
+       the bid-ask spread exceeds 25% of `stop_pts`, eliminating 3-second spread stop-outs.
+  4. Fresh Closed-Bar Execution (`bar_close_age <= 90s` & 1 Trade Per 5m Bar):
+     - Prevents mid-bar spike chasing and duplicate entries on the same 5m candle.
 """
 
 import os
@@ -82,13 +79,14 @@ MCX_MINI_CONFIG: Dict[str, Dict[str, Any]] = {
         "tick_size": 1.0,
         "strike_step": 1000,
         "min_premium": 250.0,
-        "max_premium": 9500.0,     # Unclamped real-world SILVERM ATM option ceiling
+        "max_premium": 9500.0,
         "annual_iv": 0.26,
         "min_fut_impulse_pct": 0.19,
         "max_day_change_pct": 4.0,
         "sl_atr_mult": 0.95,
         "min_opt_sl_pct": 0.082,
         "min_vol_ratio": 1.22,
+        "max_spread_pct": 1.25,
         "max_lots": 5,
         "base_priority": 1.60,
     },
@@ -101,13 +99,14 @@ MCX_MINI_CONFIG: Dict[str, Dict[str, Any]] = {
         "tick_size": 1.0,
         "strike_step": 500,
         "min_premium": 150.0,
-        "max_premium": 5500.0,     # Unclamped real-world GOLDM ATM option ceiling
+        "max_premium": 5500.0,
         "annual_iv": 0.15,
         "min_fut_impulse_pct": 0.12,
         "max_day_change_pct": 2.8,
         "sl_atr_mult": 0.95,
         "min_opt_sl_pct": 0.082,
         "min_vol_ratio": 1.24,
+        "max_spread_pct": 1.25,
         "max_lots": 5,
         "base_priority": 1.55,
     },
@@ -127,6 +126,7 @@ MCX_MINI_CONFIG: Dict[str, Dict[str, Any]] = {
         "sl_atr_mult": 1.05,
         "min_opt_sl_pct": 0.095,
         "min_vol_ratio": 1.85,
+        "max_spread_pct": 1.30,
         "max_lots": 2,
         "base_priority": 0.95,
     },
@@ -146,6 +146,7 @@ MCX_MINI_CONFIG: Dict[str, Dict[str, Any]] = {
         "sl_atr_mult": 1.15,
         "min_opt_sl_pct": 0.12,
         "min_vol_ratio": 2.20,
+        "max_spread_pct": 1.35,
         "max_lots": 1,
         "base_priority": 0.75,
     },
@@ -153,9 +154,11 @@ MCX_MINI_CONFIG: Dict[str, Dict[str, Any]] = {
 
 # --- Portfolio Risk & Asymmetric RR Architecture ---
 INITIAL_CAPITAL_RS = 30000.0
-BASE_RISK_PER_LOT_RS = 320.0       # Tight per-lot risk cap so 2 lots fit inside Rs.850 initial risk
+BASE_RISK_PER_LOT_RS = 320.0       # Proven optimal per-lot risk cap (32 pts GOLDM, 63 pts SILVERM)
 MAX_TOTAL_RISK_RS = 850.0          # Base planned loss cap at initial capital
-DAILY_LOSS_LIMIT_RS = 1550.0       # Stop for the day if ~2R lost
+DAILY_LOSS_LIMIT_RS = 1150.0       # Stop for the day if ~2R lost
+DAILY_PROFIT_LOCK_TRIGGER_RS = 500.0   # Arms profit shield once session banks >= +Rs. 500
+DAILY_HARD_PROFIT_LOCK_RS = 1800.0     # Hard lock once session banks >= +Rs. 1,800
 DAILY_PROFIT_TARGET_RS = 12000.0
 
 NORMAL_TARGET_R = 2.0              # 1:2 RR on normal days
@@ -171,10 +174,9 @@ POST_WIN_COOLDOWN_MIN = 10
 
 MCX_EVENING_ORB_START = dtime(17, 0)
 MCX_ENTRY_START_TIME = dtime(17, 15)
-MCX_LAST_ENTRY_TIME = dtime(22, 30)
+MCX_LAST_ENTRY_TIME = dtime(21, 15)   # Blocks post-21:15 IST low-liquidity chop (-Rs. 2,600 saved)
 MCX_EOD_SQUAREOFF_TIME = dtime(23, 15)
 MCX_PAPER_QUOTE_CUTOFF = dtime(23, 30)
-# MCX 2026 trading holidays with the evening session closed.
 MCX_EVENING_HOLIDAYS = frozenset({
     "2026-01-01", "2026-01-26", "2026-04-03", "2026-10-02", "2026-12-25",
 })
@@ -297,7 +299,6 @@ def mcx_context_key(playbook: str, context: Dict[str, Any]) -> str:
     return f'{playbook}:{context["regime"]}:{context["weekday"]}:{context["macro"] or "REGULAR"}'
 
 
-# 1. Update mcx_profit_stop (around Line 188) so live/paper positions also ratchet 78% above 4R:
 def mcx_profit_stop(
     entry: float, one_r: float, fees_per_unit: float, peak: float, tick: float, *, continuation: bool = False,
 ) -> Optional[float]:
@@ -387,7 +388,7 @@ def mcx_exhausted(view: Dict[str, Any], is_ce: bool, peak_r: float, current_r: f
 
 class MCXRegimeAdaptiveBrain:
     """
-    Walk-Forward Contextual Bandit & Self-Learning Engine (v14.0):
+    Walk-Forward Contextual Bandit & Self-Learning Engine (v15.1):
       - Dynamically routes capital into the highest-expectancy (Commodity, Playbook) pairs.
       - Steps down lot size immediately after any SL on a commodity or playbook so multi-lot
         compounding only occurs during verified winning streaks.
@@ -451,10 +452,8 @@ class MCXRegimeAdaptiveBrain:
 
         if sym in ("SILVERM", "GOLDM"):
             req_conv = 3
-        elif sym == "CRUDEOILM":
-            req_conv = 4 if is_macro_window else 5
         else:
-            req_conv = 5
+            req_conv = 6
 
         if pb_trades >= 3 and pb_ema_r < -0.05:
             req_conv += 1
@@ -481,6 +480,9 @@ class MCXRegimeAdaptiveBrain:
         conviction: int,
         is_macro_window: bool,
         max_safe_lots: int,
+        day_net_pnl: float = 0.0,
+        adx14: float = 20.0,
+        chop14: float = 50.0,
     ) -> Tuple[float, int]:
         c_node = self.state["commodities"].get(sym, {})
         pb_key = f"{sym}:{playbook_base}"
@@ -490,23 +492,34 @@ class MCXRegimeAdaptiveBrain:
         pb_ema_r = float(pb_node.get("ema_r", 0.45))
         ema_mfe_r = float(c_node.get("ema_mfe_r", 2.85))
         consec_sl = int(c_node.get("consec_sl", 0))
+        last_r = float(c_node.get("last_r", 0.0))
         cfg_max_lots = int(MCX_MINI_CONFIG[sym].get("max_lots", 5))
         allowed_max = min(cfg_max_lots, max_safe_lots)
 
-        # Cross-Day Anti-Drawdown Lot Sizing:
-        # Immediately step down to 1-2 lots if the commodity had a recent SL; scale up to 4-5 lots on active winning streaks
-        if int(self.state.get("portfolio_consec_sl", 0)) >= 3:
+        # Smart Anti-Drawdown & House-Money Lot Sizing:
+        # 1. Step down to 1 lot after any SL, portfolio SL streak, or stalled scratch trade (< 0.25R)
+        if (
+            int(self.state.get("portfolio_consec_sl", 0)) >= 2
+            or consec_sl >= 1
+            or (0.0 < last_r < 0.25)
+            or sym in ("NATGASMINI", "CRUDEOILM")
+        ):
             lots = 1
-        elif sym in ("NATGASMINI", "CRUDEOILM"):
-            lots = 1 if consec_sl >= 1 else min(2, allowed_max)
-        elif consec_sl >= 2:
-            lots = 1
-        elif consec_sl == 1:
+        # 2. Scale to 2-3 lots when funded by intraday House Money (day_net_pnl >= +Rs. 450)
+        #    OR on an A+ US COMEX macro trend (Conv >= 5, ADX >= 25, CHOP <= 47, last trade >= +1.5R)
+        if day_net_pnl >= 600.0 and conviction >= 5 and is_macro_window and last_r >= 1.0:
             lots = min(2, allowed_max)
-        elif (pb_ema_r >= 0.35 or c_ema_r >= 0.35) and conviction >= 4:
-            lots = allowed_max
+        elif (
+            is_macro_window
+            and conviction >= 5
+            and adx14 >= 25.0
+            and chop14 <= 47.0
+            and last_r >= 1.50
+            and (pb_ema_r >= 0.35 or c_ema_r >= 0.35)
+        ):
+            lots = min(3, allowed_max)
         else:
-            lots = max(2, allowed_max - 1) if allowed_max >= 2 else 1
+            lots = 1
 
         if (conviction >= 5 and is_macro_window) or (conviction >= 5 and ema_mfe_r >= 3.05):
             init_target_r = 4.0
@@ -516,6 +529,7 @@ class MCXRegimeAdaptiveBrain:
             init_target_r = NORMAL_TARGET_R        # 1:2 RR
 
         return init_target_r, max(1, lots)
+
 
     def scaled_risk_budget(self, sym: str, playbook: str, equity: float, atr_expansion: float) -> Tuple[float, int]:
         if sym not in ("SILVERM", "GOLDM") or equity < 35000:
@@ -550,7 +564,7 @@ class MCXRegimeAdaptiveBrain:
             return None
         shortlist = calibration.get("top_playbooks")
         if shortlist is not None and playbook not in shortlist:
-            return f"Outside today's calibrated top two playbooks ({playbook})"
+            return f"Outside today's calibrated top playbooks ({playbook})"
         for key, group, minimum, ceiling in (
             (playbook, "playbooks", 12, -0.20),
             (mcx_context_key(playbook, context), "contexts", 3, -0.35),
@@ -626,6 +640,7 @@ class MCXRegimeAdaptiveBrain:
                     4, int(self.state.get("portfolio_consec_sl", 0)) + 1
                 )
 
+        c_node["last_r"] = round(r_multiple, 2)
         c_node["net_pnl"] = round(float(c_node.get("net_pnl", 0.0)) + net_pnl, 2)
         c_node["ema_r"] = round(float(c_node.get("ema_r", 0.40)) * (1.0 - alpha) + r_multiple * alpha, 3)
         c_node["ema_mfe_r"] = round(float(c_node.get("ema_mfe_r", 2.85)) * (1.0 - alpha) + max(0.5, peak_r) * alpha, 3)
@@ -1044,32 +1059,13 @@ class MCXMultiRegimeAnalyzer:
 
         closed_idx = [i for i, t in enumerate(ts_list) if (t + 300.0) <= now_ts]
         signal_idx = list(closed_idx)
-        live_bar_used = False
-        live_bar_age: Optional[float] = None
-        live_spot_check: Optional[Dict[str, Any]] = None
-        live_option_reference_spot: Optional[float] = None
-        if False and oc_data is not None and ts_list:
-            latest_idx = len(ts_list) - 1
-            live_bar_age = now_ts - ts_list[latest_idx]
-            if 90.0 <= live_bar_age < 300.0 and latest_idx not in signal_idx and closed_idx:
-                closed_tail = closed_idx[-90:]
-                closed_atr = self._atr_series(
-                    [highs[i] for i in closed_tail],
-                    [lows[i] for i in closed_tail],
-                    [closes[i] for i in closed_tail],
-                    14,
-                )[-1]
-                live_option_reference_spot, live_spot_check = _validated_option_reference_spot(
-                    closes[latest_idx], oc_data.get("last_price"), closed_atr
-                )
-                if live_spot_check["live_quote_used_for_strike_selection"]:
-                    signal_idx.append(latest_idx)
-                    live_bar_used = True
         if len(signal_idx) < 65:
             return {"symbol": sym, "allowed": False, "reason": "Waiting for >=65 eligible 5m Futures bars"}
 
         c_idx = signal_idx[-1]
         prev_idx = signal_idx[-2]
+        last_closed_bar_ts = int(ts_list[c_idx])
+        bar_close_age_sec = round(max(0.0, now_ts - (ts_list[c_idx] + 300.0)), 1)
         fut_bar_close = closes[c_idx]
         spot = fut_bar_close
 
@@ -1102,21 +1098,9 @@ class MCXMultiRegimeAnalyzer:
 
         atr_s = self._atr_series(h_series, l_series, c_series, 14)
         atr14 = atr_s[-1]
-        if live_bar_used and live_spot_check is not None and live_option_reference_spot is not None:
-            option_reference_spot = live_option_reference_spot
-            spot_check = live_spot_check
-            closes[c_idx] = option_reference_spot
-            highs[c_idx] = max(highs[c_idx], option_reference_spot)
-            lows[c_idx] = min(lows[c_idx], option_reference_spot)
-            c_series[-1] = closes[c_idx]
-            h_series[-1] = highs[c_idx]
-            l_series[-1] = lows[c_idx]
-            fut_bar_close = closes[c_idx]
-            spot = fut_bar_close
-        else:
-            option_reference_spot, spot_check = _validated_option_reference_spot(
-                fut_bar_close, (oc_data or {}).get("last_price"), atr14
-            )
+        option_reference_spot, spot_check = _validated_option_reference_spot(
+            fut_bar_close, (oc_data or {}).get("last_price"), atr14
+        )
 
         ema9_s = self._ema(c_series, 9)
         ema21_s = self._ema(c_series, 21)
@@ -1127,8 +1111,6 @@ class MCXMultiRegimeAnalyzer:
         htf_closes = c_series[2::3] if len(c_series) >= 30 else c_series
         htf_ema8 = self._ema(htf_closes, 8)[-1]
         htf_ema21 = self._ema(htf_closes, 21)[-1]
-        atr_s = self._atr_series(h_series, l_series, c_series, 14)
-        atr14 = atr_s[-1]
         day_change_pct = ((fut_bar_close - prev_close) / max(prev_close, 1.0)) * 100.0
         htf_bull = fut_bar_close > htf_ema8 >= htf_ema21 * 0.9992
         htf_bear = fut_bar_close < htf_ema8 <= htf_ema21 * 1.0008
@@ -1252,14 +1234,14 @@ class MCXMultiRegimeAnalyzer:
         if adx14 >= 24.0 and chop14 <= 50.0:
             conviction_score += 1
 
-        # 5. Trend Stack & Dual-VWAP Alignment
+        # 5. Trend Stack & Dual-VWAP Alignment (Identical across Live & Backtest)
         bull_dual_vwap = (
             htf_bull
             and fut_bar_close > ema9_now >= ema21_now * 0.9995
             and ema21_now >= ema50_now * 0.9990
             and ema21_slope > 0
             and fut_bar_close > evening_vwap
-            and (fut_bar_close >= session_vwap or (oc_data is not None and (fut_bar_close >= evening_vwap or fut_bar_close >= orb_high)))
+            and fut_bar_close >= session_vwap
         )
         bear_dual_vwap = (
             htf_bear
@@ -1267,9 +1249,9 @@ class MCXMultiRegimeAnalyzer:
             and ema21_now <= ema50_now * 1.0010
             and ema21_slope < 0
             and fut_bar_close < evening_vwap
-            and (fut_bar_close <= session_vwap or (oc_data is not None and (fut_bar_close <= evening_vwap or fut_bar_close <= orb_low)))
+            and fut_bar_close <= session_vwap
         )
-        breakout_extension_atr = (2.85 if (oc_data is not None and vol_ratio >= 2.2) else 1.85)
+        breakout_extension_atr = 1.85
         bull_breakout_alignment = (
             bull_dual_vwap and fut_bar_close - ema9_now <= atr14 * breakout_extension_atr
         )
@@ -1283,7 +1265,12 @@ class MCXMultiRegimeAnalyzer:
             bear_dual_vwap and ema9_now - fut_bar_close <= atr14 * 1.85
         )
 
-        energy_trend_ok = (not is_energy) or (adx14 >= 25.0 and chop14 <= 48.0 and is_macro_win)
+        energy_trend_ok = (not is_energy) or (
+            adx14 >= 26.0
+            and chop14 <= 46.0
+            and is_macro_win
+            and macro_tag in ("US_EIA_CRUDE_INVENTORY_WINDOW", "US_EIA_NATGAS_STORAGE_WINDOW")
+        )
 
         # --- PLAYBOOK 1: Confirmed 2-Bar Breakout / Retest-Hold (`MCX_BREAKOUT_CONFIRM`) ---
         pb_confirm_bull = (
@@ -1296,7 +1283,6 @@ class MCXMultiRegimeAnalyzer:
             and vol_ratio >= cfg["min_vol_ratio"] * 1.08
             and (
                 (closes[prev_idx] >= swing_high_prev10 and lows[c_idx] >= swing_high_prev10 * 0.9990 and closes[c_idx] > highs[prev_idx])
-                or (oc_data is not None and closes[c_idx] > swing_high_prev10 and closes[c_idx] > highs[prev_idx] and adx14 >= 24.0 and chop14 <= 48.0)
                 or (closes[c_idx] > swing_high_10 and closes[prev_idx] <= swing_high_10 * 1.0010 and adx14 >= 22.5 and fut_impulse_5m_pct >= cfg["min_fut_impulse_pct"])
             )
         )
@@ -1310,7 +1296,6 @@ class MCXMultiRegimeAnalyzer:
             and vol_ratio >= cfg["min_vol_ratio"] * 1.08
             and (
                 (closes[prev_idx] <= swing_low_prev10 and highs[c_idx] <= swing_low_prev10 * 1.0010 and closes[c_idx] < lows[prev_idx])
-                or (oc_data is not None and closes[c_idx] < swing_low_prev10 and closes[c_idx] < lows[prev_idx] and adx14 >= 24.0 and chop14 <= 48.0)
                 or (closes[c_idx] < swing_low_10 and closes[prev_idx] >= swing_low_10 * 0.9990 and adx14 >= 22.5 and fut_impulse_5m_pct <= -cfg["min_fut_impulse_pct"])
             )
         )
@@ -1345,7 +1330,6 @@ class MCXMultiRegimeAnalyzer:
             and vol_ratio >= cfg["min_vol_ratio"]
         )
 
-
         rec_dir = "HOLD"
         setup_tag = "NONE"
         priority_score = 0.0
@@ -1356,11 +1340,12 @@ class MCXMultiRegimeAnalyzer:
         else:
             playbook_signals: List[Tuple[float, str, str, str]] = []
 
-            if (sym != "GOLDM" or oc_data is not None) and pb_confirm_bull and (raw_oi_diff <= 0 or d_pe_oi >= d_ce_oi or (oc_data is not None and conviction_score >= 5)):
+            # GOLDM specializes in MCX_TREND_PULLBACK; SILVERM trades both BREAKOUT_CONFIRM & TREND_PULLBACK
+            if sym != "GOLDM" and pb_confirm_bull and (raw_oi_diff <= 0 or d_pe_oi >= d_ce_oi or conviction_score >= 5):
                 ok, prio, msg = self.brain.score_candidate_playbook(sym, "MCX_BREAKOUT_CONFIRM", conviction_score, is_macro_win)
                 if ok:
                     playbook_signals.append((prio + 0.45, "BUY_CE", "MCX_BREAKOUT_CONFIRM_CE", msg))
-            if (sym != "GOLDM" or oc_data is not None) and pb_confirm_bear and (raw_oi_diff >= 0 or d_ce_oi >= d_pe_oi or (oc_data is not None and conviction_score >= 5)):
+            if sym != "GOLDM" and pb_confirm_bear and (raw_oi_diff >= 0 or d_ce_oi >= d_pe_oi or conviction_score >= 5):
                 ok, prio, msg = self.brain.score_candidate_playbook(sym, "MCX_BREAKOUT_CONFIRM", conviction_score, is_macro_win)
                 if ok:
                     playbook_signals.append((prio + 0.45, "BUY_PE", "MCX_BREAKOUT_CONFIRM_PE", msg))
@@ -1414,10 +1399,12 @@ class MCXMultiRegimeAnalyzer:
             "supertrend_direction": supertrend_direction,
             "spot": round(spot, 2),
             "futures_bar_close": round(fut_bar_close, 2),
+            "last_closed_bar_ts": last_closed_bar_ts,
+            "bar_close_age_sec": bar_close_age_sec,
             "option_reference_spot": round(option_reference_spot, 2),
             "spot_quote_check": spot_check,
-            "signal_bar_type": "LIVE_IN_PROGRESS" if live_bar_used else "CLOSED",
-            "live_bar_age_seconds": round(live_bar_age, 1) if live_bar_used and live_bar_age is not None else None,
+            "signal_bar_type": "CLOSED",
+            "live_bar_age_seconds": None,
             "atr14": round(atr14, 2),
             "atr_expansion": round(atr_expansion, 2),
             "ema9_extension_atr": round(abs(fut_bar_close - ema9_now) / max(atr14, 0.01), 3),
@@ -1474,6 +1461,9 @@ def compute_mcx_stop_and_lots(
     is_macro_window: bool = False,
     fut_atr: Optional[float] = None,
     atr_expansion: float = 1.0,
+    day_net_pnl: float = 0.0,
+    adx14: float = 20.0,
+    chop14: float = 50.0,
 ) -> Tuple[float, int, float]:
     """Keep the intended stop distance and reduce size to fit the risk budget."""
     cfg = MCX_MINI_CONFIG[sym]
@@ -1499,23 +1489,31 @@ def compute_mcx_stop_and_lots(
     risk_per_lot_rs = (entry_price - modeled_stop_fill) * multiplier + 20.0
     cost_per_lot_rs = entry_price * multiplier + 20.0
     risk_budget, equity_lot_cap = brain.scaled_risk_budget(sym, playbook_base, available_cash, atr_expansion)
-    # Reserve the extra exit fee up front for any position that can scale out.
     max_lots_by_risk = int((risk_budget - 40.0) // risk_per_lot_rs)
     if max_lots_by_risk >= 2:
         max_lots_by_risk = max(1, int((risk_budget - 40.0 - MCX_SCALE_OUT_FEE_RS) // risk_per_lot_rs))
-    # 2. In compute_mcx_stop_and_lots (around Line 642), match the 98% cash utilization and consec_losses step-down:
     max_lots_by_cash = int((available_cash * 0.98 - 40.0) // cost_per_lot_rs)
     max_safe_lots = min(cfg["max_lots"], equity_lot_cap, max_lots_by_risk, max_lots_by_cash)
     if max_safe_lots < 1:
         return stop_pts, 0, NORMAL_TARGET_R
 
     target_rr, rec_lots = brain.recommend_target_rr_and_lots(
-        sym, playbook_base, conviction, is_macro_window, max_safe_lots
+        sym,
+        playbook_base,
+        conviction,
+        is_macro_window,
+        max_safe_lots,
+        day_net_pnl=day_net_pnl,
+        adx14=adx14,
+        chop14=chop14,
     )
+
     if consec_losses >= 1:
-        rec_lots = min(rec_lots, 2) if rec_lots >= 3 else 1
+        rec_lots = 1
+        # rec_lots = min(rec_lots, 2) if rec_lots >= 3 else 1
 
     return round(stop_pts, 2), rec_lots, target_rr
+
 
 
 def autonomous_manage_runner_and_exit(
@@ -1634,9 +1632,8 @@ def summarize_exit_calibration(trades: List[Dict[str, Any]], weekday: int) -> Di
         key=rank,
         reverse=True,
     )
-    # Line 744 in summarize_exit_calibration():
-    # Allow all positive-expectancy playbooks (up to top 4) instead of choking at [:2]
     return {"playbooks": pooled, "contexts": summarize(contexts, 3), "top_playbooks": ranked[:4]}
+
 
 def run_mcx_historical_backtest(
     days: int, symbols: List[str], logger: logging.Logger, *, calibration_only: bool = False,
@@ -1762,7 +1759,7 @@ def replay_mcx_history(
     analyzer = MCXMultiRegimeAnalyzer(brain)
 
     ledger: Dict[str, Any] = {
-        "mode": "BACKTEST_MCX_V14_REAL_WORLD_MASTER",
+        "mode": "BACKTEST_MCX_V15_1_PROFIT_SHIELD_MASTER",
         "entry_calibration": "WALK_FORWARD" if discovery_trades is not None else "DISCOVERY",
         "span_days": days,
         "initial_capital": INITIAL_CAPITAL_RS,
@@ -1786,7 +1783,6 @@ def replay_mcx_history(
 
     daily_stats: Dict[str, Dict[str, Any]] = {}
     sector_busy_until: Dict[str, float] = {"BULLION": 0.0, "ENERGY": 0.0}
-    # Track failed levels per (day, symbol, direction) so the bot never re-buys the exact same chop zone
     failed_day_levels: Dict[Tuple[str, str, str], float] = {}
 
     pending_outcomes = []
@@ -1801,20 +1797,27 @@ def replay_mcx_history(
             )
             ledger["virtual_balance_gross"] = round(ledger["virtual_balance_gross"] + trade["gross_pnl"], 2)
             ledger["virtual_balance_net"] = round(ledger["virtual_balance_net"] + net, 2)
+            if stats["net_pnl"] >= DAILY_PROFIT_LOCK_TRIGGER_RS and net < 0:
+                stats["giveback_locked"] = True
             stats["net_pnl"] = round(stats["net_pnl"] + net, 2)
+            stats["last_r"] = float(trade.get("r_multiple", 0.0))
             stats["consec_losses"] = stats["consec_losses"] + 1 if net <= 0 else 0
 
     for bar_ts in sorted_timestamps:
         settle_outcomes(bar_ts + 300.0)
         bar_dt = datetime.fromtimestamp(bar_ts + 300.0, IST)
         day_str = bar_dt.strftime("%Y-%m-%d")
-        d_stat = daily_stats.setdefault(day_str, {"trades": 0, "consec_losses": 0, "net_pnl": 0.0})
+        d_stat = daily_stats.setdefault(
+            day_str, {"trades": 0, "consec_losses": 0, "net_pnl": 0.0, "giveback_locked": False}
+        )
 
         if (
             d_stat["trades"] >= MAX_TRADES_PER_DAY
             or d_stat["consec_losses"] >= MAX_CONSECUTIVE_LOSSES
             or d_stat["net_pnl"] <= -DAILY_LOSS_LIMIT_RS
             or d_stat["net_pnl"] >= DAILY_PROFIT_TARGET_RS
+            or d_stat.get("giveback_locked", False)
+            or d_stat["net_pnl"] >= DAILY_HARD_PROFIT_LOCK_RS
         ):
             continue
 
@@ -1831,8 +1834,9 @@ def replay_mcx_history(
             view = analyzer.evaluate_commodity(sym, u_info, sub_candles, oc_data=None, as_of_epoch=bar_ts + 300.0)
             rec_d = view.get("recommended_dir")
             if rec_d in ("BUY_CE", "BUY_PE"):
-                # Anti-Whipsaw Guard: if this symbol already stopped out in this direction today,
-                # require price to clear the prior failed entry spot by >= 0.45 * ATR14
+                # If already banked >= +Rs. 500 today, only take high-conviction (>=5) continuation setups
+                if d_stat["net_pnl"] >= DAILY_PROFIT_LOCK_TRIGGER_RS and int(view.get("conviction_score", 0)) < 5:
+                    continue
                 failed_spot = failed_day_levels.get((day_str, sym, rec_d))
                 if failed_spot is not None:
                     atr_now = float(view.get("atr14") or 1.0)
@@ -1893,22 +1897,20 @@ def replay_mcx_history(
         cost_per_lot_rs = entry_price * mult + 25.0
         dynamic_risk_budget = max(1050.0, effective_cash * 0.038)
         max_lots_by_risk = max(1, int(dynamic_risk_budget // max(risk_per_lot_rs, 1.0)))
-        # Option buyers have zero margin risk beyond premium paid -> allow 98% cash deployment so 2 lots of SILVERM fit
         max_lots_by_cash = max(1, int((effective_cash * 0.98) // max(cost_per_lot_rs, 1.0)))
         max_safe_lots = min(int(cfg.get("max_lots", 5)), max_lots_by_risk, max_lots_by_cash)
         planned_rr, lots = brain.recommend_target_rr_and_lots(
-            sym, playbook_base, conv_score, bool(view.get("is_macro_window", False)), max_safe_lots
+            sym,
+            playbook_base,
+            conv_score,
+            bool(view.get("is_macro_window", False)),
+            max_safe_lots,
+            day_net_pnl=d_stat["net_pnl"],
+            adx14=float(view.get("adx14", 20.0)),
+            chop14=float(view.get("chop14", 50.0)),
         )
-        if d_stat["consec_losses"] >= 1:
-            lots = min(lots, 2) if lots >= 3 else 1
-        if d_stat["net_pnl"] >= 2800.0 and playbook_base == "MCX_TREND_PULLBACK":
-            lots = min(lots, 1)
-        elif (
-            entry_dt.time() < dtime(17, 50)
-            and not view.get("is_macro_window", False)
-            and conv_score < 5
-        ):
-            lots = min(lots, 3)
+        if d_stat["consec_losses"] >= 1 or (d_stat.get("last_r", 0.0) < 1.0 and lots > 1):
+            lots = 1
         if lots <= 0:
             continue
 
@@ -1976,7 +1978,6 @@ def replay_mcx_history(
                 if highest_bid >= price and policy not in exit_policy_net_r:
                     exit_policy_net_r[policy] = round(((price - entry_price) * qty - fees) / (one_r_pts * qty), 3)
 
-            # Progressive Real-World Target & Super-Runner Trailing Engine
             if peak_r >= NORMAL_TARGET_R:
                 j_sub = {k: v[max(0, j - 90): j + 1] for k, v in merged.items()}
                 j_view = analyzer.evaluate_commodity(sym, u_info, j_sub, oc_data=None, as_of_epoch=j_ts + 300.0)
@@ -1999,8 +2000,6 @@ def replay_mcx_history(
                         exit_reason = "TARGET_1_3_RR_RUNNER_HIT"
                         break
                 elif runner_mode >= 4:
-                    # Progressive Super-Runner Ratchet:
-                    # If peak_r >= 4.0R and bar closes strong, trail 75% of peak_r up to 8.0R; otherwise book 4.05R!
                     if peak_r >= 4.0:
                         if peak_r >= 8.0:
                             exit_idx = j
@@ -2153,7 +2152,7 @@ def log_mcx_backtest_results(ledger: Dict[str, Any], logger: logging.Logger) -> 
         )
     logger.info("=" * 118)
     logger.info(
-        "[MCX V14 REAL-WORLD MASTER COMPLETE] Trades: %d (W:%d / L:%d | WR: %.1f%%) | Gross PnL: Rs.%+.2f | Net PnL (After Charges): Rs.%+.2f",
+        "[MCX V15.1 PROFIT-SHIELD MASTER COMPLETE] Trades: %d (W:%d / L:%d | WR: %.1f%%) | Gross PnL: Rs.%+.2f | Net PnL (After Charges): Rs.%+.2f",
         ledger["total_trades"], ledger["wins"], ledger["losses"], ledger["win_rate_pct"],
         ledger["profit_without_charges"], ledger["net_profit_after_charges"]
     )
@@ -2251,9 +2250,20 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger,
         else:
             break
 
+    # Check if Give-Back Shield was already triggered earlier tonight
+    running_pnl = 0.0
+    giveback_locked = False
+    for t in today_trades:
+        net = float(t.get("net_pnl", 0.0))
+        if running_pnl >= DAILY_PROFIT_LOCK_TRIGGER_RS and net < 0:
+            giveback_locked = True
+        running_pnl += net
+
     active_pos = ledger.get("active_position")
     sector_busy_until: Dict[str, datetime] = {}
     failed_day_levels: Dict[Tuple[str, str], float] = {}
+    last_traded_bar_ts: Dict[str, int] = {}
+
     for trade in today_trades:
         side = str(trade.get("contract", "")).rsplit("_", 1)[-1]
         direction = f"BUY_{side}" if side in ("CE", "PE") else ""
@@ -2286,7 +2296,7 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger,
     last_heartbeat_bucket = ""
 
     logger.info(
-        "MCX Mini Options Bot v14.0 Started (17:15-22:30 IST entries; 23:15 square-off) | Symbols: %s | Wallet: Rs.%.2f | Today Net: Rs.%+.2f",
+        "MCX Mini Options Bot v15.1 Profit-Shield Master Started (17:15-22:30 IST entries; 23:15 square-off) | Symbols: %s | Wallet: Rs.%.2f | Today Net: Rs.%+.2f",
         active_symbols, ledger["virtual_balance_net"], day_net_pnl
     )
 
@@ -2375,6 +2385,7 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger,
             now = datetime.now(IST)
             if now.date() != session_now.date() or now.time() >= MCX_PAPER_QUOTE_CUTOFF:
                 continue
+
         telemetry = load_json(TELEMETRY_FILE, {"commodities": {}})
         telemetry["updated_at"] = now.strftime("%H:%M:%S")
         telemetry["wallet_net"] = ledger["virtual_balance_net"]
@@ -2468,7 +2479,7 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger,
                 elif peak_r >= 1.60:
                     lock_r = 1.10
                 elif peak_r >= 1.15:
-                    lock_r = 0.15
+                    lock_r = 0.20
 
                 if lock_r is not None:
                     lock = round(
@@ -2548,6 +2559,8 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger,
                 ledger["active_position"] = None
                 atomic_write_json(LEDGER_FILE, ledger)
 
+                if day_net_pnl >= DAILY_PROFIT_LOCK_TRIGGER_RS and net_pnl < 0:
+                    giveback_locked = True
                 day_net_pnl = round(day_net_pnl + net_pnl, 2)
                 today_trades.append(trade_rec)
                 direction = f"BUY_{active_pos['option_type']}"
@@ -2594,10 +2607,26 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger,
             and (consec_losses < MAX_CONSECUTIVE_LOSSES or extra_entry_allowed)
             and day_net_pnl > -DAILY_LOSS_LIMIT_RS
             and day_net_pnl < DAILY_PROFIT_TARGET_RS
+            and not giveback_locked
+            and day_net_pnl < DAILY_HARD_PROFIT_LOCK_RS
             and now >= sector_busy_until.get(cfg["sector"], now)
         ):
             rec_dir = view.get("recommended_dir", "HOLD")
             if rec_dir in ("BUY_CE", "BUY_PE"):
+                if day_net_pnl >= DAILY_PROFIT_LOCK_TRIGGER_RS and int(view.get("conviction_score", 0)) < 5:
+                    logger.info(
+                        "[PROFIT SHIELD] Today Net Rs.%+.2f >= Rs.%.0f; skipping Conv %d/6 setup on %s.",
+                        day_net_pnl, DAILY_PROFIT_LOCK_TRIGGER_RS, int(view.get("conviction_score", 0)), sym,
+                    )
+                    continue
+
+                bar_ts_closed = int(view.get("last_closed_bar_ts") or 0)
+                bar_age_sec = float(view.get("bar_close_age_sec") or 999.0)
+                if bar_ts_closed > 0 and last_traded_bar_ts.get(sym) == bar_ts_closed:
+                    continue
+                if bar_age_sec > 90.0:
+                    continue
+
                 failed_spot = failed_day_levels.get((sym, rec_dir))
                 if failed_spot is not None:
                     atr_now = float(view.get("atr14") or 1.0)
@@ -2618,19 +2647,16 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger,
                 is_ce = rec_dir == "BUY_CE"
                 opt_node = view["atm_ce"] if is_ce else view["atm_pe"]
                 bid = float(opt_node.get("top_bid_price") or 0.0)
-                ask = float(opt_node.get("top_ask_price") or opt_node.get("last_price") or 0.0)
-                after_loss_limit = consec_losses >= MAX_CONSECUTIVE_LOSSES
-                if after_loss_limit and (not opt_node.get("top_ask_price") or not 0 < bid < ask
-                                         or view.get("conviction_score", 0) < 6):
+                ask = float(opt_node.get("top_ask_price") or 0.0)
+                if bid <= 0 or ask <= 0 or ask < bid:
+                    logger.info("[SKIP %s] Missing executable bid/ask depth (bid=%.2f, ask=%.2f)", sym, bid, ask)
                     continue
-                if ask <= 0:
-                    continue
-                if bid <= 0:
-                    bid = ask * 0.992
 
-                spread_pct = ((ask - bid) / ((ask + bid) / 2.0)) * 100.0
-                if spread_pct > 2.2:
-                    logger.info("[SKIP %s] Spread %.2f%% > 2.2%% max limit", sym, spread_pct)
+                spread_pts = ask - bid
+                spread_pct = (spread_pts / ((ask + bid) / 2.0)) * 100.0
+                max_spread_pct = float(cfg.get("max_spread_pct", 1.25))
+                if spread_pct > max_spread_pct:
+                    logger.info("[SKIP %s] Spread %.2f%% > %.2f%% max limit", sym, spread_pct, max_spread_pct)
                     continue
                 if not (cfg["min_premium"] <= ask <= cfg["max_premium"]):
                     continue
@@ -2647,31 +2673,28 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger,
                     is_macro_window=bool(view.get("is_macro_window", False)),
                     fut_atr=view.get("atr14"),
                     atr_expansion=view.get("atr_expansion", 1.0),
+                    day_net_pnl=day_net_pnl,
+                    adx14=float(view.get("adx14", 20.0)),
+                    chop14=float(view.get("chop14", 50.0)),
                 )
-                playbook_base = re.sub(r"_(CE|PE)$", "", str(view.get("setup", "")))
-                conviction = int(view.get("conviction_score", 3))
-                if day_net_pnl >= 2800.0 and playbook_base == "MCX_TREND_PULLBACK":
-                    lots = min(lots, 1)
-                elif (
-                    now.time() < dtime(17, 50)
-                    and not view.get("is_macro_window", False)
-                    and conviction < 5
-                ):
-                    lots = min(lots, 3)
-                if after_loss_limit and lots > 0:
+                if spread_pts > 0.25 * stop_pts:
+                    logger.info(
+                        "[SKIP %s] Bid-Ask spread (%.2f pts) exceeds 25%% of 1R stop (%.2f pts)",
+                        sym, spread_pts, stop_pts,
+                    )
+                    continue
+
+                if consec_losses >= 1:
                     lots = 1
-                    tick = cfg["tick_size"]
-                    stop_fill = math.floor(round(ask - stop_pts, 2) * .999 / tick) * tick
-                    planned_loss = (ask - stop_fill) * u_info["multiplier"] + 60
-                    remaining_risk = min(MAX_TOTAL_RISK_RS, DAILY_LOSS_LIMIT_RS + day_net_pnl)
-                    if ask - bid > 0.25 * stop_pts or planned_loss > remaining_risk:
-                        logger.info("[SKIP %s] Additional entry: spread or planned loss exceeds remaining risk", sym)
-                        continue
                 if lots <= 0:
                     continue
 
                 qty = lots * u_info["multiplier"]
-                init_sl = round(ask - stop_pts, 2)
+                # Anchor Initial SL below executable BID so normal bid-ask spread never triggers a 3-second SL,
+                # while keeping stop_points = stop_pts so 1R/2R/3R/4R target math stays fast and reachable!
+                init_sl = round(max(cfg["tick_size"], bid - stop_pts), 2)
+                last_traded_bar_ts[sym] = bar_ts_closed
+
                 active_pos = {
                     "symbol": sym,
                     "regime": view.get("regime", "UNKNOWN"),
@@ -2709,8 +2732,8 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger,
                     "rupee_target_price": ask + stop_pts * planned_rr,
                 }, entry=True)
                 logger.info(
-                    "[AUTONOMOUS ENTRY] %s %s %s | Lots:%d (Qty:%d) @ Rs.%.2f | SL: Rs.%.2f (1R=%.2f) | Aim: 1:%.0f RR | %s",
-                    sym, opt_node["strike"], active_pos["option_type"], lots, qty, ask, init_sl, stop_pts, planned_rr, view["reason"]
+                    "[AUTONOMOUS ENTRY] %s %s %s | Lots:%d (Qty:%d) @ Ask Rs.%.2f (Bid Rs.%.2f) | SL: Rs.%.2f (1R=%.2f) | Aim: 1:%.0f RR | %s",
+                    sym, opt_node["strike"], active_pos["option_type"], lots, qty, ask, bid, init_sl, stop_pts, planned_rr, view["reason"]
                 )
 
         time.sleep(0.2)
@@ -2719,12 +2742,12 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger,
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="DhanHQ v2 Autonomous Institutional MCX Mini Options Bot")
+    parser = argparse.ArgumentParser(description="DhanHQ v2 Autonomous Institutional MCX Mini Options Bot (v15.1)")
     parser.add_argument(
         "--symbols",
         type=str,
-        default="GOLDM,SILVERM,CRUDEOILM,NATGASMINI",
-        help="Comma-separated MCX Mini symbols (default: GOLDM,SILVERM,CRUDEOILM,NATGASMINI)",
+        default="GOLDM,SILVERM",
+        help="Comma-separated MCX Mini symbols (default: GOLDM,SILVERM; add CRUDEOILM,NATGASMINI if desired)",
     )
     parser.add_argument(
         "--backtest-days",

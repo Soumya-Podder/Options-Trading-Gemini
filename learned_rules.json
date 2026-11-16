@@ -334,7 +334,7 @@
     "avg_win_r": 0.0,
     "avg_loss_r": 1.37,
     "expectancy_r": -1.37,
-    "intraday_losses": 1,
+    "intraday_losses": 0,
     "last_lot_loss": true,
     "muted_on_day": "",
     "last_trade_day": "2026-11-13"
