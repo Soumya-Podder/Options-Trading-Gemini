@@ -17,6 +17,7 @@ Combines V14's proven +Rs. 12,190+ Bullion signal engine with V15's Live Paper E
      - Prevents mid-bar spike chasing and duplicate entries on the same 5m candle.
 """
 
+from stock_option_signals import evaluate_expert_scalp_exit
 import os
 import sys
 import csv
@@ -2562,6 +2563,14 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger,
             ledger["active_position"] = active_pos
             atomic_write_json(LEDGER_FILE, ledger)
 
+            if not exit_reason and float(node.get('top_bid_quantity') or 0) >= qty:
+                scalp_exit, scalp_reason = evaluate_expert_scalp_exit(
+                    entry_price=entry_p, current_bid=curr_bid,
+                    peak_bid=active_pos['highest_bid'], lot_size=qty, elapsed_sec=elapsed_min*60,
+                    trade_mode=active_pos.get('trade_mode', 'STANDARD'),
+                    net_pnl=open_net, peak_net_pnl=peak_net)
+                if scalp_exit:
+                    exit_reason = scalp_reason
             if exit_reason:
                 gross_pnl, net_pnl, charges = mcx_exit_pnl(active_pos, curr_bid)
                 r_mult = round(net_pnl / max(one_r_pts * qty, 1.0), 2)

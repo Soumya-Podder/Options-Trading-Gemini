@@ -3175,6 +3175,14 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     modeled_net = (modeled_fill - active_pos["entry_price"]) * active_pos["qty"] - fees
                     peak_net = max(active_pos.get("peak_net_pnl", modeled_net), modeled_net)
                     active_pos["peak_net_pnl"] = peak_net
+                    scalp_exit, scalp_reason = evaluate_expert_scalp_exit(
+                        entry_price=active_pos['entry_price'], current_bid=executable_bid,
+                        peak_bid=executable_bid, lot_size=active_pos['qty'], elapsed_sec=elapsed_min*60,
+                        trade_mode=active_pos.get('trade_mode', 'STANDARD'),
+                        net_pnl=modeled_net, peak_net_pnl=peak_net)
+                    if not exit_reason and scalp_exit:
+                        exit_reason = scalp_reason
+                        curr_ltp = executable_bid
                     feedback = (active_pos.get("market_structure") or {}).get("adaptive_feedback")
                     learned_floor = learned_profit_floor(feedback, peak_net, position_risk * active_pos["qty"])
                     if not exit_reason and learned_floor is not None and peak_net >= 480.0 and modeled_net <= learned_floor:

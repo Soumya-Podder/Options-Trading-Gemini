@@ -884,6 +884,7 @@ def evaluate_expert_scalp_exit(
     book_pressure_ratio: float = 1.0,
     nearest_wall_dist_pct: float = 99.0,
     trade_mode: str = "STANDARD",
+    net_pnl=None, peak_net_pnl=None,
 ) -> tuple[bool, str]:
     """
     Expert Scalper Exit Brain for Stock Options & Index Options:
@@ -897,6 +898,11 @@ def evaluate_expert_scalp_exit(
 
     unrealized_rs = (current_bid - entry_price) * lot_size
     peak_rs = max(unrealized_rs, (peak_bid - entry_price) * lot_size)
+    if net_pnl is not None:
+        unrealized_rs = float(net_pnl)
+        peak_rs = max(unrealized_rs, float(peak_net_pnl if peak_net_pnl is not None else net_pnl))
+    if not all(isfinite(v) for v in (unrealized_rs, peak_rs, book_pressure_ratio)) or unrealized_rs <= 0:
+        return False, ""
     giveback_rs = peak_rs - unrealized_rs
 
     # 1. Precision Reversal Scalp instant harvest at Rs.1,650 - Rs.2,000+ when order flow slows

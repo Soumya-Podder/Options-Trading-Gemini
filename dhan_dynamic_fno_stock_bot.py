@@ -1678,6 +1678,15 @@ def paper_exit(pos, quote, now, cfg, urgent_only=False, combined_net=None):
     elif elapsed >= (max(cfg.max_hold_bars_5m*5,cfg.runner_max_hold_minutes)*60
                      if cfg.staged_profit and pos.get('partial_booked') else cfg.max_hold_bars_5m*300):
         reason = "TIME_EXIT"
+    if reason is None:
+        scalp_exit, scalp_reason = evaluate_expert_scalp_exit(
+            entry_price=pos['entry_price'], current_bid=executable,
+            peak_bid=pos['peak_executable_vwap'], lot_size=pos['qty'], elapsed_sec=elapsed,
+            book_pressure_ratio=option_order_book_pressure(quote)['book_pressure_ratio'],
+            trade_mode=pos.get('trade_mode', 'STANDARD'),
+            net_pnl=net, peak_net_pnl=pos['peak_net_pnl'])
+        if scalp_exit:
+            reason = scalp_reason
     if reason:
         pos['exit_diagnostics']={'trigger_reason':reason,'trigger_epoch':stamp,'best_bid':best_bid,
             'executable_vwap':executable,'modeled_fill':price,'net_at_exit':net,
