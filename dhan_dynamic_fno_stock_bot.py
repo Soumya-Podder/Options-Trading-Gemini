@@ -979,6 +979,9 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
     smc = sig.get('smc_quality') or {}
     if not smc.get('smc_passed'):
         return reject('SMC quality: ' + ', '.join(smc.get('reasons', ['Missing closed-bar breakout evidence'])))
+    liquidity = sig.get('mtf_liquidity') or {}
+    if not liquidity.get('liquidity_clear'):
+        return reject('MTF liquidity: ' + ', '.join(liquidity.get('reasons', ['Missing multi-timeframe evidence'])))
     if sig['opt_type']!=membership['opt_type']:
         return reject('Trade confirmation conflicts with scanner direction')
     sig['scanner_membership']=membership
@@ -989,6 +992,20 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
     spot_ltp = float(current.get("last_price", 0) or 0)
     if spot_ltp <= 0:
         return reject("Current underlying quote unavailable")
+    # Recheck mapped, already-formed zones at the executable decision's spot.
+    opposing = 'SUPPLY' if sig['opt_type'] == 'CE' else 'DEMAND'
+    sign = 1 if sig['opt_type'] == 'CE' else -1
+    for timeframe, zones in liquidity.get('zones', {}).items():
+        if timeframe == '5m':
+            continue
+        for zone in zones:
+            if zone['role'] != opposing:
+                continue
+            edge = zone['lower'] if sign == 1 else zone['upper']
+            distance = sign * (edge - spot_ltp) / spot_ltp * 100
+            if 0 <= distance < .35 or zone['lower'] <= spot_ltp <= zone['upper']:
+                return reject(f'Live price within opposing {timeframe} liquidity zone')
+    liquidity['entry_spot'] = spot_ltp
     # Require the current underlying quote to hold confirmation, without chasing.
     direction = 1 if sig["opt_type"] == "CE" else -1
     confirmation=sig.get('breakout_confirmation') or {}
@@ -1362,7 +1379,7 @@ def close_paper_position(ledger, pos, price, reason, now):
     # These fields are observations, not relaxed entry criteria or new signals.
     rec['entry_diagnostics']={k:pos[k] for k in (
         'signal_timestamp','conf_close','conf_high','conf_low','atr_5m','day_change_pct','scanner_membership','entry_price_validation','entry_structure_check',
-        'cash_price_pressure','estimated_order_flow','order_flow_min_net_rr','volume_confirmation','volume_context','breakout_continuation','smc_quality','bsm_quality',
+        'cash_price_pressure','estimated_order_flow','order_flow_min_net_rr','volume_confirmation','volume_context','breakout_continuation','smc_quality','bsm_quality','mtf_liquidity',
         'ema10_15m','ema10_15m_slope','higher_timeframe_aligned',
         'vwap','bid','opt_ltp','spread_pct','quoted_spread_points',
         'spread_fraction_of_initial_risk','bid_room_to_initial_stop',
@@ -2178,7 +2195,7 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current
             sig = evaluate_stock_setup(prefix, ts+300, cfg.min_day_change_pct, cfg.ema_period,
                                         enable_opening_trend=cfg.enable_opening_trend,confirm_window_sec=cfg.confirm_window_sec,
                                         require_breakout=cfg.require_confirmed_breakout)
-            if sig and (sig.get('smc_quality') or {}).get('smc_passed'):
+            if sig and (sig.get('smc_quality') or {}).get('smc_passed') and (sig.get('mtf_liquidity') or {}).get('liquidity_clear'):
                 signals[(ts+300, sec)] = sig
     ledger = {"mode": "BACKTEST", "initial_capital": cfg.initial_capital, "trades": [],
               "entry_configuration":{"opening_trend":cfg.enable_opening_trend,"extend_rupee_target":cfg.extend_rupee_target,

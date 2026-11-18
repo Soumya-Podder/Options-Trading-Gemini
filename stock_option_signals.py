@@ -18,6 +18,135 @@ IST = timezone(timedelta(hours=5, minutes=30))
 BAR_SECONDS = 300
 
 
+def _resample_candles(candles_5m, group_size):
+    """Return complete, contiguous groups anchored to each 09:15 IST session."""
+    if not isinstance(group_size, int) or group_size < 1:
+        raise ValueError('Invalid candle group size')
+    groups = {}
+    for bar in candles_5m:
+        stamp = float(bar['timestamp'])
+        local = datetime.fromtimestamp(stamp, IST)
+        anchor = local.replace(hour=9, minute=15, second=0, microsecond=0).timestamp()
+        offset = stamp - anchor
+        if 0 <= offset < 375 * 60 and offset % 300 == 0:
+            start = anchor + int(offset // (group_size * 300)) * group_size * 300
+            groups.setdefault(start, {})[stamp] = bar
+    result = []
+    for start, items in sorted(groups.items()):
+        timestamps = [start + i * 300 for i in range(group_size)]
+        if sorted(items) != timestamps:
+            continue
+        chunk = [items[t] for t in timestamps]
+        result.append({'timestamp': start, 'end_timestamp': start + group_size * 300,
+                       'open': float(chunk[0]['open']), 'close': float(chunk[-1]['close']),
+                       'high': max(float(b['high']) for b in chunk),
+                       'low': min(float(b['low']) for b in chunk),
+                       'volume': sum(float(b['volume']) for b in chunk)})
+    return result
+
+
+def analyze_mtf_liquidity_and_reversal_zones(candles_5m, direction, spot=0.0):
+    """Map observable price zones, not trader identity or a certain reversal."""
+    failure = {'available': False, 'liquidity_clear': False, 'liquidity_sweep_bounce': False,
+               'reversal_risk': 'UNKNOWN', 'zones': {}, 'reasons': ['INVALID_OR_INSUFFICIENT_ZONE_HISTORY']}
+    try:
+        if direction not in ('CE', 'PE') or len(candles_5m) < 15:
+            return failure
+        bars = sorted(candles_5m, key=lambda b: b['timestamp'])
+        if len({b['timestamp'] for b in bars}) != len(bars):
+            return failure
+        for bar in bars:
+            if (not all(isfinite(float(bar[k])) for k in ('timestamp', 'open', 'high', 'low', 'close', 'volume'))
+                    or not 0 < bar['low'] <= min(bar['open'], bar['close']) <= max(bar['open'], bar['close']) <= bar['high']
+                    or bar['volume'] < 0):
+                return failure
+        latest = bars[-1]
+        spot = float(spot or latest['close'])
+        if not isfinite(spot) or spot <= 0:
+            return failure
+        zones, availability = {}, {}
+        for name, size in (('5m', 1), ('15m', 3), ('1h', 12), ('4h', 48)):
+            history = [b for b in _resample_candles(bars, size)
+                       if b['end_timestamp'] <= latest['timestamp']][-150:]
+            availability[name] = len(history) >= 3
+            if len(history) < 3:
+                zones[name] = []
+                continue
+            found = []
+            for bullish in (True, False):
+                field = 'low' if bullish else 'high'
+                role = 'DEMAND' if bullish else 'SUPPLY'
+                pivots = [i for i in range(1, len(history)-1)
+                          if (history[i][field] <= min(history[i-1][field], history[i+1][field]) if bullish
+                              else history[i][field] >= max(history[i-1][field], history[i+1][field]))]
+                # Retain active swing extremes and clusters of distinct pivots.
+                for pos, i in enumerate(pivots):
+                    level = history[i][field]
+                    touches = 1 + sum(abs(history[j][field]-level) / level <= .0025 and j-i >= 2 for j in pivots[pos+1:])
+                    invalidated = any((b['close'] < level if bullish else b['close'] > level) for b in history[i+1:])
+                    if invalidated:
+                        continue
+                    found.append({'kind': 'EQUAL_LOWS' if bullish and touches >= 2 else 'EQUAL_HIGHS' if touches >= 2 else 'SWING',
+                                  'role': role, 'lower': level, 'upper': level,
+                                  'formed_epoch': history[i+1]['end_timestamp'], 'touches': touches})
+            # Last opposing candle followed by a directional, volume-backed displacement.
+            for i in range(1, len(history)):
+                impulse, origin = history[i], history[i-1]
+                width = impulse['high'] - impulse['low']
+                baseline = history[max(0, i-10):i]
+                mean_volume = sum(b['volume'] for b in baseline) / len(baseline)
+                if width <= 0 or abs(impulse['close']-impulse['open']) / width < .6 or mean_volume <= 0 or impulse['volume'] < 1.5 * mean_volume:
+                    continue
+                demand = impulse['close'] > impulse['open'] and origin['close'] < origin['open'] and impulse['close'] > origin['high']
+                supply = impulse['close'] < impulse['open'] and origin['close'] > origin['open'] and impulse['close'] < origin['low']
+                if not (demand or supply):
+                    continue
+                mitigated = any(b['low'] <= origin['high'] and b['high'] >= origin['low'] for b in history[i+1:])
+                invalidated = any((b['close'] < origin['low'] if demand else b['close'] > origin['high']) for b in history[i+1:])
+                if not mitigated and not invalidated:
+                    found.append({'kind': 'UNMITIGATED_ORDER_BLOCK', 'role': 'DEMAND' if demand else 'SUPPLY',
+                                  'lower': origin['low'], 'upper': origin['high'],
+                                  'formed_epoch': impulse['end_timestamp'], 'touches': 1})
+            zones[name] = found[-40:]
+        sign = 1 if direction == 'CE' else -1
+        opposing = 'SUPPLY' if sign == 1 else 'DEMAND'
+        candidates, sweeps = [], []
+        width = latest['high'] - latest['low']
+        reference = bars[-12:-1]
+        mean_volume = sum(b['volume'] for b in reference) / len(reference)
+        rvol = latest['volume'] / mean_volume if mean_volume > 0 else 0
+        for name, mapped in zones.items():
+            if name == '5m':
+                continue
+            for zone in mapped:
+                if zone['role'] == opposing:
+                    edge = zone['lower'] if sign == 1 else zone['upper']
+                    distance = sign * (edge - spot)
+                    inside = zone['lower'] <= spot <= zone['upper']
+                    if distance >= 0 or inside:
+                        candidates.append({**zone, 'timeframe': name, 'distance_pct': max(0, distance) / spot * 100})
+                elif name in ('15m', '1h') and width > 0:
+                    level = zone['lower'] if sign == 1 else zone['upper']
+                    sweep = latest['low'] < level < latest['close'] if sign == 1 else latest['high'] > level > latest['close']
+                    wick = ((min(latest['open'], latest['close']) - latest['low']) if sign == 1
+                            else latest['high'] - max(latest['open'], latest['close'])) / width
+                    strength = ((latest['close']-latest['low']) if sign == 1 else latest['high']-latest['close']) / width
+                    if sweep and wick >= .42 and strength >= .7 and rvol >= 1.5 and sign*(latest['close']-latest['open']) > 0:
+                        sweeps.append({**zone, 'timeframe': name, 'trigger_level': level, 'rvol': rvol})
+        nearest = min(candidates, key=lambda z: z['distance_pct']) if candidates else None
+        blocking = nearest if nearest and nearest['distance_pct'] < .35 else None
+        available = availability.get('15m', False)
+        return {'available': available, 'timeframe_availability': availability,
+                'liquidity_clear': available and blocking is None,
+                'reversal_risk': 'HIGH' if blocking else 'LOW' if available else 'UNKNOWN',
+                'liquidity_sweep_bounce': available and bool(sweeps) and blocking is None,
+                'sweep_evidence': sweeps, 'nearest_opposing_zone_pct': nearest['distance_pct'] if nearest else None,
+                'blocking_zone': blocking, 'zones': zones,
+                'reasons': ['OPPOSING_HIGHER_TIMEFRAME_ZONE_WITHIN_0_35_PERCENT'] if blocking else [] if available else ['INSUFFICIENT_COMPLETED_15M_HISTORY']}
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return failure
+
+
 def compute_bsm_greeks_for_stock_option(spot, strike, premium, option_type,
                                        days_to_expiry, rate=.065):
     """Invert a European BSM price; report the model assumption and daily theta."""
@@ -449,6 +578,9 @@ def evaluate_stock_setup(
     regime=opening_trend([{**b,'ts':b['timestamp']} for b in bars]) if enable_opening_trend else None
     if atr_5m <= 0 or atr_15m <= 0:
         return reject('Unavailable ATR')
+    liquidity = analyze_mtf_liquidity_and_reversal_zones(
+        bars, 'CE' if day_change_pct > 0 else 'PE', latest['close'])
+    sweep_entry = liquidity['liquidity_sweep_bounce']
     total_volume = sum(bar["volume"] for bar in today_bars)
     if total_volume <= 0:
         return reject('No current-session volume for VWAP')
@@ -458,7 +590,7 @@ def evaluate_stock_setup(
     if average_volume <= 0 or latest["volume"] <= 0:
         return reject('Confirmation volume below 1.2 times recent average')
     candle_range = latest["high"] - latest["low"]
-    if candle_range <= 0 or abs(latest["close"] - latest["open"]) < 0.45 * candle_range:
+    if candle_range <= 0 or abs(latest["close"] - latest["open"]) < (0.25 if sweep_entry else 0.45) * candle_range:
         return reject('Weak confirmation candle body')
 
     body_fraction=abs(latest['close']-latest['open'])/candle_range
@@ -502,15 +634,15 @@ def evaluate_stock_setup(
                         and latest['volume']>=1.2*early_baseline and volume_rising
                         and (buy_continuation if day_change_pct>0 else sell_continuation)):
                     adjusted_volume=True;baseline=early_baseline;adjusted_required=1.2*baseline
-        if not adjusted_volume and not prepared:
+        if not adjusted_volume and not prepared and not sweep_entry:
             return reject('Confirmation volume below 1.2 times recent average')
     bullish = (day_change_pct >= min_day_change_pct
-               and (volume_rising or buy_continuation)
+               and (volume_rising or buy_continuation or sweep_entry)
                and latest["close"] > previous_ema
                and latest["close"] > vwap
                and latest["close"] > max(previous["close"], latest["open"]))
     bearish = (day_change_pct <= -min_day_change_pct
-               and (volume_rising or sell_continuation)
+               and (volume_rising or sell_continuation or sweep_entry)
                and latest["close"] < previous_ema
                and latest["close"] < vwap
                and latest["close"] < min(previous["close"], latest["open"]))
@@ -529,7 +661,16 @@ def evaluate_stock_setup(
     if flow_direction and flow_direction != (1 if bullish else -1):
         return reject("Completed candle order flow opposes the setup")
     breakout_confirmation=None
-    if require_breakout:
+    if sweep_entry:
+        if candle_range > 2 * atr_5m:
+            return reject('Liquidity sweep candle exceeds two ATR')
+        evidence = liquidity['sweep_evidence'][0]
+        breakout_confirmation = {'trigger_level': evidence['trigger_level'],
+            'entry_path': 'LIQUIDITY_SWEEP_RECLAIM', 'closed_candle': True,
+            'buffer': max(.05, .05*atr_5m), 'relative_volume': relative_volume,
+            'body_fraction': body_ratio, 'close_strength': close_strength,
+            'profile': 'HIGHER_TIMEFRAME_SWEEP_RECLAIM'}
+    elif require_breakout:
         if (bullish and ema_value<=previous_ema) or (bearish and ema_value>=previous_ema):
             return reject('Breakout disagrees with the completed EMA slope')
         if (len(opening_range)!=3 or latest['timestamp']<session_open+900
@@ -621,19 +762,36 @@ def evaluate_stock_setup(
     smc = evaluate_smc_institutional_breakout(
         bars, 'CE' if bullish else 'PE',
         max(b['high'] for b in previous_bars), min(b['low'] for b in previous_bars))
+    if sweep_entry:
+        smc = {'smc_passed': True, 'smc_score': 85, 'reasons': [],
+               'qualification': 'CONFIRMED_MTF_SWEEP_RECLAIM', 'sweep_evidence': liquidity['sweep_evidence']}
+        signal_quality = min(100, signal_quality + 15)
+        rally_strength = 'LIQUIDITY_SWEEP_RECLAIM'
+    suffix = '_CE' if bullish else '_PE'
+    if sweep_entry:
+        setup_name = 'LIQUIDITY_SWEEP_RECLAIM' + suffix
+    elif breakout_confirmation:
+        setup_name = 'CONFIRMED_BREAKOUT' + suffix
+    elif continuation:
+        setup_name = 'BREAKOUT_CONTINUATION' + suffix
+    elif regime:
+        setup_name = regime['setup'] + suffix
+    else:
+        setup_name = 'BULLISH_MOMENTUM_CONFIRMATION' if bullish else 'BEARISH_MOMENTUM_CONFIRMATION'
     return {
         'smc_quality': smc,
+        'mtf_liquidity': liquidity,
         "rally_classification": rally_strength,
         "buying_pressure_score": buying_pressure_score,
         "is_retracement_retest": retest_active,
         'breakout_confirmation':breakout_confirmation,
         "opt_type": "CE" if bullish else "PE",
-        "scanner": ('CONFIRMED_BREAKOUT_CE' if bullish else 'CONFIRMED_BREAKOUT_PE') if breakout_confirmation else (("BREAKOUT_CONTINUATION_CE" if bullish else "BREAKOUT_CONTINUATION_PE") if continuation else ((regime['setup']+('_CE' if bullish else '_PE')) if regime else ("BULLISH_MOMENTUM_CONFIRMATION" if bullish else "BEARISH_MOMENTUM_CONFIRMATION"))),
+        "scanner": setup_name,
         "breakout_continuation": {"trigger_level":level,"threshold_cross":threshold_cross,
                                   "local_consolidation_break":local_break,
                                   "distance_atr":sign*(latest['close']-level)/atr_5m} if continuation else None,
         "cash_price_pressure":"BULLISH_CONFIRMED" if bullish else "BEARISH_CONFIRMED",
-        "volume_confirmation":("CONSOLIDATION_VOLUME_EXPANSION" if prepared else "OPENING_SPIKE_ADJUSTED_STRONG_CONTINUATION" if adjusted_volume else
+        "volume_confirmation":("MTF_LIQUIDITY_SWEEP_VOLUME" if sweep_entry else "CONSOLIDATION_VOLUME_EXPANSION" if prepared else "OPENING_SPIKE_ADJUSTED_STRONG_CONTINUATION" if adjusted_volume else
                                "RISING_CANDLE_VOLUME" if volume_rising else "ABOVE_AVERAGE_STRONG_PRICE_CONTINUATION"),
         "volume_context":{"confirmation_volume":latest['volume'],"regular_average":average_volume,
                           "regular_ratio":latest['volume']/average_volume,

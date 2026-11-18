@@ -293,6 +293,11 @@ def index_contract_quality(view, node, strike, option_type):
         is_expiry_day=float(view.get('days_to_expiry', 99)) < 1)
     mtf = structure.get('mtf_sr') or {}
     reasons = list(greek['greek_veto_reasons'])
+    matrix = (view.get('oi_analysis') or {}).get('multi_horizon_matrix') or {}
+    horizon_decision = matrix.get('directions', {}).get(option_type, {})
+    reasons.extend(horizon_decision.get('veto_reasons', []))
+    if matrix and not 0 <= time.time() - float(matrix.get('snapshot_epoch', 0)) <= 30:
+        reasons.append('MULTI_HORIZON_SNAPSHOT_STALE')
     walls = []
     if not structure.get('ready') or not mtf:
         reasons.append('MTF_STRUCTURE_NOT_READY')
@@ -327,6 +332,14 @@ def index_contract_quality(view, node, strike, option_type):
         'regime': (view.get('regime_info') or {}).get('regime', 'UNKNOWN'),
     }
     return {'allowed': not reasons, 'score': score, 'components': components, 'greeks': greek, 'factors': factors,
+            'multi_horizon': {'decision': horizon_decision,
+                              'snapshot_epoch': matrix.get('snapshot_epoch'),
+                              'horizons': {k: {field: v.get(field) for field in (
+                                  'available', 'reference_epoch', 'reference_age_seconds',
+                                  'ce_oi_change', 'pe_oi_change', 'dominant_writer',
+                                  'ce_iv_change', 'pe_iv_change', 'ce_delta_change', 'pe_delta_change',
+                                  'atm_ce', 'atm_pe')}
+                                           for k, v in matrix.get('horizons', {}).items()}},
             'opposing_walls': walls, 'failure_factors': reasons,
             'score_basis': 'Rule-based decision evidence, not a profit probability'}
 

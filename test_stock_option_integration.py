@@ -508,7 +508,7 @@ class IntegrationTests(unittest.TestCase):
             for advance,allowed in ((-0.21,False),(-0.2,True),(0,True),(0.7,True),(1.4,True),(1.41,False)):
                 with self.subTest(side=side,advance=advance):
                     client.fetch_batch_ohlc.return_value={"NSE_EQ":{"1":{"last_price":100+direction*advance,"received_epoch":bot.time.time()}}}
-                    sig={"smc_quality":{"smc_passed":True},"opt_type":side,"conf_close":100,"atr_5m":2}
+                    sig={"smc_quality":{"smc_passed":True},"mtf_liquidity":{"liquidity_clear":True},"opt_type":side,"conf_close":100,"atr_5m":2}
                     with patch.object(bot,"evaluate_stock_setup",return_value=sig), \
                          patch.object(bot,"scanx_stock_membership",return_value={'allowed':True,'opt_type':side,'previous_close':100}), \
                          patch.object(bot.DynamicStockOptionsUniverse,"resolve_atm_option",return_value={"opt_security_id":"9"}):
@@ -525,7 +525,7 @@ class IntegrationTests(unittest.TestCase):
                 client.fetch_batch_ohlc.side_effect=[
                     {'NSE_EQ':{'1':{'last_price':100,'received_epoch':bot.time.time()}}},
                     {'NSE_EQ':{'1':{'last_price':final_price,'received_epoch':bot.time.time()-age}}}]
-                sig={'smc_quality':{'smc_passed':True},'opt_type':'CE','conf_close':100,'atr_5m':2}
+                sig={'smc_quality':{'smc_passed':True},'mtf_liquidity':{'liquidity_clear':True},'opt_type':'CE','conf_close':100,'atr_5m':2}
                 reasons=[]
                 with patch.object(bot,'evaluate_stock_setup',return_value=sig), \
                      patch.object(bot,'scanx_stock_membership',return_value={'allowed':True,'opt_type':'CE','previous_close':100}), \
@@ -543,7 +543,7 @@ class IntegrationTests(unittest.TestCase):
                     client.fetch_intraday_candles.return_value={'timestamp':[1]}
                     client.fetch_batch_ohlc.return_value={'NSE_EQ':{'1':{
                         'last_price':100+direction*advance,'received_epoch':bot.time.time()}}}
-                    sig={'smc_quality':{'smc_passed':True},'opt_type':side,'conf_close':100,'conf_low':98,'conf_high':102,'atr_5m':2,
+                    sig={'smc_quality':{'smc_passed':True},'mtf_liquidity':{'liquidity_clear':True},'opt_type':side,'conf_close':100,'conf_low':98,'conf_high':102,'atr_5m':2,
                          'signal_timestamp':bot.time.time()-310,
                          'breakout_confirmation':{'trigger_level':100-direction,'buffer':0.1,
                             'closed_candle':True,'entry_path':'DIRECT_BREAKOUT'}}
@@ -563,7 +563,7 @@ class IntegrationTests(unittest.TestCase):
                 client.fetch_intraday_candles.return_value={'timestamp':[1]}
                 client.fetch_batch_ohlc.return_value={'NSE_EQ':{'1':{
                     'last_price':100,'received_epoch':bot.time.time()}}}
-                sig={'smc_quality':{'smc_passed':True},'opt_type':'CE','conf_close':100,'atr_5m':2,'signal_timestamp':bot.time.time()-310}
+                sig={'smc_quality':{'smc_passed':True},'mtf_liquidity':{'liquidity_clear':True},'opt_type':'CE','conf_close':100,'atr_5m':2,'signal_timestamp':bot.time.time()-310}
                 def resolve(*args):
                     if failure=='expiry':sig['signal_timestamp']=bot.time.time()-300-self.cfg.confirm_window_sec-1
                     return {'opt_security_id':'9'}

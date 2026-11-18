@@ -4,6 +4,87 @@ from collections import deque
 from datetime import datetime, timedelta, timezone
 
 IST=timezone(timedelta(hours=5,minutes=30))
+HORIZON_WINDOWS_SEC = {'5m': 300, '10m': 600, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400}
+
+
+def compute_multi_horizon_oi_iv_delta_matrix(tracker, now_ts, spot, current_nodes, current_info=None, option_type=None):
+    """Compare identical current ATM +/-3 contracts with genuinely aged anchors."""
+    atm = math.floor(spot / tracker.strike_step + .5) * tracker.strike_step
+    keys = [(atm + i * tracker.strike_step, side) for i in range(-3, 4) for side in ('ce', 'pe')]
+    history = list(tracker.history)
+    snapshots = {}
+    for name, seconds in HORIZON_WINDOWS_SEC.items():
+        eligible = [s for s in history if seconds <= now_ts - s['time'] <= seconds + 90]
+        snapshots[name] = eligible[-1] if eligible else None
+    snapshots['morning'] = getattr(tracker, 'morning_snapshot', None)
+    horizons = {}
+    for name, anchor in snapshots.items():
+        row = {'available': False, 'reason': 'Required horizon anchor unavailable',
+               'reference_epoch': anchor['time'] if anchor else None,
+               'reference_age_seconds': round(now_ts - anchor['time'], 2) if anchor else None,
+               'ce_oi_change': None, 'pe_oi_change': None, 'net_put_minus_call_writing': None,
+               'dominant_writer': 'UNAVAILABLE', 'contracts': []}
+        if not anchor or anchor['time'] >= now_ts:
+            horizons[name] = row
+            continue
+        for key in keys:
+            current, prior = current_nodes.get(key), anchor['nodes'].get(key)
+            if not current or not prior:
+                continue
+            if current['security_id'] and prior['security_id'] and current['security_id'] != prior['security_id']:
+                continue
+            iv_valid = current['iv'] > 0 and prior['iv'] > 0
+            delta_valid = 0 < abs(current['delta']) <= 1 and 0 < abs(prior['delta']) <= 1
+            row['contracts'].append({
+                'strike': key[0], 'side': key[1], 'security_id': current['security_id'],
+                'oi_change': current['oi'] - prior['oi'],
+                'premium_change': current['price'] - prior['price'],
+                'volume_change': (current['volume'] - prior['volume']) if current['volume'] >= prior['volume'] else None,
+                'iv_change': current['iv'] - prior['iv'] if iv_valid else None,
+                'delta_change': current['delta'] - prior['delta'] if delta_valid else None,
+                'absolute_delta_change': abs(current['delta']) - abs(prior['delta']) if delta_valid else None,
+            })
+        row['matched_contracts'] = len(row['contracts'])
+        if len(row['contracts']) != len(keys):
+            row['reason'] = 'Incomplete identical-contract coverage'
+            horizons[name] = row
+            continue
+        ce = sum(r['oi_change'] for r in row['contracts'] if r['side'] == 'ce')
+        pe = sum(r['oi_change'] for r in row['contracts'] if r['side'] == 'pe')
+        net = pe - ce
+        dominant = 'BALANCED'
+        if abs(net) > .18 * max(abs(ce), abs(pe), 1):
+            dominant = 'PUT_SIDE_RELATIVE_BUILDUP' if net > 0 else 'CALL_SIDE_RELATIVE_BUILDUP'
+        row.update(available=True, reason='Identical-contract horizon ready',
+                   ce_oi_change=ce, pe_oi_change=pe, net_put_minus_call_writing=net, dominant_writer=dominant)
+        for side in ('ce', 'pe'):
+            contracts = [r for r in row['contracts'] if r['side'] == side]
+            row[side + '_writing_evidence_oi'] = sum(max(0, r['oi_change']) for r in contracts if r['premium_change'] < 0)
+            row[side + '_covering_evidence_oi'] = sum(max(0, -r['oi_change']) for r in contracts if r['premium_change'] > 0)
+            for field in ('iv_change', 'delta_change', 'absolute_delta_change'):
+                values = [r[field] for r in contracts if r[field] is not None]
+                row[side + '_' + field] = sum(values) / len(values) if len(values) == len(contracts) else None
+            atm_row = next(r for r in contracts if r['strike'] == atm)
+            row['atm_' + side] = {field: atm_row[field] for field in ('iv_change', 'delta_change', 'absolute_delta_change')}
+        horizons[name] = row
+    bullish = sum(r['available'] and r['dominant_writer'] == 'PUT_SIDE_RELATIVE_BUILDUP' for r in horizons.values())
+    bearish = sum(r['available'] and r['dominant_writer'] == 'CALL_SIDE_RELATIVE_BUILDUP' for r in horizons.values())
+    short = [horizons[k] for k in ('5m', '10m', '15m')]
+    long = [horizons[k] for k in ('30m', '1h', '4h', 'morning')]
+    decisions = {}
+    for side, opposing in (('CE', 'CALL_SIDE_RELATIVE_BUILDUP'), ('PE', 'PUT_SIDE_RELATIVE_BUILDUP')):
+        blocked = (sum(r['available'] and r['dominant_writer'] == opposing for r in short) >= 2
+                   and sum(r['available'] and r['dominant_writer'] == opposing for r in long) >= 2)
+        decisions[side] = {'multi_horizon_supported': not blocked,
+                           'alignment_score': 30 if blocked else 65,
+                           'veto_reasons': ['PERSISTENT_OPPOSING_MULTI_HORIZON_OI'] if blocked else []}
+    result = {'horizons': horizons, 'atm_strike': atm, 'strike_radius': 3, 'snapshot_epoch': now_ts,
+              'bullish_horizons': bullish, 'bearish_horizons': bearish, 'directions': decisions,
+              'morning_basis': 'First observed snapshot in this date/expiry session',
+              'interpretation': 'OI differences measure net positioning; price/OI pairs are writing or covering evidence, not participant identification'}
+    if option_type in decisions:
+        result.update(decisions[option_type])
+    return result
 
 
 def validate_option_greeks_and_iv(node, option_type, *, iv_change_5m=None,
@@ -54,7 +135,7 @@ class NiftyOITracker:
     def __init__(self, strike_step=50):
         if strike_step <= 0:raise ValueError("Strike step must be positive")
         self.strike_step=strike_step
-        self.history=deque(maxlen=200)
+        self.history=deque(maxlen=400)
         self.context=None
 
     def assess(self,chain,spot,now,expiry=None):
@@ -163,9 +244,13 @@ class NiftyOITracker:
                 info[side+'_oi_change_5m']=sum(n['oi'] for n in current)-reference[side+'_oi']
                 info[side+'_premium_change_5m']=sum(n['price'] for n in current)-reference[side+'_prem']
         if self.history and now<=self.history[-1]['time']:
-            self.history.clear();reference=None;info.update(ready=False,reason='Non-increasing snapshot time')
+            self.history.clear();self.morning_snapshot=None;reference=None;info.update(ready=False,reason='Non-increasing snapshot time')
         snap_obj = {'time':now,'spot':spot,'nodes':nodes}
         if getattr(self, "morning_snapshot", None) is None and nodes:
             self.morning_snapshot = snap_obj
-        self.history.append(snap_obj)
+        info['multi_horizon_matrix'] = compute_multi_horizon_oi_iv_delta_matrix(self, now, spot, nodes, info)
+        if self.history and int(now // 60) == int(self.history[-1]['time'] // 60):
+            self.history[-1] = snap_obj
+        else:
+            self.history.append(snap_obj)
         return reference,info
