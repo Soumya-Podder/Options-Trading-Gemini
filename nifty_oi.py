@@ -6,6 +6,50 @@ from datetime import datetime, timedelta, timezone
 IST=timezone(timedelta(hours=5,minutes=30))
 
 
+def validate_option_greeks_and_iv(node, option_type, *, iv_change_5m=None,
+                                  expected_spot_move=0.0, is_expiry_day=False):
+    """Check the selected contract, using daily theta over a 20-minute horizon."""
+    result = {'greek_supported': False, 'greek_score': 0.0, 'greek_veto_reasons': []}
+    try:
+        greeks = node['greeks']
+        delta = float(greeks['delta'])
+        gamma = float(greeks['gamma'])
+        theta = float(greeks['theta'])
+        iv = float(node['implied_volatility'])
+        premium = float(node['top_ask_price'])
+        move = abs(float(expected_spot_move))
+        values = (delta, gamma, theta, iv, premium, move)
+        if not all(math.isfinite(v) for v in values) or option_type not in ('CE', 'PE'):
+            raise ValueError('Invalid contract data')
+        if not 0 < abs(delta) <= 1 or gamma <= 0 or iv <= 0 or premium <= 0:
+            raise ValueError('Invalid Greeks or premium')
+        if (delta > 0) != (option_type == 'CE'):
+            raise ValueError('Delta sign conflicts with contract')
+        if iv_change_5m is not None and not math.isfinite(float(iv_change_5m)):
+            raise ValueError('Invalid matched IV change')
+    except (KeyError, TypeError, ValueError, OverflowError):
+        result['greek_veto_reasons'] = ['MISSING_OR_INVALID_SELECTED_CONTRACT_GREEKS']
+        return result
+    reasons = []
+    if abs(delta) < .38:
+        reasons.append('LOW_DELTA')
+    # Compare premium points with premium points, rather than daily theta / delta.
+    decay = max(0.0, -theta) * 20.0 / 375.0
+    directional_gain = abs(delta) * move + .5 * gamma * move * move
+    drag = decay / max(directional_gain, .01)
+    if drag > (.45 if is_expiry_day else .65):
+        reasons.append('HIGH_HOLDING_THETA_DRAG')
+    if iv_change_5m is not None and float(iv_change_5m) < -.65:
+        reasons.append('MATCHED_CONTRACT_IV_CRUSH')
+    score = max(0.0, 100.0 - 25.0 * len(reasons))
+    result.update(greek_supported=not reasons, greek_score=score,
+                  delta=delta, gamma=gamma, theta=theta, iv=iv,
+                  iv_change_5m=iv_change_5m, iv_trend_available=iv_change_5m is not None,
+                  holding_minutes=20, modeled_decay_points=round(decay, 4),
+                  theta_to_directional_gain=round(drag, 4), greek_veto_reasons=reasons)
+    return result
+
+
 class NiftyOITracker:
     def __init__(self, strike_step=50):
         if strike_step <= 0:raise ValueError("Strike step must be positive")
@@ -83,6 +127,7 @@ class NiftyOITracker:
             rows.append({'strike':strike,'side':side,'oi':node['oi'],
                          'volume':node.get('volume',0.0),'iv':node.get('iv',0.0),
                          'iv_change_5m':round(node.get('iv',0.0)-old.get('iv',0.0),3) if same else 0.0,
+                         'iv_comparison_available':bool(same and node['iv'] > 0 and old['iv'] > 0),
                          'delta':node.get('delta',0.0),'gamma':node.get('gamma',0.0),'theta':node.get('theta',0.0),
                          'change_since_morning':morn_oi_diff,
                          'change_from_previous_day':node['oi']-node['previous_oi'] if node['previous_oi'] is not None else None,

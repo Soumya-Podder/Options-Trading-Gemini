@@ -205,7 +205,7 @@ class BacktestCoverageTests(unittest.TestCase):
         with patch.object(bot,"datetime",End),patch.object(bot,"DhanStockOptionsClient",return_value=client), \
              patch.object(bot.DynamicStockOptionsUniverse,"load_universe",return_value={"1":{"symbol":"TEST","eq_security_id":"1","fno_lot_size":100}}), \
              patch.object(bot,'scanx_stock_membership',return_value={'allowed':scanner_allowed,'reason':'Session volume not above previous full-session volume'}), \
-             patch.object(bot,"evaluate_stock_setup",return_value={"opt_type":"CE","scanner":"TEST"}),patch.object(bot,"atomic_write_json"):
+             patch.object(bot,"evaluate_stock_setup",return_value={"opt_type":"CE","scanner":"TEST","smc_quality":{"smc_passed":True}}),patch.object(bot,"atomic_write_json"):
             ledger=bot.run_stock_options_historical_backtest(5,0,bot.DynamicStrategyConfig({},argparse.Namespace()),MagicMock())
             if partial:
                 client.fetch_rolling_stock_option.assert_called_once()

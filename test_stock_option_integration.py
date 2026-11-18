@@ -297,7 +297,9 @@ class IntegrationTests(unittest.TestCase):
         cfg=bot.DynamicStrategyConfig({'STOCK_OPT_MIN_DAYS_TO_EXPIRY':'4'},argparse.Namespace())
         self.assertEqual(cfg.min_days_to_expiry,0)
         sig={**self.sig,'expiry':self.now.date().isoformat()}
-        self.assertIsNotNone(bot.qualify_quote(sig,self.quote,self.cfg,60000,self.now.timestamp()))
+        # Isolate expiry eligibility; model validity has dedicated quality tests.
+        with patch.object(bot, 'compute_bsm_greeks_for_stock_option', return_value={'greek_supported':True}):
+            self.assertIsNotNone(bot.qualify_quote(sig,self.quote,self.cfg,60000,self.now.timestamp()))
         sig['expiry']=(self.now-timedelta(days=1)).date().isoformat()
         reasons=[]
         self.assertIsNone(bot.qualify_quote(sig,self.quote,self.cfg,60000,self.now.timestamp(),reasons))
@@ -506,7 +508,7 @@ class IntegrationTests(unittest.TestCase):
             for advance,allowed in ((-0.21,False),(-0.2,True),(0,True),(0.7,True),(1.4,True),(1.41,False)):
                 with self.subTest(side=side,advance=advance):
                     client.fetch_batch_ohlc.return_value={"NSE_EQ":{"1":{"last_price":100+direction*advance,"received_epoch":bot.time.time()}}}
-                    sig={"opt_type":side,"conf_close":100,"atr_5m":2}
+                    sig={"smc_quality":{"smc_passed":True},"opt_type":side,"conf_close":100,"atr_5m":2}
                     with patch.object(bot,"evaluate_stock_setup",return_value=sig), \
                          patch.object(bot,"scanx_stock_membership",return_value={'allowed':True,'opt_type':side,'previous_close':100}), \
                          patch.object(bot.DynamicStockOptionsUniverse,"resolve_atm_option",return_value={"opt_security_id":"9"}):
@@ -523,7 +525,7 @@ class IntegrationTests(unittest.TestCase):
                 client.fetch_batch_ohlc.side_effect=[
                     {'NSE_EQ':{'1':{'last_price':100,'received_epoch':bot.time.time()}}},
                     {'NSE_EQ':{'1':{'last_price':final_price,'received_epoch':bot.time.time()-age}}}]
-                sig={'opt_type':'CE','conf_close':100,'atr_5m':2}
+                sig={'smc_quality':{'smc_passed':True},'opt_type':'CE','conf_close':100,'atr_5m':2}
                 reasons=[]
                 with patch.object(bot,'evaluate_stock_setup',return_value=sig), \
                      patch.object(bot,'scanx_stock_membership',return_value={'allowed':True,'opt_type':'CE','previous_close':100}), \
@@ -541,7 +543,7 @@ class IntegrationTests(unittest.TestCase):
                     client.fetch_intraday_candles.return_value={'timestamp':[1]}
                     client.fetch_batch_ohlc.return_value={'NSE_EQ':{'1':{
                         'last_price':100+direction*advance,'received_epoch':bot.time.time()}}}
-                    sig={'opt_type':side,'conf_close':100,'conf_low':98,'conf_high':102,'atr_5m':2,
+                    sig={'smc_quality':{'smc_passed':True},'opt_type':side,'conf_close':100,'conf_low':98,'conf_high':102,'atr_5m':2,
                          'signal_timestamp':bot.time.time()-310,
                          'breakout_confirmation':{'trigger_level':100-direction,'buffer':0.1,
                             'closed_candle':True,'entry_path':'DIRECT_BREAKOUT'}}
@@ -561,7 +563,7 @@ class IntegrationTests(unittest.TestCase):
                 client.fetch_intraday_candles.return_value={'timestamp':[1]}
                 client.fetch_batch_ohlc.return_value={'NSE_EQ':{'1':{
                     'last_price':100,'received_epoch':bot.time.time()}}}
-                sig={'opt_type':'CE','conf_close':100,'atr_5m':2,'signal_timestamp':bot.time.time()-310}
+                sig={'smc_quality':{'smc_passed':True},'opt_type':'CE','conf_close':100,'atr_5m':2,'signal_timestamp':bot.time.time()-310}
                 def resolve(*args):
                     if failure=='expiry':sig['signal_timestamp']=bot.time.time()-300-self.cfg.confirm_window_sec-1
                     return {'opt_security_id':'9'}
@@ -580,7 +582,7 @@ class IntegrationTests(unittest.TestCase):
             "STOCK_OPT_MIN_NET_RR":"1.2", "STOCK_OPT_RUPEE_TARGET":"2000",
             "STOCK_OPT_RUPEE_MAX_RISK":"1000", "STOCK_OPT_MAX_LOTS":"3"}, argparse.Namespace())
         self.now = datetime(2026, 10, 22, 11, 0, 10, tzinfo=bot.IST)
-        self.sig = {"symbol": "TEST", "lot_size": 500, "signal_timestamp": self.now.timestamp()-310,
+        self.sig = {"symbol": "TEST", "lot_size": 500, "spot_ltp":1000, "strike":1000, "signal_timestamp": self.now.timestamp()-310,
                     "delta": 0.6, "theta": -1, "gamma": 0.01, "iv": 20,
                     "iv_range_low": 15, "iv_range_high": 30, "opt_type": "CE",
                     "greeks_timestamp": self.now.timestamp(), "expiry": "2026-11-26", "atr_5m": 20}
@@ -643,7 +645,7 @@ class IntegrationTests(unittest.TestCase):
 
     def test_strong_mover_spread_and_iv_still_require_depth_and_risk(self):
         cfg=bot.DynamicStrategyConfig({"STOCK_OPT_RUPEE_MAX_RISK":"1000"},argparse.Namespace())
-        sig={**self.sig,"lot_size":100,"day_change_pct":-6,"opt_type":"PE","delta":-0.6,"iv":27.75}
+        sig={**self.sig,"spot_ltp":1200,"strike":1200,"lot_size":100,"day_change_pct":-6,"opt_type":"PE","delta":-0.6,"iv":27.75}
         quote=copy.deepcopy(self.quote);quote['depth']['buy'][0]['price']=96
         reasons=[]
         self.assertIsNone(bot.qualify_quote(sig,quote,cfg,60000,self.now.timestamp(),reasons))

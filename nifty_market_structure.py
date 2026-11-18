@@ -95,18 +95,26 @@ def compute_multi_timeframe_sr_and_bounces(bars, today, spot, buffer=6.0):
     mtf_15m_levels = []
     ltf_5m_levels = []
     try:
-        # 1. 4-Hour (45 x 5m bars per half-session/4H block)
-        if len(bars) >= 30:
-            chunk = 36
-            for start in range(0, len(bars) - 6, chunk):
-                seg = bars[start:start + chunk]
-                if len(seg) >= 6:
-                    htf_4h_levels.append(round(max(b["high"] for b in seg), 2))
-                    htf_4h_levels.append(round(min(b["low"] for b in seg), 2))
-        # 2. 15-Minute Swings (3 x 5m bars per 15m candle)
+        def completed_groups(minutes):
+            groups = {}
+            for bar in bars:
+                local = datetime.fromtimestamp(bar['ts'], IST)
+                anchor = local.replace(hour=9, minute=15, second=0, microsecond=0).timestamp()
+                offset = int(bar['ts'] - anchor)
+                if 0 <= offset < 375 * 60:
+                    start = anchor + offset // (minutes * 60) * minutes * 60
+                    groups.setdefault(start, {})[bar['ts']] = bar
+            expected = minutes // 5
+            return [list(group.values()) for start, group in sorted(groups.items())
+                    if len(group) == expected
+                    and sorted(group) == [start + i * 300 for i in range(expected)]]
+
+        for seg in completed_groups(240):
+            htf_4h_levels.extend((round(max(b['high'] for b in seg), 2),
+                                   round(min(b['low'] for b in seg), 2)))
+        # Complete, session-aligned fifteen-minute bars.
         bars_15m = []
-        for idx in range(0, len(bars) - 2, 3):
-            grp = bars[idx:idx + 3]
+        for grp in completed_groups(15):
             bars_15m.append({"high": max(b["high"] for b in grp), "low": min(b["low"] for b in grp), "close": grp[-1]["close"]})
         for i in range(1, len(bars_15m) - 1):
             if bars_15m[i]["high"] >= max(bars_15m[i - 1]["high"], bars_15m[i + 1]["high"]):

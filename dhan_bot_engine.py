@@ -48,9 +48,9 @@ import requests
 from stock_option_policy import underwater_exit_reason
 
 from telegram_notifier import TelegramNotifier, TelegramCallFeed
-from nifty_market_structure import apply_nifty_level_entry
+from nifty_market_structure import apply_nifty_level_entry, assess_nifty_structure
 from index_option_replay import replay_option_trade, ReplayDataError, fixed_contract_bars
-from nifty_oi import NiftyOITracker, IST
+from nifty_oi import NiftyOITracker, IST, validate_option_greeks_and_iv
 
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -277,6 +277,58 @@ def index_entry_signal(brain, view, losses, now, cooldown_until, channel_call=No
         view['entry_decision'] = {'action': 'HOLD', 'reason': 'Validated negative setup feedback; temporary pause', 'rule': sig}
         return 'HOLD', None
     return action, sig
+
+
+def index_contract_quality(view, node, strike, option_type):
+    """Apply the same selected-contract and opposing-wall checks to every entry."""
+    structure = view.get('market_structure') or {}
+    side = option_type.lower()
+    matched = next((r for r in (view.get('oi_analysis') or {}).get('nearby_strikes', [])
+                    if r.get('strike') == strike and r.get('side') == side
+                    and r.get('change_over_5m') is not None
+                    and r.get('iv_comparison_available', True)), None)
+    greek = validate_option_greeks_and_iv(
+        node, option_type, iv_change_5m=matched.get('iv_change_5m') if matched else None,
+        expected_spot_move=abs(float(view.get('d_spot_5m') or 0)),
+        is_expiry_day=float(view.get('days_to_expiry', 99)) < 1)
+    mtf = structure.get('mtf_sr') or {}
+    reasons = list(greek['greek_veto_reasons'])
+    walls = []
+    if not structure.get('ready') or not mtf:
+        reasons.append('MTF_STRUCTURE_NOT_READY')
+    else:
+        sign = 1 if option_type == 'CE' else -1
+        role = 'STRONG_RESISTANCE' if sign == 1 else 'STRONG_SUPPORT'
+        higher_levels = mtf.get('htf_4h_levels', []) + mtf.get('mtf_15m_levels', [])
+        for zone in mtf.get('multi_bounce_zones', []):
+            level = float(zone['level'])
+            distance = sign * (level - float(view['spot']))
+            if (zone.get('touches', 0) >= 2 and zone.get('role') == role
+                    and any(abs(level - float(v)) <= 6 for v in higher_levels)
+                    and 0 <= distance <= (12 if view['index'] == 'NIFTY' else 35)):
+                walls.append({**zone, 'distance_points': round(distance, 2)})
+        if walls:
+            reasons.append('OPPOSING_MULTI_TIMEFRAME_WALL')
+    components = {
+        'greeks': greek['greek_score'],
+        'structure': 100.0 if structure.get('ready') and not walls else 0.0,
+        'option_flow': (100.0 if matched and (matched.get('premium_change_over_5m') or 0) > 0 else 0.0),
+        'regime': 100.0 if (view.get('regime_info') or {}).get('regime') else 0.0,
+    }
+    score = round(.4 * components['greeks'] + .25 * components['structure']
+                  + .2 * components['option_flow'] + .15 * components['regime'], 2)
+    if score < 55:
+        reasons.append('TRADE_QUALITY_BELOW_55')
+    factors = {
+        'delta_band': 'RESPONSIVE' if abs(greek.get('delta', 0)) >= .48 else 'MODERATE',
+        'iv_trend': ('UNKNOWN' if matched is None else 'FALLING' if matched.get('iv_change_5m', 0) < 0 else 'STABLE_OR_RISING'),
+        'theta_load': 'HIGH' if greek.get('theta_to_directional_gain', 0) > .3 else 'LOW',
+        'structure': structure.get('setup') or 'CHANNEL_OR_OTHER',
+        'regime': (view.get('regime_info') or {}).get('regime', 'UNKNOWN'),
+    }
+    return {'allowed': not reasons, 'score': score, 'components': components, 'greeks': greek, 'factors': factors,
+            'opposing_walls': walls, 'failure_factors': reasons,
+            'score_basis': 'Rule-based decision evidence, not a profit probability'}
 
 
 def channel_entry_lots(native_lots, wallet, entry_price, lot_size, bid_qty, ask_qty, losses, last_lot_loss):
@@ -1810,8 +1862,18 @@ class SelfLearningBrain:
         return 1
 
     def learn_from_trade(
-        self, day_str: str, sig: str, state_vec: List[float], action_idx: int, r_mult: float, lots: int = 1
+        self, day_str: str, sig: str, state_vec: List[float], action_idx: int, r_mult: float, lots: int = 1, trade_quality=None
     ) -> None:
+        if trade_quality:
+            for name, value in trade_quality.get('factors', {}).items():
+                key = f'{action_idx}|{name}|{value}'
+                stats = self.brain.setdefault('quality_factor_outcomes', {}).setdefault(
+                    key, {'trades': 0, 'wins': 0, 'net_r_sum': 0.0, 'days': []})
+                stats['trades'] += 1
+                stats['wins'] += int(r_mult > 0)
+                stats['net_r_sum'] = round(stats['net_r_sum'] + r_mult, 6)
+                if day_str not in stats['days']:
+                    stats['days'].append(day_str)
         if r_mult <= -0.70:
             self.recent_losing_states.append(("BUY_CE" if action_idx == 1 else "BUY_PE", state_vec))
 
@@ -2139,7 +2201,9 @@ def record_closed_trade(
     if ledger["avg_losing_value_rs"] > 0:
         ledger["win_to_loss_ratio"] = round(ledger["avg_winning_value_rs"] / ledger["avg_losing_value_rs"], 2)
 
-    brain.learn_from_trade(day_str, sig, state_vec, 1 if opt_type == "CE" else 2, learning_r, lots=lots)
+    quality = (market_structure or {}).get('trade_quality')
+    learning_options = {'trade_quality': quality} if quality else {}
+    brain.learn_from_trade(day_str, sig, state_vec, 1 if opt_type == "CE" else 2, learning_r, lots=lots, **learning_options)
     atomic_write_json(ledger_path, ledger)
     return gross_pnl
 
@@ -2826,6 +2890,8 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
     last_structure_log = None
     last_entry_audit = None
     structure_candles = None
+    sensex_structure = None
+    sensex_structure_received = 0.0
     last_oi_log = 0.0
     # Enabled by default in PAPER mode so GrowX and Tradewithsac early morning calls are always captured
     call_feed = (
@@ -2944,12 +3010,32 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         enable_price_levels=True, enable_breakout_entries=True
                     )
                     view["market_structure"] = structure
+                    structure['assessed_epoch'] = time.time()
                     log_key = (structure.get("confirmation_close"), structure["reason"])
                     if log_key != last_structure_log:
                         logger.info("[NIFTY STRUCTURE] %s", json.dumps(structure, sort_keys=True))
                         last_structure_log = log_key
                 else:
                     view["market_structure"] = active_pos.get("market_structure", {})
+            if idx_name == 'SENSEX' and active_pos is None:
+                if time.time() - sensex_structure_received >= 30:
+                    candles = dhan.fetch_index_spot_candles(
+                        idx_name, (now - timedelta(days=10)).strftime('%Y-%m-%d 00:00:00'),
+                        now.strftime('%Y-%m-%d %H:%M:%S'))
+                    sensex_structure = assess_nifty_structure(
+                        candles, raw_oc.get('oc', {}), time.time(), view['spot'], 'BUY_CE', buffer=10)
+                    sensex_structure['assessed_epoch'] = time.time()
+                    sensex_structure_received = time.time()
+                view['market_structure'] = dict(sensex_structure or {})
+            if idx_name == 'NIFTY' and direct_call_quote and active_pos is None:
+                # Priority contract polling must still refresh the underlying level evidence.
+                structure_candles = dhan.fetch_nifty_structure_candles(
+                    (now - timedelta(days=10)).strftime('%Y-%m-%d 00:00:00'),
+                    now.strftime('%Y-%m-%d %H:%M:%S'))
+                view['market_structure'] = assess_nifty_structure(
+                    structure_candles, raw_oc.get('oc', {}), time.time(),
+                    view.get('spot', 0), 'BUY_CE', enable_breakout_entries=True)
+                view['market_structure']['assessed_epoch'] = time.time()
             now = datetime.now()
             if call_feed:
                 pending = call_feed.pending_snapshot(time.time(), ledger.get('telegram_call_entries', []))
@@ -3448,6 +3534,25 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             if initial_risk <= 0 or bid <= init_sl:
                                 logger.info("[PAPER NIFTY RETRY] Entry rejected by remaining risk or stop distance")
                                 continue
+                        quality = index_contract_quality(view, {**entry_node, 'top_ask_price': entry_p}, strike_k, opt_type)
+                        outcomes = brain.brain.get('quality_factor_outcomes', {})
+                        adjustment = 0
+                        for name, value in quality['factors'].items():
+                            stats = outcomes.get(f'{1 if is_ce else 2}|{name}|{value}', {})
+                            if stats.get('trades', 0) >= 12 and len(stats.get('days', [])) >= 5:
+                                mean_r = stats['net_r_sum'] / stats['trades']
+                                adjustment += -5 if mean_r < -.2 else 2 if mean_r > .2 else 0
+                        quality['learned_adjustment'] = max(-15, min(10, adjustment))
+                        quality['score'] = max(0, min(100, quality['score'] + quality['learned_adjustment']))
+                        if quality['score'] < 55 and 'TRADE_QUALITY_BELOW_55' not in quality['failure_factors']:
+                            quality['failure_factors'].append('LEARNED_TRADE_QUALITY_BELOW_55')
+                            quality['allowed'] = False
+                        view.setdefault('market_structure', {})['trade_quality'] = quality
+                        if not quality['allowed']:
+                            reason = 'GREEK_OR_MTF_WALL_VETO: ' + ', '.join(quality['failure_factors'])
+                            view['entry_decision'] = {'action': 'HOLD', 'reason': reason, 'rule': sig}
+                            logger.info('[INDEX QUALITY HOLD] %s | %s', idx_name, reason)
+                            continue
                         view.setdefault("market_structure", {})["entry_quote"] = {
                             "received_epoch": chain_received_epoch, "decision_epoch": time.time(),
                             "modeled_entry_price_basis": "EXECUTABLE_ASK_PLUS_0.1PCT_SLIPPAGE",

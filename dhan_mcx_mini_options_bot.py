@@ -947,6 +947,39 @@ class DhanMCXClient:
         return {"last_price": last_spot, "oc": oc}
 
 
+def mcx_trade_quality_and_session_gate(candles, quote, adx_val, chop_val, now_dt=None):
+    """Use closed futures bars; quote=None is reserved for historical signal replay."""
+    try:
+        if len(candles) < 12:
+            return False, 'INSUFFICIENT_CLOSED_CANDLES'
+        closes = [float(b['close']) for b in candles[-11:]]
+        last = candles[-1]
+        o, h, low, c = (float(last[k]) for k in ('open', 'high', 'low', 'close'))
+        if not all(math.isfinite(v) for v in closes + [o, h, low, c, float(adx_val), float(chop_val)]):
+            return False, 'INVALID_QUALITY_DATA'
+        if min(closes) <= 0 or not 0 < low <= min(o, c) <= max(o, c) <= h or h <= low:
+            return False, 'INVALID_QUALITY_CANDLE'
+        travel = sum(abs(b - a) for a, b in zip(closes, closes[1:]))
+        er = abs(closes[-1] - closes[0]) / travel if travel else 0.0
+        if er < .28:
+            return False, f'MCX_LOW_EFFICIENCY_CHOP({er:.3f})'
+        if abs(c - o) / (h - low) < .48:
+            return False, 'MCX_WEAK_WICK_CANDLE'
+        if now_dt is not None:
+            hm = now_dt.astimezone(IST).hour * 60 + now_dt.astimezone(IST).minute
+            if 705 <= hm <= 945 and (adx_val < 30 or er < .38):
+                return False, 'MCX_MIDDAY_LULL_FILTER'
+        if quote is not None:
+            bid, ask = float(quote['top_bid_price']), float(quote['top_ask_price'])
+            if not all(math.isfinite(v) for v in (bid, ask)) or not 0 < bid <= ask:
+                return False, 'MCX_MISSING_EXECUTABLE_DEPTH'
+            if (ask - bid) / ((ask + bid) / 2) > .018:
+                return False, 'MCX_EXCESSIVE_SPREAD'
+        return True, f'MCX_QUALITY_OK(ER={er:.3f})'
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False, 'INVALID_QUALITY_DATA'
+
+
 class MCXMultiRegimeAnalyzer:
     """
     Combines the Two Proven Positive-Expectancy Playbooks:
@@ -1390,10 +1423,25 @@ class MCXMultiRegimeAnalyzer:
                 priority_score, rec_dir, setup_tag, b_msg = playbook_signals[0]
                 reason = f"[{active_regime}] {setup_tag} | ADX={adx14:.1f} CHOP={chop14:.1f} | {b_msg}"
 
+        quality_ok, quality_reason = True, 'NO_ENTRY_CANDIDATE'
+        if rec_dir in ('BUY_CE', 'BUY_PE'):
+            quality_bars = [dict(open=opens[i], high=highs[i], low=lows[i], close=closes[i])
+                            for i in signal_idx[-12:]]
+            quality_quote = (atm_ce if rec_dir == 'BUY_CE' else atm_pe) if oc_data is not None else None
+            quality_ok, quality_reason = mcx_trade_quality_and_session_gate(
+                quality_bars, quality_quote, adx14, chop14, dt_ist)
+            if quality_ok and 'BREAKOUT' in setup_tag:
+                level = swing_high_prev10 if rec_dir == 'BUY_CE' else swing_low_prev10
+                sign = 1 if rec_dir == 'BUY_CE' else -1
+                if any(sign * (closes[i] - level) <= 0 for i in (prev_idx, c_idx)):
+                    quality_ok, quality_reason = False, 'MCX_NEEDS_TWO_CLOSED_BREAKOUT_BARS'
+            if not quality_ok:
+                rec_dir, reason = 'HOLD', quality_reason
         supertrend, supertrend_direction = mcx_supertrend(h_series, l_series, c_series, self._atr_series(h_series, l_series, c_series, 10))
         return {
             "symbol": sym,
             "sector": cfg["sector"],
+            "trade_quality": {"allowed": quality_ok, "reason": quality_reason},
             "regime": active_regime,
             "supertrend": supertrend,
             "supertrend_direction": supertrend_direction,
@@ -2549,6 +2597,7 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger,
                     "setup": active_pos["setup"],
                     "learning_risk_rs": one_r_pts * qty,
                     "exit_diagnostics": {"peak_net_pnl": peak_net},
+                    "trade_quality": active_pos.get('trade_quality'),
                 }
                 ledger["virtual_balance_gross"] = round(ledger["virtual_balance_gross"] + gross_pnl, 2)
                 ledger["virtual_balance_net"] = round(ledger["virtual_balance_net"] + net_pnl, 2)
@@ -2712,6 +2761,7 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger,
                     "planned_target_r": planned_rr,
                     "entry_context": entry_context,
                     "exit_policy": exit_policy,
+                    "trade_quality": view.get('trade_quality'),
                     "adaptive_feedback": adaptive_setup_feedback(
                         {"symbol": sym, "setup": view["setup"]}, ledger["trades"], now.timestamp()
                     ),

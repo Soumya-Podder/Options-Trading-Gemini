@@ -16,6 +16,107 @@ from market_regime import opening_trend
 
 IST = timezone(timedelta(hours=5, minutes=30))
 BAR_SECONDS = 300
+
+
+def compute_bsm_greeks_for_stock_option(spot, strike, premium, option_type,
+                                       days_to_expiry, rate=.065):
+    """Invert a European BSM price; report the model assumption and daily theta."""
+    import math
+    failure = {'greek_supported': False, 'reasons': ['INVALID_BSM_INPUT_OR_PRICE']}
+    try:
+        spot, strike, premium, days_to_expiry, rate = map(float, (spot, strike, premium, days_to_expiry, rate))
+        if not all(math.isfinite(v) for v in (spot, strike, premium, days_to_expiry, rate)):
+            return failure
+        if min(spot, strike, premium, days_to_expiry) <= 0 or option_type not in ('CE', 'PE'):
+            return failure
+        t = days_to_expiry / 365.0
+        root = math.sqrt(t)
+        discount = math.exp(-rate * t)
+        cdf = lambda x: .5 * (1 + math.erf(x / math.sqrt(2)))
+
+        def price(vol):
+            d1 = (math.log(spot / strike) + (rate + .5 * vol * vol) * t) / (vol * root)
+            d2 = d1 - vol * root
+            if option_type == 'CE':
+                return spot * cdf(d1) - strike * discount * cdf(d2)
+            return strike * discount * cdf(-d2) - spot * cdf(-d1)
+
+        low, high = .00001, 5.0
+        if not price(low) < premium < price(high):
+            return failure
+        for _ in range(80):
+            middle = (low + high) / 2
+            if price(middle) < premium:
+                low = middle
+            else:
+                high = middle
+        iv = (low + high) / 2
+        d1 = (math.log(spot / strike) + (rate + .5 * iv * iv) * t) / (iv * root)
+        d2 = d1 - iv * root
+        pdf = math.exp(-.5 * d1 * d1) / math.sqrt(2 * math.pi)
+        delta = cdf(d1) if option_type == 'CE' else cdf(d1) - 1
+        gamma = pdf / (spot * iv * root)
+        theta = -spot * pdf * iv / (2 * root)
+        theta += (-rate * strike * discount * cdf(d2) if option_type == 'CE'
+                  else rate * strike * discount * cdf(-d2))
+        theta /= 365
+        drag = max(0.0, -theta) / max(.01, abs(delta) * spot * .005)
+        reasons = []
+        if abs(delta) < .38:
+            reasons.append('STOCK_OPT_LOW_DELTA')
+        if iv > .85:
+            reasons.append('STOCK_OPT_EXTREME_IV')
+        if drag > .55:
+            reasons.append('STOCK_OPT_THETA_TRAP')
+        return {'greek_supported': not reasons, 'delta': delta, 'gamma': gamma,
+                'theta_daily': theta, 'iv_pct': iv * 100, 'theta_ratio': drag,
+                'model': 'European BSM, zero dividend yield', 'reasons': reasons}
+    except (TypeError, ValueError, OverflowError, ZeroDivisionError):
+        return failure
+
+
+def evaluate_smc_institutional_breakout(candles, direction, pdh=0.0, pdl=0.0):
+    """OHLCV breakout evidence. This does not identify participant identity."""
+    failure = {'smc_passed': False, 'smc_score': 0.0, 'reasons': ['INVALID_OR_INSUFFICIENT_CLOSED_BARS']}
+    try:
+        if direction not in ('CE', 'PE') or len(candles) < 12:
+            return failure
+        bars = [{k: float(b[k]) for k in ('open', 'high', 'low', 'close', 'volume')}
+                for b in candles[-12:]]
+        if any(not all(isfinite(v) for v in b.values()) or b['volume'] < 0
+               or not 0 < b['low'] <= min(b['open'], b['close']) <= max(b['open'], b['close']) <= b['high']
+               for b in bars):
+            return failure
+        last, prior = bars[-1], bars[:-1]
+        width = last['high'] - last['low']
+        average = sum(b['volume'] for b in prior) / len(prior)
+        if width <= 0 or average <= 0:
+            return failure
+        body = abs(last['close'] - last['open']) / width
+        rvol = last['volume'] / average
+        bullish = direction == 'CE'
+        level = max(b['high'] for b in prior) if bullish else min(b['low'] for b in prior)
+        bos = last['close'] > level if bullish else last['close'] < level
+        directional = last['close'] > last['open'] if bullish else last['close'] < last['open']
+        fvg = last['low'] > bars[-3]['high'] if bullish else last['high'] < bars[-3]['low']
+        wick = ((last['high'] - max(last['open'], last['close'])) if bullish
+                else (min(last['open'], last['close']) - last['low'])) / width
+        swept = (last['high'] > level >= last['close'] if bullish else last['low'] < level <= last['close'])
+        day_level = float(pdh if bullish else pdl)
+        swept_day = day_level > 0 and (last['high'] > day_level >= last['close'] if bullish
+                                      else last['low'] < day_level <= last['close'])
+        fakeout = swept or swept_day or (wick > .42 and body < .45)
+        reasons = []
+        for bad, reason in ((fakeout, 'LIQUIDITY_SWEEP_OR_WICK_REJECTION'), (not bos, 'NO_BREAK_OF_STRUCTURE'),
+                            (not directional or body < .60, 'NO_DIRECTIONAL_DISPLACEMENT'),
+                            (rvol < 1.5, 'RVOL_BELOW_1_5'), (not fvg, 'NO_THREE_BAR_IMBALANCE')):
+            if bad:
+                reasons.append(reason)
+        return {'smc_passed': not reasons, 'smc_score': max(0, 100 - 20 * len(reasons)),
+                'bos': bos, 'fvg_present': fvg, 'is_fakeout': fakeout,
+                'rvol': rvol, 'displacement_body_ratio': body, 'reasons': reasons}
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return failure
 SESSION_OPEN = time(9, 15)
 SESSION_LAST_BAR = time(15, 25)
 
@@ -517,7 +618,11 @@ def evaluate_stock_setup(
     buying_pressure_score = round(min(100.0, 35.0 * min(quality_volume_ratio / 2.5, 1.0) + 35.0 * close_strength + 20.0 * body_ratio + (10.0 if flow_direction == (1 if bullish else -1) else 5.0)), 2)
     signal_quality = (40.0 * min(quality_volume_ratio / 3.0, 1.0)
                       + 30.0 * body_ratio + 20.0 * close_strength + 10.0 * orb_bonus)
+    smc = evaluate_smc_institutional_breakout(
+        bars, 'CE' if bullish else 'PE',
+        max(b['high'] for b in previous_bars), min(b['low'] for b in previous_bars))
     return {
+        'smc_quality': smc,
         "rally_classification": rally_strength,
         "buying_pressure_score": buying_pressure_score,
         "is_retracement_retest": retest_active,

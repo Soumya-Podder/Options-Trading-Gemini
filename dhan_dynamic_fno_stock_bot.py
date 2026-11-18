@@ -23,7 +23,7 @@ import requests
 from collections import Counter
 from bisect import bisect_left
 from pathlib import Path
-from stock_option_signals import evaluate_stock_setup, scanx_stock_membership, recent_entry_momentum, order_flow_direction
+from stock_option_signals import evaluate_stock_setup, scanx_stock_membership, recent_entry_momentum, order_flow_direction, compute_bsm_greeks_for_stock_option
 from stock_option_policy import premium_plan, rank_candidates, learned_profit_floor, DailyTradeGate, stock_reentry_reason, option_chain_request_slot, market_quote_request_slot, single_bot_session, session_open_wait_seconds, combined_paper_loss_state, combined_paper_entry_allowed, COMBINED_PAPER_LOSS_LIMIT_RS, option_order_book_pressure
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -976,6 +976,9 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
     if not sig:
         if reasons:return None
         return reject("No fresh confirmed momentum setup (EMA/VWAP/volume/body/proximity)")
+    smc = sig.get('smc_quality') or {}
+    if not smc.get('smc_passed'):
+        return reject('SMC quality: ' + ', '.join(smc.get('reasons', ['Missing closed-bar breakout evidence'])))
     if sig['opt_type']!=membership['opt_type']:
         return reject('Trade confirmation conflicts with scanner direction')
     sig['scanner_membership']=membership
@@ -1177,6 +1180,14 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         dte = (datetime.strptime(sig["expiry"], "%Y-%m-%d").date() - datetime.fromtimestamp(now_epoch, IST).date()).days
         if dte < 0:
             return reject('Contract already expired')
+        expiry_epoch = datetime.combine(datetime.strptime(sig['expiry'], '%Y-%m-%d').date(), dtime(15, 30), IST).timestamp()
+        model = compute_bsm_greeks_for_stock_option(
+            sig['spot_ltp'], sig['strike'], ask, sig['opt_type'], (expiry_epoch - now_epoch) / 86400)
+        sig['bsm_quality'] = model
+        if not model['greek_supported']:
+            return reject('BSM quality: ' + ', '.join(model['reasons']))
+        if iv > 85:
+            return reject('Broker IV exceeds 85%')
         theta_pct = max(0, -theta)/ask*100
         if theta_pct > cfg.max_theta_pct_per_day:
             return reject(f"Theta {theta_pct:.2f}%/day above {cfg.max_theta_pct_per_day:.2f}%")
@@ -1351,7 +1362,7 @@ def close_paper_position(ledger, pos, price, reason, now):
     # These fields are observations, not relaxed entry criteria or new signals.
     rec['entry_diagnostics']={k:pos[k] for k in (
         'signal_timestamp','conf_close','conf_high','conf_low','atr_5m','day_change_pct','scanner_membership','entry_price_validation','entry_structure_check',
-        'cash_price_pressure','estimated_order_flow','order_flow_min_net_rr','volume_confirmation','volume_context','breakout_continuation',
+        'cash_price_pressure','estimated_order_flow','order_flow_min_net_rr','volume_confirmation','volume_context','breakout_continuation','smc_quality','bsm_quality',
         'ema10_15m','ema10_15m_slope','higher_timeframe_aligned',
         'vwap','bid','opt_ltp','spread_pct','quoted_spread_points',
         'spread_fraction_of_initial_risk','bid_room_to_initial_stop',
@@ -2167,7 +2178,7 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current
             sig = evaluate_stock_setup(prefix, ts+300, cfg.min_day_change_pct, cfg.ema_period,
                                         enable_opening_trend=cfg.enable_opening_trend,confirm_window_sec=cfg.confirm_window_sec,
                                         require_breakout=cfg.require_confirmed_breakout)
-            if sig:
+            if sig and (sig.get('smc_quality') or {}).get('smc_passed'):
                 signals[(ts+300, sec)] = sig
     ledger = {"mode": "BACKTEST", "initial_capital": cfg.initial_capital, "trades": [],
               "entry_configuration":{"opening_trend":cfg.enable_opening_trend,"extend_rupee_target":cfg.extend_rupee_target,
