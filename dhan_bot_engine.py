@@ -1,3 +1,5 @@
+from stock_option_signals import evaluate_expert_scalp_exit
+from nifty_oi import evaluate_index_scalp_opportunity
 #!/usr/bin/env python3
 """
 DhanHQ v6.0 Autonomous Multi-Regime & Gamma-Blast Engine (NIFTY & SENSEX)

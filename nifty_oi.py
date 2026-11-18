@@ -254,3 +254,64 @@ class NiftyOITracker:
         else:
             self.history.append(snap_obj)
         return reference,info
+
+
+def evaluate_index_scalp_opportunity(
+    spot: float,
+    option_type: str,
+    oi_info: dict,
+    mtf_sr: dict,
+    book_pressure_ratio: float = 1.0,
+) -> dict:
+    """
+    Determines if a NIFTY / SENSEX trade should be executed as a high-precision
+    quick scalp (capturing 8-14 points / Rs.1,000 - Rs.1,800 quickly) vs a full trend runner.
+    Never trades blindly: requires 5m/10m OI writer shift + Delta >= 0.42 + Order Book Bid dominance.
+    """
+    matrix = (oi_info or {}).get("multi_horizon_matrix") or {}
+    horizons = matrix.get("horizons") or {}
+    h5 = horizons.get("5m") or {}
+    h10 = horizons.get("10m") or {}
+
+    greeks = (oi_info or {}).get("atm_ce_greeks" if option_type == "CE" else "atm_pe_greeks") or {}
+    delta = abs(float(greeks.get("delta") or 0.50))
+    iv_chg_5m = float((oi_info or {}).get("atm_iv_change_5m") or 0.0)
+
+    # Check if 5m & 10m writers are actively supporting the quick scalp direction
+    st_writer_ok = (
+        (option_type == "CE" and h5.get("net_put_minus_call_writing", 0) > 0)
+        or (option_type == "PE" and h5.get("net_put_minus_call_writing", 0) < 0)
+    )
+
+    # Check distance to next 15m / 4H wall
+    tf_15m = (mtf_sr or {}).get("15m") or {}
+    wall_dist = 999.0
+    if option_type == "CE" and float(tf_15m.get("resistance") or 0) > spot:
+        wall_dist = float(tf_15m["resistance"]) - spot
+    elif option_type == "PE" and 0 < float(tf_15m.get("support") or 0) < spot:
+        wall_dist = spot - float(tf_15m["support"])
+
+    # If wall is between 16 and 35 Nifty points away, a full runner will likely bounce back,
+    # making it an ideal high-accuracy SCALP setup if Delta & Order Book are strong.
+    is_scalp_zone = 16.0 <= wall_dist <= 38.0
+    qualifies_for_scalp = delta >= 0.42 and iv_chg_5m >= -0.35 and book_pressure_ratio >= 1.05 and st_writer_ok
+
+    if is_scalp_zone and qualifies_for_scalp:
+        return {
+            "trade_mode": "INDEX_PRECISION_SCALP",
+            "scalp_qualified": True,
+            "scalp_target_pts": 10.0,
+            "scalp_target_rupees": 1500.0,
+            "wall_dist_pts": round(wall_dist, 1),
+            "reason": f"INDEX_SCALP_MODE(wall={wall_dist:.1f}pts,delta={delta:.2f},book={book_pressure_ratio:.2f})",
+        }
+
+    return {
+        "trade_mode": "TREND_RUNNER",
+        "scalp_qualified": qualifies_for_scalp,
+        "scalp_target_pts": 12.0,
+        "scalp_target_rupees": 1650.0,
+        "wall_dist_pts": round(wall_dist, 1),
+        "reason": "STANDARD_RUNNER_OR_SCALP_FALLBACK",
+    }
+

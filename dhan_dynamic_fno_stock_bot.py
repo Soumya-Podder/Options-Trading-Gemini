@@ -1,3 +1,4 @@
+from stock_option_signals import detect_institutional_reversal_scalp, evaluate_expert_scalp_exit
 #!/usr/bin/env python3
 """Selective stock options: capped shortlist entries, rupee targets and premium exits.
 API reference: https://docs.dhanhq.co/

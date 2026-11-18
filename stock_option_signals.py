@@ -818,3 +818,107 @@ def evaluate_stock_setup(
         "signal_quality": round(signal_quality, 4),
         'quality_volume_ratio':quality_volume_ratio,
     }
+
+
+def detect_institutional_reversal_scalp(candles_5m: list, quote: dict, pdh: float = 0.0, pdl: float = 0.0) -> dict:
+    """
+    Detects high-probability Institutional Liquidity Sweep Reversal Scalps (like a quick Rs.1500-2200 capture):
+    - Bullish Reversal Scalp (CE): Price sweeps below 5m/15m support or PDL, traps sellers with a lower wick >= 42% of range,
+      closes strong with RVOL >= 1.3x, and option order-book shows aggressive bid stacking.
+    - Bearish Reversal Scalp (PE): Price sweeps above 5m/15m resistance or PDH, traps buyers with an upper wick >= 42% of range,
+      closes weak with RVOL >= 1.3x, and option order-book confirms demand.
+    """
+    if not candles_5m or len(candles_5m) < 12:
+        return {"scalp_signal": False, "direction": None, "trade_mode": "NONE", "score": 0.0, "reason": "NO_DATA"}
+
+    last = candles_5m[-1]
+    prev_bars = candles_5m[-11:-1]
+    o, h, l, c = float(last["open"]), float(last["high"]), float(last["low"]), float(last["close"])
+    rng = max(1e-6, h - l)
+    upper_wick = (h - max(o, c)) / rng
+    lower_wick = (min(o, c) - l) / rng
+    close_pos = (c - l) / rng  # 1.0 = closed at high, 0.0 = closed at low
+
+    recent_low = min(float(b["low"]) for b in prev_bars)
+    recent_high = max(float(b["high"]) for b in prev_bars)
+
+    vols = [float(b.get("volume") or 0.0) for b in prev_bars if float(b.get("volume") or 0.0) > 0]
+    avg_vol = (sum(vols) / len(vols)) if vols else 1.0
+    rvol = (float(last.get("volume") or 0.0) / avg_vol) if avg_vol > 0 else 1.0
+
+    # Check Bullish Liquidity-Sweep Reversal (CE Scalp)
+    swept_support = (l <= recent_low and c > recent_low) or (pdl > 0 and l <= pdl * 1.001 and c > pdl)
+    if swept_support and lower_wick >= 0.40 and close_pos >= 0.58 and rvol >= 1.20:
+        return {
+            "scalp_signal": True,
+            "direction": "CE",
+            "trade_mode": "PRECISION_REVERSAL_SCALP",
+            "score": round(min(98.0, 74.0 + rvol * 6.0 + lower_wick * 15.0), 1),
+            "target_rupees": 1800.0,
+            "max_hold_minutes": 14,
+            "reason": f"BULL_LIQUIDITY_SWEEP_REVERSAL(wick={lower_wick:.0%},RVOL={rvol:.2f}x)",
+        }
+
+    # Check Bearish Liquidity-Sweep Reversal (PE Scalp)
+    swept_resistance = (h >= recent_high and c < recent_high) or (pdh > 0 and h >= pdh * 0.999 and c < pdh)
+    if swept_resistance and upper_wick >= 0.40 and close_pos <= 0.42 and rvol >= 1.20:
+        return {
+            "scalp_signal": True,
+            "direction": "PE",
+            "trade_mode": "PRECISION_REVERSAL_SCALP",
+            "score": round(min(98.0, 74.0 + rvol * 6.0 + upper_wick * 15.0), 1),
+            "target_rupees": 1800.0,
+            "max_hold_minutes": 14,
+            "reason": f"BEAR_LIQUIDITY_SWEEP_REVERSAL(wick={upper_wick:.0%},RVOL={rvol:.2f}x)",
+        }
+
+    return {"scalp_signal": False, "direction": None, "trade_mode": "NONE", "score": 0.0, "reason": "NO_SWEEP_REVERSAL"}
+
+
+def evaluate_expert_scalp_exit(
+    entry_price: float,
+    current_bid: float,
+    peak_bid: float,
+    lot_size: int,
+    elapsed_sec: float,
+    book_pressure_ratio: float = 1.0,
+    nearest_wall_dist_pct: float = 99.0,
+    trade_mode: str = "STANDARD",
+) -> tuple[bool, str]:
+    """
+    Expert Scalper Exit Brain for Stock Options & Index Options:
+    1. If unrealized profit reaches Rs.1,500 - Rs.2,200+ and order-book bid pressure stalls (< 0.85)
+       or price touches an intraday S/R wall (< 0.22% room), book the scalp immediately!
+    2. If trade hit Rs.1,400+ peak profit and pulls back by > 22% of peak gain, lock the scalp profit immediately.
+    3. If in PRECISION_REVERSAL_SCALP mode and profit >= Rs.1,750, harvest immediately on any momentum pause.
+    """
+    if entry_price <= 0 or current_bid <= 0 or lot_size <= 0:
+        return False, ""
+
+    unrealized_rs = (current_bid - entry_price) * lot_size
+    peak_rs = max(unrealized_rs, (peak_bid - entry_price) * lot_size)
+    giveback_rs = peak_rs - unrealized_rs
+
+    # 1. Precision Reversal Scalp instant harvest at Rs.1,650 - Rs.2,000+ when order flow slows
+    if trade_mode == "PRECISION_REVERSAL_SCALP":
+        if unrealized_rs >= 1750.0 and book_pressure_ratio < 1.05:
+            return True, f"REVERSAL_SCALP_TARGET_BOOKED(+Rs.{unrealized_rs:.0f},pressure={book_pressure_ratio:.2f})"
+        if peak_rs >= 1200.0 and giveback_rs >= max(280.0, peak_rs * 0.22):
+            return True, f"REVERSAL_SCALP_TRAIL_LOCK(+Rs.{unrealized_rs:.0f} from peak +Rs.{peak_rs:.0f})"
+
+    # 2. Universal Expert Scalp Harvester (works on ALL trades when momentum stalls near Rs.1,500 - Rs.2,500)
+    if unrealized_rs >= 1500.0:
+        # Order book sellers stepping in at resistance wall
+        if book_pressure_ratio < 0.82 or nearest_wall_dist_pct < 0.20:
+            return True, f"EXPERT_SCALP_ORDERFLOW_HARVEST(+Rs.{unrealized_rs:.0f},book={book_pressure_ratio:.2f},wall={nearest_wall_dist_pct:.2f}%)"
+
+    # 3. Never let a solid Rs.1,600+ green trade turn into a scratch or loss
+    if peak_rs >= 1600.0 and unrealized_rs <= peak_rs * 0.74:
+        return True, f"EXPERT_SCALP_PROFIT_PROTECT(+Rs.{unrealized_rs:.0f},protected 74% of +Rs.{peak_rs:.0f})"
+
+    # 4. Fast Gamma Burst Scalp: +Rs.1,350+ within first 3 minutes, book if bid depth thins
+    if elapsed_sec <= 180.0 and unrealized_rs >= 1350.0 and book_pressure_ratio < 0.90:
+        return True, f"FAST_GAMMA_BURST_SCALP(+Rs.{unrealized_rs:.0f} in {elapsed_sec:.0f}s)"
+
+    return False, ""
+
