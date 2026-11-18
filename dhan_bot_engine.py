@@ -102,7 +102,7 @@ MAX_POST_LOCK_RUNNER_ENTRIES = 2
 
 # --- HARD ANTI-DRAWDOWN CIRCUIT BREAKERS ---
 MAX_LOSS_PER_TRADE_RS = 650.0            # Never risk more than Rs. 650 net per lot on a standard trade
-DAILY_MAX_LOSS_RS = -2500.0              # Hard daily kill-switch if net P&L hits -Rs. 1,100
+DAILY_MAX_LOSS_RS = -COMBINED_PAPER_LOSS_LIMIT_RS
 HOUSE_MONEY_SCALE_THRESHOLD_RS = 1200.0  # Only allow >1 lot when today's realized net PnL >= +Rs. 1,200
 
 NIFTY_TARGET_POINTS = 25.0               # Default ceiling; dynamically overridden per regime (12 / 18 / 25 / 36 pts)
@@ -113,8 +113,8 @@ MIN_STRUCTURE_RR_AFTER_LOSS = 1.95
 MIN_STRUCTURE_RR_RETEST = 1.90
 MAX_TRADES_PER_DAY = 8
 MAX_CONSECUTIVE_LOSSES_PER_DAY = 2
-POST_SL_COOLDOWN_MINUTES = 12
-POST_WIN_COOLDOWN_MINUTES = 5
+POST_SL_COOLDOWN_MINUTES = 0
+POST_WIN_COOLDOWN_MINUTES = 0
 SESSION_START_TIME = dtime(9, 15)
 EOD_SQUAREOFF_TIME = dtime(14, 45)
 LAST_ENTRY_TIME = EOD_SQUAREOFF_TIME
@@ -261,32 +261,11 @@ def prepared_channel_entry_quote(dhan, call, cached, expiry, lot_size, now_epoch
 
 
 def index_entry_signal(brain, view, losses, now, cooldown_until, channel_call=None, closed_trades=()):
-    """Fresh executable channel alerts are independent of native signal cooldown."""
+    """Evaluate channel and native setups without a post-trade waiting period."""
     if channel_call:
         action, sig = 'BUY_' + channel_call['option_type'], 'TELEGRAM_CHANNEL ' + channel_call['key']
     else:
-        if cooldown_until is not None and now < cooldown_until:
-            view['entry_decision'] = {'action': 'HOLD', 'reason': 'Native signal cooldown active'}
-            return 'HOLD', None
         action, sig = brain.select_action(view, losses, bar_time=now.time())
-        if action in ('BUY_CE', 'BUY_PE') and closed_trades:
-            today_iso = now.strftime('%Y-%m-%d')
-            same_idx_today = [t for t in closed_trades if t.get('index') == view.get('index') and str(t.get('exit_timestamp', '')).startswith(today_iso)]
-            if same_idx_today:
-                last_t = same_idx_today[-1]
-                last_side = str(last_t.get('contract', '')).rsplit('_', 1)[-1]
-                if float(last_t.get('net_pnl', 0.0)) <= 0 and last_side == action[4:]:
-                    try:
-                        ex_dt = datetime.strptime(str(last_t['exit_timestamp'])[:19], '%Y-%m-%d %H:%M:%S')
-                        mins_since = (now.replace(tzinfo=None) - ex_dt).total_seconds() / 60.0
-                        req_clear = 12.0 if view.get('index') == 'NIFTY' else 35.0
-                        sign_d = 1.0 if action == 'BUY_CE' else -1.0
-                        spot_clear = sign_d * (float(view.get('spot', 0.0)) - float(last_t.get('spot_at_entry', 0.0)))
-                        if 0 <= mins_since < 25.0 and spot_clear < req_clear:
-                            view['entry_decision'] = {'action': 'HOLD', 'reason': f'Same-side whipsaw guard ({mins_since:.0f}m since {last_t.get("contract")} loss; spot advance {spot_clear:+.1f} < {req_clear:.0f})'}
-                            return 'HOLD', None
-                    except (ValueError, TypeError, KeyError):
-                        pass
     if action not in ('BUY_CE', 'BUY_PE') or not sig:
         return action, sig
     context = {**view, 'option_type': action[4:]}
@@ -1667,7 +1646,7 @@ class SelfLearningBrain:
         # 3. Anti-Whipsaw Direction Flip Lock after an Intraday Loss
         if consec_losses >= 1 and self.recent_losing_states:
             last_lost_dir = self.recent_losing_states[-1][0]
-            if last_lost_dir != analysis['recommended_dir'] and abs(diff_l) < 55.0:
+            if last_lost_dir != analysis['recommended_dir'] and abs(diff_l) < 55.0 and not breakout_entry:
                 return reject(f'Anti-whipsaw lock: blocked flip from {last_lost_dir} to {analysis["recommended_dir"]} without >=55L OI wall')
 
         # If Gamma Blast Hero-Zero is active on Expiry afternoon, allow OTM strike selection
@@ -3269,7 +3248,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                 if not block_reason:
                     combined_net, combined_reached = combined_paper_loss_state(today_str)
                     if combined_reached or combined_net is None:
-                        block_reason = ("Combined PAPER loss limit (Rs.2,500) reached" if combined_reached
+                        block_reason = (f"Combined PAPER loss limit (Rs.{COMBINED_PAPER_LOSS_LIMIT_RS:,.0f}) reached" if combined_reached
                                         else "Combined PAPER profit state unavailable")
 
             channel_has_fresh_candidate = bool(

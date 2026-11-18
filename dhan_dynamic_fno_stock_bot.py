@@ -201,11 +201,11 @@ class DynamicStrategyConfig:
         if not 5<=self.runner_max_hold_minutes<=120:
             raise ValueError('Runner holding limit must be between 5 and 120 minutes')
 
-    def plan(self, entry: float, qty: int, max_target_price=None, min_lots=1, min_net_rr=None):
+    def plan(self, entry: float, qty: int, max_target_price=None, min_lots=1, min_net_rr=None, max_lots=None):
         # Cash loss is an exit trigger for the whole position, not an entry veto.
         plan = premium_plan(entry, qty, compute_fno_option_charges, self.target_pct,
                             self.stop_pct, max(self.min_rr_target, min_net_rr or 0), self.slippage_pct,
-                            self.rupee_target, self.max_lots, float("inf"),self.extend_rupee_target,max_target_price,
+                            self.rupee_target, min(self.max_lots, max_lots) if max_lots is not None else self.max_lots, float("inf"),self.extend_rupee_target,max_target_price,
                             min_lots=min_lots,cash_loss_limit=self.rupee_max_risk)
         if plan is None:
             return None
@@ -1127,14 +1127,15 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
             return reject("Unusable bid/ask or wallet")
         if not 3 <= ask <= cfg.max_premium:
             return reject(f"Premium {ask:.2f} outside 3-{cfg.max_premium:.0f}")
-        if min(int(bid_node["quantity"]), int(ask_node["quantity"])) < qty:
+        depth_lots = min(int(bid_node["quantity"]), int(ask_node["quantity"])) // qty
+        if depth_lots < 1:
             return reject("Displayed depth below one lot")
         spread = (ask - bid) / ask * 100
         spread_limit = cfg.max_spread_pct + (1.0 if strong_mover else 0.0)
         if spread > spread_limit:
             return reject(f"Spread {spread:.2f}% above {spread_limit:.2f}%")
         flow_rr = sig.get("order_flow_min_net_rr")
-        plan_options = {"min_net_rr": flow_rr} if flow_rr is not None else {}
+        plan_options = {"min_net_rr": flow_rr, "max_lots": depth_lots}
         if cfg.extend_rupee_target:
             # Feed the same option-move estimate into sizing. A small first lot
             # must not veto a larger affordable lot count that fits both the
@@ -1156,8 +1157,10 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         if bid <= plan["initial_sl"]:
             return reject("Bid already at or below the planned stop")
         effective_stop=max(plan['initial_sl'],plan['cash_loss_stop_price'])
-        if ask-bid > 0.25*(ask-effective_stop)+1e-9:
-            return reject('Spread consumes over 25% of effective stop distance')
+        confirmed_breakout = (sig.get('breakout_confirmation') or {}).get('closed_candle') is True
+        spread_risk_limit = 0.30 if confirmed_breakout and plan['lots'] == 1 else 0.25
+        if ask-bid > spread_risk_limit*(ask-effective_stop)+1e-9:
+            return reject(f'Spread consumes over {spread_risk_limit:.0%} of effective stop distance')
         if ask * qty + plan["estimated_costs"] > wallet:
             return reject("Insufficient wallet for the planned size")
         delta, theta, gamma, iv = (float(sig[k]) for k in ("delta", "theta", "gamma", "iv"))
@@ -1200,7 +1203,7 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         # passed every one-position entry check. Fresh depth/cash still bind.
         if (float(sig.get('signal_quality',0))>=76 or float(sig.get('buying_pressure_score',0))>=78) and sig.get('higher_timeframe_aligned') and option_order_book_pressure(quote)['book_pressure_ratio']>=0.95:
             lot_size=int(sig['lot_size'])
-            for lots in range(plan['lots']+1,min(3,cfg.max_lots)+1):
+            for lots in range(plan['lots']+1,min(3,cfg.max_lots,depth_lots)+1):
                 larger=cfg.plan(ask,lot_size,min_lots=lots,
                     max_target_price=ask+premium_move if cfg.extend_rupee_target and not strong_mover else None,
                     **plan_options)

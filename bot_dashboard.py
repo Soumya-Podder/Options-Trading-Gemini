@@ -239,21 +239,13 @@ def render_dashboard(
             f"| Entry: Rs.{active_pos.get('entry_price'):.2f} | SL: Rs.{active_pos.get('current_sl'):.2f} | Peak: Rs.{active_pos.get('highest_ltp'):.2f}"
         )
     if not open_positions:
-        consec_l = 0
-        for t in reversed(trades):
-            if float(t.get("gross_pnl", 0)) <= 0:
-                consec_l += 1
-            else:
-                break
-        guard_mode = (
-            f"{YELLOW}SNIPER RECOVERY (+65% Q-Gate, 25m Cooldown, Cosine Veto){RESET}"
-            if consec_l == 1
-            else (
-                f"{RED}DAILY CIRCUIT BREAKER LOCKED (Shadow Learning Only){RESET}"
-                if consec_l >= 2
-                else f"{GREEN}AUTONOMOUS HUNTING (Gate: >=50L Wall + 4-Quadrant Alignment){RESET}"
-            )
-        )
+        reasons = [
+            str(info.get("entry_decision", {}).get("reason", ""))
+            for info in indices_data.values()
+            if isinstance(info, dict) and isinstance(info.get("entry_decision", {}), dict)
+        ]
+        reason = next((value for value in reasons if value), "Scanning for an eligible entry")
+        guard_mode = f"{YELLOW}{reason}{RESET}"
         state_label = "FLAT" if telemetry else "UNKNOWN"
         if not indices_data:
             guard_mode = f"{YELLOW}Awaiting verified telemetry{RESET}"

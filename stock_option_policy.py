@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Optional
 
 
-COMBINED_PAPER_LOSS_LIMIT_RS = 2500.0
+COMBINED_PAPER_LOSS_LIMIT_RS = 3000.0
 SUPPORTED_COMBINED_INDICES = frozenset({"NIFTY", "SENSEX", "BANKNIFTY", "BANKEX"})
 TICK = Decimal("0.05")
 

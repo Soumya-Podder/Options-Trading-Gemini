@@ -1,11 +1,11 @@
 {
   "mode": "PAPER",
   "initial_capital": 30000.0,
-  "virtual_balance_gross": 29068.0,
-  "virtual_balance_net": 28208.0,
-  "profit_without_charges": -932.0,
-  "net_profit_after_charges": -1792.0,
-  "total_trades": 14,
+  "virtual_balance_gross": 29128.0,
+  "virtual_balance_net": 27968.0,
+  "profit_without_charges": -872.0,
+  "net_profit_after_charges": -2032.0,
+  "total_trades": 19,
   "trades": [
     {
       "timestamp": "2026-11-10 21:50:06",
@@ -315,6 +315,131 @@
       "learning_risk_rs": 295.0,
       "exit_diagnostics": {
         "peak_net_pnl": 405.0
+      }
+    },
+    {
+      "timestamp": "2026-11-16 20:55:20",
+      "exit_timestamp": "2026-11-16 20:58:58",
+      "symbol": "GOLDM",
+      "regime": "REGIME_STRONG_TREND",
+      "contract": "GOLDM_135500_PE",
+      "lots": 1,
+      "qty": 10,
+      "spot_at_entry": 135116.0,
+      "entry_price": 2588.5,
+      "exit_price": 2550.5,
+      "gross_pnl": -380.0,
+      "net_pnl": -440.0,
+      "charges": 60.0,
+      "partial_exit": null,
+      "r_multiple": -1.47,
+      "peak_r": 0.55,
+      "planned_rr": 3.0,
+      "exit_reason": "INITIAL_SL_HIT",
+      "setup": "MCX_TREND_PULLBACK_PE",
+      "learning_risk_rs": 300.0,
+      "exit_diagnostics": {
+        "peak_net_pnl": 105.0
+      }
+    },
+    {
+      "timestamp": "2026-11-17 17:15:02",
+      "exit_timestamp": "2026-11-17 17:16:12",
+      "symbol": "SILVERM",
+      "regime": "REGIME_STRONG_TREND",
+      "contract": "SILVERM_171000_CE",
+      "lots": 1,
+      "qty": 5,
+      "spot_at_entry": 171580.0,
+      "entry_price": 4249.5,
+      "exit_price": 4368.0,
+      "gross_pnl": 592.5,
+      "net_pnl": 532.5,
+      "charges": 60.0,
+      "partial_exit": null,
+      "r_multiple": 1.81,
+      "peak_r": 2.64,
+      "planned_rr": 4.0,
+      "exit_reason": "TRAIL_PROFIT_HIT",
+      "setup": "MCX_TREND_PULLBACK_CE",
+      "learning_risk_rs": 295.0,
+      "exit_diagnostics": {
+        "peak_net_pnl": 717.5
+      }
+    },
+    {
+      "timestamp": "2026-11-17 18:15:54",
+      "exit_timestamp": "2026-11-17 18:16:32",
+      "symbol": "SILVERM",
+      "regime": "REGIME_STRONG_TREND",
+      "contract": "SILVERM_172000_CE",
+      "lots": 1,
+      "qty": 5,
+      "spot_at_entry": 172249.0,
+      "entry_price": 4011.0,
+      "exit_price": 3939.5,
+      "gross_pnl": -357.5,
+      "net_pnl": -417.5,
+      "charges": 60.0,
+      "partial_exit": null,
+      "r_multiple": -1.42,
+      "peak_r": -0.19,
+      "planned_rr": 4.0,
+      "exit_reason": "INITIAL_SL_HIT",
+      "setup": "MCX_TREND_PULLBACK_CE",
+      "learning_risk_rs": 295.0,
+      "exit_diagnostics": {
+        "peak_net_pnl": -155.0
+      }
+    },
+    {
+      "timestamp": "2026-11-18 18:11:04",
+      "exit_timestamp": "2026-11-18 18:12:25",
+      "symbol": "GOLDM",
+      "regime": "REGIME_STRONG_TREND",
+      "contract": "GOLDM_131000_PE",
+      "lots": 1,
+      "qty": 10,
+      "spot_at_entry": 130650.0,
+      "entry_price": 2351.5,
+      "exit_price": 2412.0,
+      "gross_pnl": 605.0,
+      "net_pnl": 545.0,
+      "charges": 60.0,
+      "partial_exit": null,
+      "r_multiple": 1.82,
+      "peak_r": 2.02,
+      "planned_rr": 4.0,
+      "exit_reason": "TRAIL_PROFIT_HIT",
+      "setup": "MCX_TREND_PULLBACK_PE",
+      "learning_risk_rs": 300.0,
+      "exit_diagnostics": {
+        "peak_net_pnl": 545.0
+      }
+    },
+    {
+      "timestamp": "2026-11-18 19:15:19",
+      "exit_timestamp": "2026-11-18 19:15:48",
+      "symbol": "GOLDM",
+      "regime": "REGIME_STRONG_TREND",
+      "contract": "GOLDM_131000_CE",
+      "lots": 1,
+      "qty": 10,
+      "spot_at_entry": 131257.0,
+      "entry_price": 2257.5,
+      "exit_price": 2217.5,
+      "gross_pnl": -400.0,
+      "net_pnl": -460.0,
+      "charges": 60.0,
+      "partial_exit": null,
+      "r_multiple": -1.53,
+      "peak_r": -0.18,
+      "planned_rr": 4.0,
+      "exit_reason": "INITIAL_SL_HIT",
+      "setup": "MCX_TREND_PULLBACK_CE",
+      "learning_risk_rs": 300.0,
+      "exit_diagnostics": {
+        "peak_net_pnl": -115.0
       }
     }
   ],

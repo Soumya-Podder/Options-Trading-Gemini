@@ -355,5 +355,42 @@
     "intraday_losses": 0,
     "last_lot_loss": false,
     "muted_on_day": ""
+  },
+  "VWAP_TREND_FLOW & regime=HIGH_IV_VEGA_MOMENTUM & q=SHORT_COVERING -> BUY_PE": {
+    "rule_id": "RULE_017",
+    "condition_signature": "VWAP_TREND_FLOW & regime=HIGH_IV_VEGA_MOMENTUM & q=SHORT_COVERING -> BUY_PE",
+    "status": "CANDIDATE",
+    "trades_count": 0,
+    "wins_count": 0,
+    "losses_count": 0,
+    "unique_days_traded": [],
+    "total_win_r": 0.0,
+    "total_loss_r": 0.0,
+    "avg_win_r": 0.0,
+    "avg_loss_r": 0.0,
+    "expectancy_r": 0.0,
+    "intraday_losses": 0,
+    "last_lot_loss": false,
+    "muted_on_day": ""
+  },
+  "LEVEL_V2 BREAKOUT_CONFIRMED & strike_oi=ce,pe -> BUY_PE": {
+    "rule_id": "RULE_018",
+    "condition_signature": "LEVEL_V2 BREAKOUT_CONFIRMED & strike_oi=ce,pe -> BUY_PE",
+    "status": "CANDIDATE",
+    "trades_count": 1,
+    "wins_count": 0,
+    "losses_count": 1,
+    "unique_days_traded": [
+      "2026-11-18"
+    ],
+    "total_win_r": 0.0,
+    "total_loss_r": 1.14645,
+    "avg_win_r": 0.0,
+    "avg_loss_r": 1.15,
+    "expectancy_r": -1.15,
+    "intraday_losses": 1,
+    "last_lot_loss": true,
+    "muted_on_day": "",
+    "last_trade_day": "2026-11-18"
   }
 }

@@ -1,26 +1,26 @@
 {
   "version": "8.0-high-yield",
-  "updated_at": "2026-11-16 17:49:21",
+  "updated_at": "2026-11-18 19:15:48",
   "commodities": {
     "SILVERM": {
-      "trades": 599,
-      "wins": 242,
-      "losses": 357,
-      "net_pnl": 204008.15,
-      "ema_r": 0.106,
-      "ema_mfe_r": 1.679,
-      "consec_sl": 0,
-      "last_r": -0.24
+      "trades": 601,
+      "wins": 243,
+      "losses": 358,
+      "net_pnl": 204123.15,
+      "ema_r": 0.063,
+      "ema_mfe_r": 1.583,
+      "consec_sl": 1,
+      "last_r": -1.42
     },
     "GOLDM": {
-      "trades": 569,
-      "wins": 256,
-      "losses": 313,
-      "net_pnl": 192464.7,
-      "ema_r": 0.963,
-      "ema_mfe_r": 2.37,
-      "consec_sl": 0,
-      "last_r": -1.27
+      "trades": 572,
+      "wins": 257,
+      "losses": 315,
+      "net_pnl": 192109.7,
+      "ema_r": 0.236,
+      "ema_mfe_r": 1.654,
+      "consec_sl": 1,
+      "last_r": -1.53
     },
     "CRUDEOILM": {
       "trades": 90,
@@ -49,10 +49,10 @@
       "net_pnl": 112117.0
     },
     "SILVERM:MCX_TREND_PULLBACK": {
-      "trades": 389,
-      "wins": 158,
-      "ema_r": 0.212,
-      "net_pnl": 91891.15
+      "trades": 391,
+      "wins": 159,
+      "ema_r": 0.128,
+      "net_pnl": 92006.15
     },
     "GOLDM:MCX_BREAKOUT_CONFIRM": {
       "trades": 25,
@@ -61,10 +61,10 @@
       "net_pnl": 1944.4
     },
     "GOLDM:MCX_TREND_PULLBACK": {
-      "trades": 544,
-      "wins": 248,
-      "ema_r": 0.963,
-      "net_pnl": 190520.3
+      "trades": 547,
+      "wins": 249,
+      "ema_r": 0.236,
+      "net_pnl": 190165.3
     },
     "CRUDEOILM:MCX_BREAKOUT_CONFIRM": {
       "trades": 90,
@@ -505,34 +505,34 @@
         "optimal_exit_policy": "ADAPTIVE_RUNNER"
       },
       "SILVERM:MCX_TREND_PULLBACK": {
-        "samples": 16,
-        "win_rate": 0.5625,
-        "payoff_ratio": 2.906976744186046,
-        "baseline_mean_net_r": 1.545,
+        "samples": 17,
+        "win_rate": 0.5882352941176471,
+        "payoff_ratio": 2.71025641025641,
+        "baseline_mean_net_r": 1.515,
         "policy_mean_net_r": {
-          "SCALP_1_5R": 0.103,
-          "SWING_2_2R": 0.389,
-          "RUNNER_3_8R": 0.874
+          "SCALP_1_5R": 0.106,
+          "SWING_2_2R": 0.392,
+          "RUNNER_3_8R": 0.884
         },
         "policy_hits": {
           "SCALP_1_5R": 7,
-          "SWING_2_2R": 6,
+          "SWING_2_2R": 7,
           "RUNNER_3_8R": 5
         },
         "optimal_exit_policy": "ADAPTIVE_RUNNER"
       },
       "SILVERM:MCX_BREAKOUT_CONFIRM": {
-        "samples": 3,
+        "samples": 6,
         "win_rate": 0.3333333333333333,
-        "payoff_ratio": 3.13953488372093,
-        "baseline_mean_net_r": 0.49,
+        "payoff_ratio": 2.3229571984435795,
+        "baseline_mean_net_r": 0.138,
         "policy_mean_net_r": {
-          "SCALP_1_5R": -0.357,
-          "SWING_2_2R": -0.126,
-          "RUNNER_3_8R": 0.411
+          "SCALP_1_5R": -0.354,
+          "SWING_2_2R": -0.17,
+          "RUNNER_3_8R": 0.099
         },
         "policy_hits": {
-          "SCALP_1_5R": 1,
+          "SCALP_1_5R": 2,
           "SWING_2_2R": 1,
           "RUNNER_3_8R": 1
         },
@@ -560,12 +560,12 @@
       "SILVERM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:0:US_COMEX_OPEN_WINDOW": {
         "samples": 4,
         "win_rate": 0.5,
-        "payoff_ratio": 3.7734375,
-        "baseline_mean_net_r": 1.775,
+        "payoff_ratio": 3.8031496062992125,
+        "baseline_mean_net_r": 1.78,
         "policy_mean_net_r": {
-          "SCALP_1_5R": 0.114,
-          "SWING_2_2R": 0.461,
-          "RUNNER_3_8R": 1.267
+          "SCALP_1_5R": 0.119,
+          "SWING_2_2R": 0.466,
+          "RUNNER_3_8R": 1.272
         },
         "policy_hits": {
           "SCALP_1_5R": 2,
@@ -578,14 +578,14 @@
         "samples": 3,
         "win_rate": 1.0,
         "payoff_ratio": 0.0,
-        "baseline_mean_net_r": 4.673,
+        "baseline_mean_net_r": 4.067,
         "policy_mean_net_r": {
-          "SCALP_1_5R": 1.508,
-          "SWING_2_2R": 2.109,
-          "RUNNER_3_8R": 3.183
+          "SCALP_1_5R": 1.039,
+          "SWING_2_2R": 1.502,
+          "RUNNER_3_8R": 2.576
         },
         "policy_hits": {
-          "SCALP_1_5R": 3,
+          "SCALP_1_5R": 2,
           "SWING_2_2R": 2,
           "RUNNER_3_8R": 2
         },
@@ -829,7 +829,24 @@
         },
         "optimal_exit_policy": "ADAPTIVE_RUNNER"
       },
-      "SILVERM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:3:AUTONOMOUS_VOL_SHOCK_DETECTED": {
+      "SILVERM:MCX_BREAKOUT_CONFIRM:REGIME_STRONG_TREND:1:US_COMEX_OPEN_WINDOW": {
+        "samples": 1,
+        "win_rate": 1.0,
+        "payoff_ratio": 0.0,
+        "baseline_mean_net_r": 1.92,
+        "policy_mean_net_r": {
+          "SCALP_1_5R": 1.508,
+          "SWING_2_2R": 1.92,
+          "RUNNER_3_8R": 1.92
+        },
+        "policy_hits": {
+          "SCALP_1_5R": 1,
+          "SWING_2_2R": 0,
+          "RUNNER_3_8R": 0
+        },
+        "optimal_exit_policy": "ADAPTIVE_RUNNER"
+      },
+      "SILVERM:MCX_BREAKOUT_CONFIRM:REGIME_STRONG_TREND:3:AUTONOMOUS_VOL_SHOCK_DETECTED": {
         "samples": 1,
         "win_rate": 0.0,
         "payoff_ratio": 0.0,
@@ -838,6 +855,23 @@
           "SCALP_1_5R": -1.29,
           "SWING_2_2R": -1.29,
           "RUNNER_3_8R": -1.29
+        },
+        "policy_hits": {
+          "SCALP_1_5R": 0,
+          "SWING_2_2R": 0,
+          "RUNNER_3_8R": 0
+        },
+        "optimal_exit_policy": "ADAPTIVE_RUNNER"
+      },
+      "SILVERM:MCX_BREAKOUT_CONFIRM:REGIME_STRONG_TREND:0:US_COMEX_OPEN_WINDOW": {
+        "samples": 1,
+        "win_rate": 0.0,
+        "payoff_ratio": 0.0,
+        "baseline_mean_net_r": -1.27,
+        "policy_mean_net_r": {
+          "SCALP_1_5R": -1.27,
+          "SWING_2_2R": -1.27,
+          "RUNNER_3_8R": -1.27
         },
         "policy_hits": {
           "SCALP_1_5R": 0,
@@ -862,15 +896,49 @@
           "RUNNER_3_8R": 0
         },
         "optimal_exit_policy": "ADAPTIVE_RUNNER"
+      },
+      "SILVERM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:0:REGULAR": {
+        "samples": 1,
+        "win_rate": 0.0,
+        "payoff_ratio": 0.0,
+        "baseline_mean_net_r": -1.25,
+        "policy_mean_net_r": {
+          "SCALP_1_5R": -1.25,
+          "SWING_2_2R": -1.25,
+          "RUNNER_3_8R": -1.25
+        },
+        "policy_hits": {
+          "SCALP_1_5R": 0,
+          "SWING_2_2R": 0,
+          "RUNNER_3_8R": 0
+        },
+        "optimal_exit_policy": "ADAPTIVE_RUNNER"
+      },
+      "SILVERM:MCX_TREND_PULLBACK:REGIME_STRONG_TREND:1:AUTONOMOUS_VOL_SHOCK_DETECTED": {
+        "samples": 1,
+        "win_rate": 1.0,
+        "payoff_ratio": 0.0,
+        "baseline_mean_net_r": 2.8,
+        "policy_mean_net_r": {
+          "SCALP_1_5R": 1.508,
+          "SWING_2_2R": 2.203,
+          "RUNNER_3_8R": 2.8
+        },
+        "policy_hits": {
+          "SCALP_1_5R": 1,
+          "SWING_2_2R": 1,
+          "RUNNER_3_8R": 0
+        },
+        "optimal_exit_policy": "ADAPTIVE_RUNNER"
       }
     },
     "top_playbooks": [
       "SILVERM:MCX_TREND_PULLBACK",
-      "GOLDM:MCX_TREND_PULLBACK",
-      "SILVERM:MCX_BREAKOUT_CONFIRM"
+      "SILVERM:MCX_BREAKOUT_CONFIRM",
+      "GOLDM:MCX_TREND_PULLBACK"
     ],
     "version": "10.0",
-    "date": "2026-11-16",
+    "date": "2026-11-18",
     "span_days": 30,
     "symbols": [
       "GOLDM",
@@ -1146,6 +1214,101 @@
       "setup": "MCX_TREND_PULLBACK_PE",
       "closed_at": "2026-11-16T17:49:21.660276+05:30",
       "net_r": -0.24
+    },
+    {
+      "regime": "REGIME_STRONG_TREND",
+      "weekday": 0,
+      "macro": null,
+      "features": [
+        0.5686,
+        0.48840000000000006,
+        0.29,
+        0.39999999999999997,
+        -0.999999999954012,
+        -0.13731726049872395,
+        0.0,
+        0.5595238095238096
+      ],
+      "symbol": "GOLDM",
+      "setup": "MCX_TREND_PULLBACK_PE",
+      "closed_at": "2026-11-16T20:58:58.674209+05:30",
+      "net_r": -1.47
+    },
+    {
+      "regime": "REGIME_STRONG_TREND",
+      "weekday": 1,
+      "macro": "AUTONOMOUS_VOL_SHOCK_DETECTED",
+      "features": [
+        0.6462,
+        0.45130000000000003,
+        0.6759999999999999,
+        0.5133333333333333,
+        0.9504106814787077,
+        0.023561456223271316,
+        0.16666666666666666,
+        0.03571428571428571
+      ],
+      "symbol": "SILVERM",
+      "setup": "MCX_TREND_PULLBACK_CE",
+      "closed_at": "2026-11-17T17:16:12.725656+05:30",
+      "net_r": 1.81
+    },
+    {
+      "regime": "REGIME_STRONG_TREND",
+      "weekday": 1,
+      "macro": "US_COMEX_OPEN_WINDOW",
+      "features": [
+        0.8268000000000001,
+        0.5154,
+        0.562,
+        0.6633333333333333,
+        0.9996710764713621,
+        0.13315996550765663,
+        0.16666666666666666,
+        0.17857142857142858
+      ],
+      "symbol": "SILVERM",
+      "setup": "MCX_TREND_PULLBACK_CE",
+      "closed_at": "2026-11-17T18:16:32.096376+05:30",
+      "net_r": -1.42
+    },
+    {
+      "regime": "REGIME_STRONG_TREND",
+      "weekday": 2,
+      "macro": "US_COMEX_OPEN_WINDOW",
+      "features": [
+        0.5042,
+        0.4446,
+        1.0,
+        0.8233333333333334,
+        -0.9997752506520837,
+        -0.2640980485259609,
+        0.3333333333333333,
+        0.16904761904761909
+      ],
+      "symbol": "GOLDM",
+      "setup": "MCX_TREND_PULLBACK_PE",
+      "closed_at": "2026-11-18T18:12:25.572164+05:30",
+      "net_r": 1.82
+    },
+    {
+      "regime": "REGIME_STRONG_TREND",
+      "weekday": 2,
+      "macro": "US_COMEX_OPEN_WINDOW",
+      "features": [
+        0.7490000000000001,
+        0.4211,
+        0.27999999999999997,
+        0.32,
+        0.9475572150441046,
+        0.1977559015379202,
+        0.3333333333333333,
+        0.32142857142857145
+      ],
+      "symbol": "GOLDM",
+      "setup": "MCX_TREND_PULLBACK_CE",
+      "closed_at": "2026-11-18T19:15:48.042146+05:30",
+      "net_r": -1.53
     }
   ]
 }
