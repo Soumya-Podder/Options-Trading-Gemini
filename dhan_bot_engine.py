@@ -51,6 +51,7 @@ from telegram_notifier import TelegramNotifier, TelegramCallFeed
 from nifty_market_structure import apply_nifty_level_entry, assess_nifty_structure
 from index_option_replay import replay_option_trade, ReplayDataError, fixed_contract_bars
 from nifty_oi import NiftyOITracker, IST, validate_option_greeks_and_iv
+from bot_observability import publish_bot_observation
 
 if __name__ == "__main__":
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -2905,6 +2906,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
     structure_candles = None
     sensex_structure = None
     sensex_structure_received = 0.0
+    sensex_candles = None
     last_oi_log = 0.0
     # Enabled by default in PAPER mode so GrowX and Tradewithsac early morning calls are always captured
     call_feed = (
@@ -3035,6 +3037,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     candles = dhan.fetch_index_spot_candles(
                         idx_name, (now - timedelta(days=10)).strftime('%Y-%m-%d 00:00:00'),
                         now.strftime('%Y-%m-%d %H:%M:%S'))
+                    sensex_candles = candles
                     sensex_structure = assess_nifty_structure(
                         candles, raw_oc.get('oc', {}), time.time(), view['spot'], 'BUY_CE', buffer=10)
                     sensex_structure['assessed_epoch'] = time.time()
@@ -3668,6 +3671,8 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                 {k: v for k, v in pos.items() if k != "entry_dt"} for pos in positions.values()
             ]
             telemetry_state["active_position"] = next(iter(telemetry_state["active_positions"]), None)
+            publish_bot_observation('index', idx_name,
+                                    structure_candles if idx_name == 'NIFTY' else sensex_candles, view)
             atomic_write_json("live_telemetry.json", telemetry_state)
 
         if not raw_oc:

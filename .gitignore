@@ -16,6 +16,8 @@ venv/
 dhan_hist_cache/
 stock_option_daily_entries/
 *.log
+*_desk_telemetry.json
+*_desk_telemetry.*.tmp
 
 # Local editor and agent files
 .vscode/
@@ -23,3 +25,6 @@ stock_option_daily_entries/
 .codex/
 .codex-remote-attachments/
 .agents/
+
+stock_scanner_last_snapshot.json
+stock_scanner_last_snapshot.tmp

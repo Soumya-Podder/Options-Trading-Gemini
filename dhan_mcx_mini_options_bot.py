@@ -22,6 +22,7 @@ import sys
 import csv
 import math
 import json
+from bot_observability import publish_bot_observation
 import time
 import hashlib
 import logging
@@ -2404,6 +2405,7 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger,
                     continue
                 now = datetime.now(IST)
                 c_view = analyzer.evaluate_commodity(s_cand, u_cand, c_candles, c_oc)
+                publish_bot_observation('mcx', s_cand, c_candles, c_view)
                 closed_bar_epochs = [
                     float(ts) for ts in c_candles.get("timestamp", [])
                     if float(ts) + 300.0 <= now.timestamp()
@@ -2444,6 +2446,7 @@ def run_mcx_session(live_mode: bool, symbols: List[str], logger: logging.Logger,
         telemetry.setdefault("commodities", {})[sym] = view
         telemetry["active_position"] = active_pos
         telemetry["recent_trades"] = ledger.get("trades", [])[-4:]
+        publish_bot_observation('mcx', sym, candles, view)
         atomic_write_json(TELEMETRY_FILE, telemetry)
         heartbeat_bucket = f"{now.strftime('%H:%M:')}{now.second // 2 * 2:02d}"
         if heartbeat_bucket != last_heartbeat_bucket:

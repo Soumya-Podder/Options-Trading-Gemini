@@ -2,15 +2,21 @@
 import json
 import math
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from stock_option_policy import stock_reporting_exclusions
+from dashboard_data import desk_snapshot
 
 ROOT = Path(__file__).resolve().parent
 IST = timezone(timedelta(hours=5, minutes=30))
 FILES = {'/': ('index.html', 'text/html'), '/app.js': ('app.js', 'text/javascript'),
-         '/style.css': ('style.css', 'text/css')}
+         '/style.css': ('style.css', 'text/css'), '/desk.js': ('desk.js', 'text/javascript'),
+         '/desk.css': ('desk.css', 'text/css')}
+FILES['/chart-navigation.js'] = ('chart-navigation.js', 'text/javascript')
+_desk_cache = (0, {})
+_live_scanner = None
 
 
 def read_json(name, errors):
@@ -55,20 +61,36 @@ def snapshot():
             if net is None or gross is None:
                 continue
             call = (trade.get('market_structure') or {}).get('telegram_call') or {}
+            diagnostics = trade.get('entry_diagnostics') or {}
+            entry = number(trade.get('entry_price'))
+            risk = number(trade.get('initial_risk_points'))
+            initial_stop = round(entry-risk, 2) if entry is not None and risk is not None else number(diagnostics.get('initial_sl'))
+            target = number(diagnostics.get('rupee_target_price'))
+            if target is None:
+                targets = [number(t) for t in call.get('targets', [])]
+                target = min((t for t in targets if t is not None and entry is not None and t > entry), default=None)
             trades.append({'segment': segment, 'symbol': trade.get('index') or trade.get('symbol') or segment,
                            'contract': str(trade.get('contract', '—')), 'source': call.get('source', 'Native'),
                            'entry': number(trade.get('entry_price')), 'exit': number(trade.get('exit_price')),
                            'lots': trade.get('lots'), 'qty': trade.get('qty'),
                            'closed': trade.get('exit_timestamp', ''), 'opened': trade.get('timestamp', ''),
                            'net': net, 'gross': gross, 'charges': round(gross-net, 2),
-                           'reason': trade.get('exit_reason', '—')})
+                           'reason': trade.get('exit_reason', '—'), 'initial_stop': initial_stop, 'target': target})
         for key, pos in ledger.items():
             if key.startswith('active_position') and isinstance(pos, dict) and pos.get('entry_price'):
                 positions.append({'segment': segment, 'symbol': pos.get('index') or pos.get('symbol'),
                                   'contract': pos.get('contract') or str(pos.get('strike', ''))+' '+pos.get('option_type', ''),
                                   'entry': number(pos.get('entry_price')), 'qty': pos.get('qty'),
-                                  'stop': number(pos.get('current_sl')), 'opened': pos.get('entry_ts')})
+                                  'target': number(pos.get('target_price') or pos.get('target')), 'stop': number(pos.get('current_sl')), 'opened': pos.get('entry_ts')})
     indices = read_json('live_telemetry.json', errors)
+    for path in (ROOT / 'stock_option_daily_entries').glob('*.json'):
+        saved = read_json(path.relative_to(ROOT), [])
+        details = saved.get('details') or {}
+        pos = details.get('position') or {}
+        if saved.get('state') == 'reserved' and details.get('mode') == 'PAPER' and pos.get('entry_price'):
+            positions.append({'segment': 'Stocks', 'symbol': pos.get('symbol'), 'contract': pos.get('contract'),
+                              'entry': number(pos.get('entry_price')), 'qty': pos.get('qty'),
+                              'target': number(pos.get('target_price') or pos.get('target')), 'stop': number(pos.get('current_sl')), 'opened': pos.get('entry_ts')})
     mcx = read_json('mcx_live_telemetry.json', errors)
     markets = []
     for name, telemetry, key in [('Indices', indices, 'indices'), ('Commodities', mcx, 'commodities')]:
@@ -105,8 +127,19 @@ def snapshot():
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
+        global _desk_cache
         if self.path == '/api/snapshot':
             body = json.dumps(snapshot(), allow_nan=False).encode()
+            content_type = 'application/json'
+        elif self.path == '/api/desk':
+            if time.monotonic() - _desk_cache[0] > 3:
+                _desk_cache = (time.monotonic(), desk_snapshot(ROOT))
+            document = {**_desk_cache[1], 'engines': dict(_desk_cache[1].get('engines', {}))}
+            live = _live_scanner.snapshot() if _live_scanner else {'status': 'ERROR', 'message': 'Live scanner is unavailable', 'symbols': {}}
+            document['live_scanner'] = live
+            document['engines']['Stocks'] = live['symbols']
+            document['scanner_basis'] = 'Live Dhan quotes every 3 seconds; previous-session volume and completed 15-minute EMA(10). No log-based matches.'
+            body = json.dumps(document, allow_nan=False).encode()
             content_type = 'application/json'
         elif self.path in FILES:
             filename, content_type = FILES[self.path]
@@ -127,5 +160,8 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == '__main__':
+    from live_stock_scanner import LiveStockScanner
+    _live_scanner = LiveStockScanner(ROOT)
+    _live_scanner.start()
     print('PAPER dashboard http://127.0.0.1:8765', flush=True)
     ThreadingHTTPServer(('127.0.0.1', 8765), Handler).serve_forever()

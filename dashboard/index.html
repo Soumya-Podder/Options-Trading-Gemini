@@ -11,9 +11,17 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/desk.css" />
+    <script src="/chart-navigation.js" defer></script>
     <script src="/app.js" defer></script>
+    <script src="/desk.js" defer></script>
   </head>
   <body>
+    <div class="glass-atmosphere" aria-hidden="true">
+      <div class="glass-orbit orbit-one"></div>
+      <div class="glass-orbit orbit-two"></div>
+      <div class="glass-orbit orbit-three"></div>
+    </div>
     <aside class="sidebar">
       <a class="brand" href="/" aria-label="Gemini home"
         ><span class="brandmark">✳</span
@@ -72,7 +80,7 @@
         <div class="page-heading reveal">
           <div class="heading-copy">
             <div class="eyebrow">YOUR TRADING DESK</div>
-            <h1 id="heading">Portfolio overview<span>.</span></h1>
+            <h1 id="heading">Trading workspace<span>.</span></h1>
             <p id="subtitle">PAPER trading performance</p>
           </div>
           <div class="period-control" aria-label="Reporting period">
@@ -82,6 +90,229 @@
           </div>
         </div>
         <div class="error-banner" id="errors" hidden></div>
+        <section
+          class="bot-workspace reveal"
+          id="bot-workspace"
+          data-active-bot="Indices"
+          aria-label="Three bot workspaces"
+        >
+          <div
+            class="bot-switcher"
+            id="bot-switcher"
+            role="tablist"
+            aria-label="Trading bot"
+          >
+            <button
+              class="bot-card active"
+              role="tab"
+              aria-selected="true"
+              data-bot="Indices"
+            >
+              <span class="bot-card-icon">↗</span
+              ><span class="bot-card-name"
+                >Nifty &amp; Sensex<small>Index options engine</small></span
+              ><span class="bot-card-status">Loading observations</span>
+              <div class="bot-card-metrics">
+                <span
+                  >PERIOD P&amp;L<strong data-bot-pnl="Indices">—</strong></span
+                ><span>TRADES<strong data-bot-count="Indices">—</strong></span>
+              </div>
+              <span class="bot-card-arrow">↗</span>
+            </button>
+            <button
+              class="bot-card"
+              role="tab"
+              aria-selected="false"
+              data-bot="Stocks"
+            >
+              <span class="bot-card-icon">◫</span
+              ><span class="bot-card-name"
+                >Stock options<small
+                  >Bullish &amp; bearish scanners</small
+                ></span
+              ><span class="bot-card-status">Loading observations</span>
+              <div class="bot-card-metrics">
+                <span
+                  >PERIOD P&amp;L<strong data-bot-pnl="Stocks">—</strong></span
+                ><span>TRADES<strong data-bot-count="Stocks">—</strong></span>
+              </div>
+              <span class="bot-card-arrow">↗</span>
+            </button>
+            <button
+              class="bot-card"
+              role="tab"
+              aria-selected="false"
+              data-bot="Commodities"
+            >
+              <span class="bot-card-icon">⌁</span
+              ><span class="bot-card-name"
+                >Commodities<small>MCX mini options engine</small></span
+              ><span class="bot-card-status">Loading observations</span>
+              <div class="bot-card-metrics">
+                <span
+                  >PERIOD P&amp;L<strong data-bot-pnl="Commodities"
+                    >—</strong
+                  ></span
+                ><span
+                  >TRADES<strong data-bot-count="Commodities">—</strong></span
+                >
+              </div>
+              <span class="bot-card-arrow">↗</span>
+            </button>
+          </div>
+          <section class="scanner-section" aria-label="Stock options scanners">
+            <div class="section-title">
+              <h2>Stock options scanners</h2>
+              <span id="scanner-observed"
+                >Recorded matches · awaiting data</span
+              >
+            </div>
+            <div class="scanner-grid">
+              <article class="panel scanner-panel">
+                <div class="scanner-heading">
+                  <div>
+                    <span class="scanner-dot bullish-dot"></span>
+                    <h3>Bullish scanner</h3>
+                    <small>Qualified scanner direction · CE candidates</small>
+                  </div>
+                  <span class="count-badge" id="bull-count">0</span>
+                </div>
+                <div id="bullish-scanner"></div>
+              </article>
+              <article class="panel scanner-panel">
+                <div class="scanner-heading">
+                  <div>
+                    <span class="scanner-dot bearish-dot"></span>
+                    <h3>Bearish scanner</h3>
+                    <small>Qualified scanner direction · PE candidates</small>
+                  </div>
+                  <span class="count-badge" id="bear-count">0</span>
+                </div>
+                <div id="bearish-scanner"></div>
+              </article>
+            </div>
+            <p class="scanner-coverage" id="scanner-coverage"></p>
+          </section>
+          <div class="desk-grid">
+            <article class="panel structure-panel">
+              <div class="desk-chart-heading">
+                <div class="symbol-selection">
+                  <label for="desk-symbol">MARKET STRUCTURE</label
+                  ><select
+                    id="desk-symbol"
+                    aria-label="Instrument for market structure"
+                  >
+                    <option>NIFTY</option>
+                  </select>
+                </div>
+                <div class="desk-price">
+                  <strong id="desk-spot">—</strong
+                  ><span id="desk-observed">Awaiting observations</span>
+                </div>
+              </div>
+              <div class="chart-options">
+                <span class="candle-timeframe">5 MIN CANDLES</span>
+                <div role="group" aria-label="Chart overlays">
+                  <button
+                    class="selected"
+                    data-overlay="levels"
+                    aria-pressed="true"
+                  >
+                    Support / resistance</button
+                  ><button
+                    class="selected"
+                    data-overlay="zones"
+                    aria-pressed="true"
+                  >
+                    Liquidity</button
+                  ><button
+                    class="selected"
+                    data-overlay="events"
+                    aria-pressed="true"
+                  >
+                    Breakouts
+                  </button>
+                </div>
+              </div>
+              <div class="chart-navigation" id="structure-navigation">
+                <span data-chart-range>Loading candles</span
+                ><span class="chart-hint">Scroll to zoom · drag to pan</span>
+                <div role="group" aria-label="Candlestick zoom controls">
+                  <button
+                    data-zoom="out"
+                    aria-label="Zoom out candlestick chart"
+                  >
+                    −</button
+                  ><button
+                    data-zoom="reset"
+                    aria-label="Reset candlestick chart"
+                  >
+                    Reset</button
+                  ><button
+                    data-zoom="in"
+                    aria-label="Zoom in candlestick chart"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+              <div class="candle-readout" id="candle-readout">
+                Select a candle to inspect its OHLC and recorded events.
+              </div>
+              <div class="structure-canvas-wrap">
+                <canvas
+                  id="structure-chart"
+                  role="img"
+                  aria-label="Five-minute candlesticks with recorded support, resistance and breakout events"
+                  tabindex="0"
+                ></canvas>
+                <div class="structure-empty" id="structure-empty" hidden>
+                  <span>⌁</span><strong>No candle recording available</strong>
+                  <p>
+                    Decision and scanner evidence is available below. Candle
+                    observations begin with the next engine session.
+                  </p>
+                </div>
+              </div>
+              <div class="structure-legend">
+                <span><i class="legend-up"></i> Bullish candle</span
+                ><span><i class="legend-down"></i> Bearish candle</span
+                ><span><i class="legend-5m"></i> 5m S/R</span
+                ><span><i class="legend-15m"></i> 15m S/R</span
+                ><span><i class="legend-4h"></i> 4h S/R</span
+                ><span><i class="legend-event"></i> Recorded event</span
+                ><span id="desk-source">—</span>
+              </div>
+            </article>
+            <aside class="panel decision-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2>Why this decision?</h2>
+                  <p id="decision-context">Recorded engine evidence</p>
+                </div>
+                <span class="decision-action" id="decision-action">WAIT</span>
+              </div>
+              <div id="decision-trail" class="decision-trail"></div>
+              <div class="decision-verdict" id="decision-verdict">
+                Waiting for the bot’s observations.
+              </div>
+            </aside>
+          </div>
+          <div class="levels-strip panel">
+            <div>
+              <h2>Structure map</h2>
+              <small>Recorded levels &amp; zones</small>
+            </div>
+            <div id="structure-levels" class="level-chips"></div>
+          </div>
+          <section class="execution-section">
+            <div class="section-title">
+              <h2>Execution trail</h2>
+              <span id="execution-caption">Completed PAPER trades</span>
+            </div>
+            <div class="execution-trail" id="execution-trail"></div>
+          </section>
+        </section>
         <section class="stats reveal" aria-label="Portfolio statistics">
           <article class="stat">
             <div class="stat-label">Total paper balance<span>↗</span></div>
@@ -120,11 +351,37 @@
                 <span id="chart-total">—</span
                 ><span class="chart-legend"><i></i> Net P&L</span>
               </div>
+              <div
+                class="chart-navigation performance-navigation"
+                id="performance-navigation"
+              >
+                <span data-chart-range>Loading results</span
+                ><span class="chart-hint">Scroll to zoom · drag to pan</span>
+                <div role="group" aria-label="Performance zoom controls">
+                  <button
+                    data-zoom="out"
+                    aria-label="Zoom out performance chart"
+                  >
+                    −</button
+                  ><button
+                    data-zoom="reset"
+                    aria-label="Reset performance chart"
+                  >
+                    Reset</button
+                  ><button
+                    data-zoom="in"
+                    aria-label="Zoom in performance chart"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
               <div class="chart-wrap">
                 <canvas
                   id="chart"
                   aria-label="Cumulative realised net profit and loss chart"
                   role="img"
+                  tabindex="0"
                 ></canvas>
                 <div class="chart-tooltip" id="chart-tooltip" hidden></div>
                 <div id="chart-empty" hidden>

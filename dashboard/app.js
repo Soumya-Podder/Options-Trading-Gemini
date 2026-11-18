@@ -41,6 +41,23 @@ const readable = (text) =>
     .toLowerCase();
 const animations = new WeakMap();
 let chartState = { points: [], progress: 1, hover: -1, frame: null };
+const performanceNavigation = createChartNavigation($("chart"), {
+  length: () => chartState.points.length,
+  plot: (width) => ({ left: 57, right: width - 13 }),
+  controls: "performance-navigation",
+  unit: "closes",
+  minCount: 2,
+  onChange: () => {
+    chartState.hover = -1;
+    chartState.progress = 1;
+    $("chart-tooltip").hidden = true;
+    drawChart();
+  },
+});
+function visiblePerformancePoints() {
+  const range = performanceNavigation.range();
+  return chartState.points.slice(range.start, range.end);
+}
 
 function html(id, value) {
   if ($(id).innerHTML !== value) $(id).innerHTML = value;
@@ -268,7 +285,18 @@ function drawChart() {
   const ctx = canvas.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, width, height);
-  const points = chartState.points;
+  const points = visiblePerformancePoints();
+  performanceNavigation.sync();
+  const axisLabel = (point) =>
+    point?.label === "Period start"
+      ? "Period start"
+      : point
+        ? point.label.slice(5, 10) + " · " + timeLabel(point.label) + " IST"
+        : "—";
+  if ($("chart-start").textContent !== axisLabel(points[0]))
+    $("chart-start").textContent = axisLabel(points[0]);
+  if ($("chart-end").textContent !== axisLabel(points.at(-1)))
+    $("chart-end").textContent = axisLabel(points.at(-1));
   if (!points.length) return;
   const values = points.map((p) => p.value);
   let min = Math.min(...values),
@@ -338,7 +366,7 @@ function drawChart() {
   ctx.fillStyle = color;
   ctx.fill();
   ctx.restore();
-  if (chartState.hover >= 0) {
+  if (chartState.hover >= 0 && points[chartState.hover]) {
     const i = chartState.hover;
     ctx.beginPath();
     ctx.moveTo(x(i), top);
@@ -353,20 +381,21 @@ function drawChart() {
 }
 
 $("chart").addEventListener("pointermove", (event) => {
-  if (chartState.points.length < 2) return;
+  const points = visiblePerformancePoints();
+  if (points.length < 2 || performanceNavigation.busy()) return;
   const bounds = event.currentTarget.getBoundingClientRect();
   const index = Math.max(
     0,
     Math.min(
-      chartState.points.length - 1,
+      points.length - 1,
       Math.round(
         ((event.clientX - bounds.left - 57) / (bounds.width - 70)) *
-          (chartState.points.length - 1),
+          (points.length - 1),
       ),
     ),
   );
   chartState.hover = index;
-  const point = chartState.points[index];
+  const point = points[index];
   $("chart-tooltip").textContent = `${point.label} · ${signed(point.value)}`;
   $("chart-tooltip").hidden = false;
   $("chart-tooltip").style.left =
@@ -391,6 +420,7 @@ new ResizeObserver(() => drawChart()).observe($("chart"));
 document.querySelectorAll("[data-period]").forEach((button) =>
   button.addEventListener("click", () => {
     state.period = button.dataset.period;
+    performanceNavigation.reset();
     document
       .querySelectorAll("[data-period]")
       .forEach((b) => b.classList.toggle("selected", b === button));
@@ -417,7 +447,7 @@ document.querySelectorAll("[data-page]").forEach((button) =>
       .querySelectorAll("[data-page]")
       .forEach((b) => b.classList.toggle("active", b === button));
     const names = {
-      overview: ["Overview", "Portfolio overview"],
+      overview: ["Overview", "Trading workspace"],
       trades: ["Trade history", "Every trade, accounted for"],
       intelligence: ["Intelligence", "Inside the engines"],
     };
@@ -472,3 +502,68 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refresh();
 });
 refresh();
+
+// Move a small composited reflection, leaving the frosted surface itself static.
+let reflectedSurface = null;
+let reflectionFrame = null;
+let reflectionPoint = null;
+function clearReflection() {
+  reflectedSurface?.classList.remove("glass-active");
+  reflectedSurface = null;
+}
+document.addEventListener(
+  "pointermove",
+  (event) => {
+    if (reducedMotion.matches || event.pointerType === "touch") return;
+    const surface = event.target.closest(".stat, .panel, .engine");
+    if (surface !== reflectedSurface) {
+      clearReflection();
+      reflectedSurface = surface;
+      if (surface) {
+        if (!surface.querySelector(":scope > .glass-reflection")) {
+          const reflection = document.createElement("span");
+          reflection.className = "glass-reflection";
+          reflection.setAttribute("aria-hidden", "true");
+          surface.append(reflection);
+        }
+        surface.classList.add("glass-active");
+      }
+    }
+    if (!surface) return;
+    reflectionPoint = { x: event.clientX, y: event.clientY };
+    if (reflectionFrame) return;
+    reflectionFrame = requestAnimationFrame(() => {
+      reflectionFrame = null;
+      if (!reflectedSurface || !reflectionPoint) return;
+      const bounds = reflectedSurface.getBoundingClientRect();
+      const reflection = reflectedSurface.querySelector(
+        ":scope > .glass-reflection",
+      );
+      reflection.style.transform = `translate3d(${reflectionPoint.x - bounds.left - 110}px, ${reflectionPoint.y - bounds.top - 110}px, 0)`;
+    });
+  },
+  { passive: true },
+);
+document.addEventListener("pointerleave", clearReflection);
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) clearReflection();
+});
+
+// A short, composited pulse gives every control the same tactile feedback.
+document.addEventListener("click", (event) => {
+  const button = event.target.closest("button");
+  if (!button || button.disabled || reducedMotion.matches) return;
+  button.querySelector(":scope > .control-pulse")?.remove();
+  const bounds = button.getBoundingClientRect();
+  const pulse = document.createElement("span");
+  const size = Math.max(bounds.width, bounds.height) * 1.8;
+  const x = event.detail ? event.clientX - bounds.left : bounds.width / 2;
+  const y = event.detail ? event.clientY - bounds.top : bounds.height / 2;
+  pulse.className = "control-pulse";
+  pulse.setAttribute("aria-hidden", "true");
+  pulse.style.width = pulse.style.height = size + "px";
+  pulse.style.left = x - size / 2 + "px";
+  pulse.style.top = y - size / 2 + "px";
+  button.append(pulse);
+  pulse.addEventListener("animationend", () => pulse.remove(), { once: true });
+});

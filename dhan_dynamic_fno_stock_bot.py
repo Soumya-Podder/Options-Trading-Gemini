@@ -11,6 +11,7 @@ import math
 from stock_option_policy import underwater_exit_reason
 import time
 import json
+from bot_observability import publish_bot_observation
 import hashlib
 import logging
 import struct
@@ -936,8 +937,13 @@ def recheck_recent_stock_candidate(client,candidate,cfg,market_quotes,reasons):
 
 
 def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day_change_pct, cfg, reasons=None, market_quotes=None, *, membership_only=False):
+    desk_evidence = {}
+    candles = None
     def reject(reason):
-        if reasons is not None:
+        if getattr(client, 'desk_observations_enabled', False) is True:
+            publish_bot_observation('stock', stock_info['symbol'], candles,
+                                    {**desk_evidence, 'entry_decision': {'action': 'HOLD', 'reason': reason}})
+        if reasons is not None and (not reasons or reasons[-1] != reason):
             reasons.append(reason)
         return None
     candles = client.fetch_intraday_candles(stock_info["eq_security_id"], interval="5",
@@ -949,6 +955,7 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
     current = fresh_stock_underlying_quote(client,stock_info["eq_security_id"],market_quotes)
     current['previous_session_reference']=daily_reference
     membership=scanx_stock_membership(candles,current,time.time())
+    desk_evidence.update(scanner_membership=membership, spot=spot_ltp, day_change_pct=day_change_pct)
     if not membership['allowed']:
         return reject('Scanner membership: '+membership['reason'])
     client.logger.info('[STOCK SCANNER %s] %s | %s','MATCH',
@@ -966,6 +973,10 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
                 client.logger.info("[STOCK ORDER FLOW CANDLE] %s | %s", stock_info["symbol"], json.dumps(flow))
                 order_flow.reported[security_id] = flow
     if membership_only:
+        if getattr(client, 'desk_observations_enabled', False) is True:
+            publish_bot_observation('stock', stock_info['symbol'], candles,
+                {**desk_evidence, 'entry_decision': {'action': 'SCAN_ONLY',
+                 'reason': 'Scanner-only observation; entry qualification was not requested'}})
         return membership
     sig = evaluate_stock_setup(candles, time.time(), cfg.min_day_change_pct, cfg.ema_period,
                                enable_opening_trend=cfg.enable_opening_trend,reasons=reasons,
@@ -973,8 +984,10 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
                                previous_close=membership['previous_close'],
                                require_breakout=cfg.require_confirmed_breakout,previous_session=daily_reference,
                                **({"order_flow": flow} if flow is not None else {}))
+    desk_evidence.update(sig or {})
     if not sig:
-        if reasons:return None
+        if reasons:
+            return reject(reasons[-1])
         return reject("No fresh confirmed momentum setup (EMA/VWAP/volume/body/proximity)")
     smc = sig.get('smc_quality') or {}
     if not smc.get('smc_passed'):
@@ -1079,6 +1092,9 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
     if not isinstance(context,dict):context={}
     context[str(stock_info['eq_security_id'])]={'candles':candles,'daily_reference':daily_reference}
     client._stock_verification_context=context
+    if getattr(client, 'desk_observations_enabled', False) is True:
+        publish_bot_observation('stock', stock_info['symbol'], candles,
+                                {**desk_evidence, 'entry_decision': {'action': 'CANDIDATE', 'reason': 'Underlying confirmed; checking executable option'}})
     return {**sig, **contract, "spot_ltp": final_spot, "eq_security_id": stock_info["eq_security_id"],
             'verified_epoch':time.time()}
 
@@ -1283,6 +1299,12 @@ def qualify_stock_contracts(client, sig, cfg, wallet, reject_label):
         reasons = []
         quote = depth.get(str(contract["opt_security_id"]), {})
         qualified = qualify_quote(contract, quote, cfg, wallet, reasons=reasons)
+        if getattr(client, 'desk_observations_enabled', False) is True:
+            context = getattr(client, '_stock_verification_context', {}).get(str(contract.get('eq_security_id')), {})
+            publish_bot_observation('stock', contract['symbol'], context.get('candles'),
+                {**contract, 'entry_decision': {
+                    'action': 'OPTION_QUALIFIED' if qualified else 'HOLD',
+                    'reason': 'Option qualified; checking final cash and entry limits' if qualified else (reasons[0] if reasons else 'Option not qualified')}})
         if qualified:
             qualified["alternate_contracts"] = [
                 alternate for alternate in alternatives if alternate["opt_security_id"] != contract["opt_security_id"]
@@ -1700,6 +1722,7 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
     if not env.get("DHAN_CLIENT_ID") or not env.get("DHAN_ACCESS_TOKEN"):
         raise ValueError("Missing Dhan credentials in .env")
     client = DhanStockOptionsClient(env["DHAN_CLIENT_ID"], env["DHAN_ACCESS_TOKEN"], logger)
+    client.desk_observations_enabled = True
     universe = DynamicStockOptionsUniverse.load_universe(logger, cfg.min_days_to_expiry)
     gate = DailyTradeGate(cfg.gate_dir, cfg.max_daily_trades)
     ledger = None if scan_once else load_or_init_ledger(live_mode, cfg.initial_capital)
