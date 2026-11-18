@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#000000" />
+    <title>Gemini · Trading desk</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;450;500;550;600;650;700&family=IBM+Plex+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <aside class="sidebar">
+      <a class="brand" href="/" aria-label="Gemini home"
+        ><span class="brandmark">✳</span
+        ><span>gemini<span class="brand-dot">.</span></span></a
+      >
+      <div class="workspace">
+        <span class="workspace-icon">G</span>
+        <div>Personal workspace<small>Trading desk</small></div>
+        <span class="chevron">⌄</span>
+      </div>
+      <span class="nav-label">WORKSPACE</span>
+      <nav aria-label="Main navigation">
+        <button class="nav-item active" data-page="overview">
+          <span class="nav-icon">◫</span> Overview<span
+            class="nav-indicator"
+          ></span>
+        </button>
+        <button class="nav-item" data-page="trades">
+          <span class="nav-icon">⇄</span> Trade history
+        </button>
+        <button class="nav-item" data-page="intelligence">
+          <span class="nav-icon">✧</span> Intelligence
+        </button>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="paper-note">
+          <i></i> PAPER ENVIRONMENT<small
+            >Virtual capital · Live market data</small
+          >
+        </div>
+        <div class="profile">
+          <span class="avatar">SP</span>
+          <div>Soumya Podder<small>Personal account</small></div>
+        </div>
+      </div>
+    </aside>
+    <div class="shell">
+      <header class="topbar">
+        <div>
+          <span class="breadcrumb">Workspace</span><span class="slash">/</span
+          ><span id="page-name">Overview</span>
+        </div>
+        <div class="header-right">
+          <span id="connection" class="connection"><i></i> Connecting</span
+          ><span class="header-divider"></span><time id="clock">— IST</time
+          ><button
+            class="icon-button"
+            id="refresh"
+            aria-label="Refresh dashboard"
+          >
+            ↻
+          </button>
+        </div>
+      </header>
+      <main>
+        <div class="page-heading reveal">
+          <div class="heading-copy">
+            <div class="eyebrow">YOUR TRADING DESK</div>
+            <h1 id="heading">Portfolio overview<span>.</span></h1>
+            <p id="subtitle">PAPER trading performance</p>
+          </div>
+          <div class="period-control" aria-label="Reporting period">
+            <button data-period="today" class="selected">Latest session</button
+            ><button data-period="week">7 days</button
+            ><button data-period="all">All time</button>
+          </div>
+        </div>
+        <div class="error-banner" id="errors" hidden></div>
+        <section class="stats reveal" aria-label="Portfolio statistics">
+          <article class="stat">
+            <div class="stat-label">Total paper balance<span>↗</span></div>
+            <div class="stat-value" id="balance">—</div>
+            <div class="stat-foot">
+              Across <span id="account-count">—</span> virtual wallets
+            </div>
+          </article>
+          <article class="stat">
+            <div class="stat-label">Realised P&L<span>⌁</span></div>
+            <div class="stat-value" id="pnl">—</div>
+            <div class="stat-foot" id="pnl-foot">After estimated charges</div>
+          </article>
+          <article class="stat">
+            <div class="stat-label">Completed trades<span>⇄</span></div>
+            <div class="stat-value" id="trade-count">—</div>
+            <div class="stat-foot" id="trade-foot">Waiting for ledger</div>
+          </article>
+          <article class="stat">
+            <div class="stat-label">Win rate<span>◎</span></div>
+            <div class="stat-value" id="win-rate">—</div>
+            <div class="stat-foot" id="win-foot">Closed trades only</div>
+          </article>
+        </section>
+        <div id="overview-content">
+          <section class="middle-grid reveal">
+            <article class="panel performance">
+              <div class="panel-heading">
+                <div>
+                  <h2>Performance</h2>
+                  <p>Cumulative realised net P&L</p>
+                </div>
+                <span class="subtle-tag">INR</span>
+              </div>
+              <div class="chart-summary">
+                <span id="chart-total">—</span
+                ><span class="chart-legend"><i></i> Net P&L</span>
+              </div>
+              <div class="chart-wrap">
+                <canvas
+                  id="chart"
+                  aria-label="Cumulative realised net profit and loss chart"
+                  role="img"
+                ></canvas>
+                <div class="chart-tooltip" id="chart-tooltip" hidden></div>
+                <div id="chart-empty" hidden>
+                  No completed trades in this period
+                </div>
+              </div>
+              <div class="chart-axis">
+                <span id="chart-start">Session start</span
+                ><span id="chart-end">Latest close</span>
+              </div>
+            </article>
+            <article class="panel allocation">
+              <div class="panel-heading">
+                <div>
+                  <h2>Your engines</h2>
+                  <p>Paper wallet allocation</p>
+                </div>
+                <span class="tiny-icon">◉</span>
+              </div>
+              <div id="wallets"></div>
+              <div class="allocation-note">
+                <span>↳</span> Nifty and Sensex share one wallet.
+              </div>
+            </article>
+          </section>
+        </div>
+        <section class="panel trade-panel reveal" id="trade-section">
+          <div class="panel-heading">
+            <div>
+              <h2>
+                Trade activity
+                <span class="count-badge" id="table-count">0</span>
+              </h2>
+              <p id="table-subtitle">Executed trades from your paper ledgers</p>
+            </div>
+            <div class="trade-actions">
+              <label class="search"
+                ><span>⌕</span
+                ><input
+                  id="search"
+                  type="search"
+                  placeholder="Search trades"
+                  aria-label="Search trades" /></label
+              ><button class="text-button" id="view-all">
+                View all <span>↗</span>
+              </button>
+            </div>
+          </div>
+          <div class="filter-row" aria-label="Filter trades by engine">
+            <button data-segment="All" class="selected">All engines</button
+            ><button data-segment="Indices">Nifty / Sensex</button
+            ><button data-segment="Stocks">Stock options</button
+            ><button data-segment="Commodities">Commodities</button>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>INSTRUMENT</th>
+                  <th>SOURCE</th>
+                  <th>ENTRY</th>
+                  <th>EXIT</th>
+                  <th>QUANTITY</th>
+                  <th>NET P&L</th>
+                  <th>CLOSED · IST</th>
+                </tr>
+              </thead>
+              <tbody id="trades"></tbody>
+            </table>
+          </div>
+          <div id="empty-trades" class="empty-state" hidden>
+            <span>⇄</span>
+            <h3>No trades to show</h3>
+            <p>
+              Completed trades will appear here as the bots close positions.
+            </p>
+          </div>
+          <div class="table-footer">
+            <span id="table-note">—</span
+            ><span>Net includes estimated charges</span>
+          </div>
+        </section>
+        <section class="reveal" id="intelligence-section">
+          <div class="section-title">
+            <h2>Engine intelligence</h2>
+            <span>Latest recorded decisions</span>
+          </div>
+          <div class="engine-grid" id="engines"></div>
+        </section>
+        <section class="panel reveal" id="positions-section" hidden>
+          <div class="panel-heading">
+            <div>
+              <h2>Open positions</h2>
+              <p>Saved entry state · prices may be delayed</p>
+            </div>
+          </div>
+          <div id="positions"></div>
+        </section>
+        <footer>
+          <span class="footer-brand">✳ gemini.</span
+          ><span>PAPER trading · All amounts in INR</span
+          ><span id="updated">Waiting for data</span>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>
