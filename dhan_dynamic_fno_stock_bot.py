@@ -396,7 +396,20 @@ class DynamicStockOptionsUniverse:
         for candidate in candidates:
             candidate["iv_range_low"], candidate["iv_range_high"] = min(ivs), max(ivs)
         candidates.sort(key=lambda c: (abs(abs(c["delta"])-(cfg.min_delta+cfg.max_delta)/2), c["iv"]))
-        return {**candidates[0], "alternate_contracts": candidates[1:3]}
+        primary = candidates[0]
+        listed_strikes = sorted(
+            float(strike) for strike, legs in stock_info["strikes_map"].items()
+            if legs.get(opt_type)
+        )
+        strike_index = listed_strikes.index(primary["strike"])
+        neighbor_index = strike_index + (-1 if opt_type == "CE" else 1)
+        itm_fallback = None
+        if 0 <= neighbor_index < len(listed_strikes):
+            neighbor = listed_strikes[neighbor_index]
+            itm_fallback = next((candidate for candidate in candidates
+                                 if candidate["strike"] == neighbor), None)
+        return {**primary, "alternate_contracts": candidates[1:3],
+                "itm_fallback_contract": itm_fallback}
 
 
 CACHE_VERSION = 2
@@ -1178,6 +1191,8 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
             return reject("Displayed depth below one lot")
         spread = (ask - bid) / ask * 100
         spread_limit = cfg.max_spread_pct + (1.0 if strong_mover else 0.0)
+        if sig.get("used_itm_fallback"):
+            spread_limit = min(spread_limit, 2.0)
         if spread > spread_limit:
             return reject(f"Spread {spread:.2f}% above {spread_limit:.2f}%")
         flow_rr = sig.get("order_flow_min_net_rr")
@@ -1300,11 +1315,31 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         return reject(f"Malformed quote or Greek data ({type(error).__name__})")
 
 
+def has_fresh_sub_floor_book(quote, now_epoch):
+    try:
+        bid = float(quote["depth"]["buy"][0]["price"])
+        ask = float(quote["depth"]["sell"][0]["price"])
+        return 0 <= quote_received_age(quote, now_epoch) <= 30 and 0 < bid <= ask < 6
+    except (KeyError, IndexError, TypeError, ValueError, OverflowError):
+        return False
+
+
 def qualify_stock_contracts(client, sig, cfg, wallet, reject_label):
     primary = {**sig}
     alternatives = primary.pop("alternate_contracts", [])
+    fallback = primary.pop("itm_fallback_contract", None)
+    is_fallback = primary.get("used_itm_fallback")
     contracts = [primary, *({**primary, **contract} for contract in alternatives)]
-    depth = client.fetch_option_quotes([contract["opt_security_id"] for contract in contracts])
+    quote_ids = [contract["opt_security_id"] for contract in contracts]
+    if fallback and not is_fallback:
+        quote_ids.append(fallback["opt_security_id"])
+    depth = client.fetch_option_quotes(list(dict.fromkeys(quote_ids)))
+    primary_quote = depth.get(str(primary["opt_security_id"]), {})
+    if is_fallback or has_fresh_sub_floor_book(primary_quote, time.time()):
+        alternatives = []
+        contracts = [primary]
+        if fallback and not is_fallback:
+            contracts.append({**primary, **fallback, "used_itm_fallback": True})
     for contract in contracts:
         reasons = []
         quote = depth.get(str(contract["opt_security_id"]), {})
@@ -1316,6 +1351,8 @@ def qualify_stock_contracts(client, sig, cfg, wallet, reject_label):
                     'action': 'OPTION_QUALIFIED' if qualified else 'HOLD',
                     'reason': 'Option qualified; checking final cash and entry limits' if qualified else (reasons[0] if reasons else 'Option not qualified')}})
         if qualified:
+            if contract is primary and not is_fallback:
+                qualified["itm_fallback_contract"] = fallback
             qualified["alternate_contracts"] = [
                 alternate for alternate in alternatives if alternate["opt_security_id"] != contract["opt_security_id"]
             ]
@@ -2064,6 +2101,7 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                 best, entry_quote = qualify_stock_contracts(client, best, cfg, wallet, "OPTSTK RECHECK REJECT")
                 if best:
                     best.pop("alternate_contracts", None)
+                    best.pop("itm_fallback_contract", None)
                 now = datetime.now(IST)
                 if not best or now.time().replace(tzinfo=None) >= SCAN_END_TIME:
                     continue
