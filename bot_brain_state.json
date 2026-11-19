@@ -13,34 +13,34 @@
       0.0
     ],
     [
-      -0.055432,
-      -0.021295,
-      0.231479,
-      0.189788,
-      -0.050169,
-      0.093153,
-      0.078078,
+      -0.069385,
+      -0.025774,
+      0.227163,
+      0.183083,
+      -0.044805,
+      0.083095,
+      0.073035,
       -0.161877,
-      0.117094,
-      -0.035443
+      0.110389,
+      -0.032182
     ],
     [
-      0.094512,
-      -0.100042,
-      -0.000574,
-      -0.038634,
-      0.125292,
-      0.004955,
-      -0.051157,
-      -0.002349,
+      0.09836,
+      -0.099311,
+      -0.002199,
+      -0.03948,
+      0.126419,
+      0.002841,
+      -0.052341,
+      -0.001491,
       -0.081472,
-      -0.050433
+      -0.049266
     ]
   ],
   "bias": [
     0.1,
-    -0.328867,
-    -0.384099
+    -0.335572,
+    -0.385508
   ],
   "epsilon": 0.05,
   "replay_buffer": [
@@ -1380,7 +1380,125 @@
       "action": 2,
       "reward_basis": "NET_AFTER_MODELED_CHARGES",
       "reward": -1.1464
+    },
+    {
+      "day": "2026-11-19",
+      "state": [
+        -2.7304,
+        -0.5188,
+        1.1527,
+        0.6,
+        -0.8,
+        1.5,
+        0.84,
+        -0.609,
+        0.0,
+        -0.8281
+      ],
+      "action": 2,
+      "reward_basis": "NET_AFTER_MODELED_CHARGES",
+      "reward": -1.1785
+    },
+    {
+      "day": "2026-11-19",
+      "state": [
+        2.0808,
+        0.6679,
+        0.6436,
+        1.0,
+        -0.8,
+        1.5,
+        0.752,
+        0.0,
+        1.0,
+        -0.4863
+      ],
+      "action": 1,
+      "reward_basis": "NET_AFTER_MODELED_CHARGES",
+      "reward": -1.5173
     }
   ],
-  "model_role": "DIAGNOSTIC_ONLY_RULES_CONTROL_TRADING"
+  "model_role": "DIAGNOSTIC_ONLY_RULES_CONTROL_TRADING",
+  "quality_factor_outcomes": {
+    "2|delta_band|MODERATE": {
+      "trades": 1,
+      "wins": 0,
+      "net_r_sum": -1.178501,
+      "days": [
+        "2026-11-19"
+      ]
+    },
+    "2|iv_trend|FALLING": {
+      "trades": 1,
+      "wins": 0,
+      "net_r_sum": -1.178501,
+      "days": [
+        "2026-11-19"
+      ]
+    },
+    "2|theta_load|LOW": {
+      "trades": 1,
+      "wins": 0,
+      "net_r_sum": -1.178501,
+      "days": [
+        "2026-11-19"
+      ]
+    },
+    "2|structure|CHANNEL_OR_OTHER": {
+      "trades": 1,
+      "wins": 0,
+      "net_r_sum": -1.178501,
+      "days": [
+        "2026-11-19"
+      ]
+    },
+    "2|regime|HIGH_IV_VEGA_MOMENTUM": {
+      "trades": 1,
+      "wins": 0,
+      "net_r_sum": -1.178501,
+      "days": [
+        "2026-11-19"
+      ]
+    },
+    "1|delta_band|MODERATE": {
+      "trades": 1,
+      "wins": 0,
+      "net_r_sum": -1.517318,
+      "days": [
+        "2026-11-19"
+      ]
+    },
+    "1|iv_trend|STABLE_OR_RISING": {
+      "trades": 1,
+      "wins": 0,
+      "net_r_sum": -1.517318,
+      "days": [
+        "2026-11-19"
+      ]
+    },
+    "1|theta_load|LOW": {
+      "trades": 1,
+      "wins": 0,
+      "net_r_sum": -1.517318,
+      "days": [
+        "2026-11-19"
+      ]
+    },
+    "1|structure|CHANNEL_OR_OTHER": {
+      "trades": 1,
+      "wins": 0,
+      "net_r_sum": -1.517318,
+      "days": [
+        "2026-11-19"
+      ]
+    },
+    "1|regime|GAMMA_BLAST_HERO_ZERO": {
+      "trades": 1,
+      "wins": 0,
+      "net_r_sum": -1.517318,
+      "days": [
+        "2026-11-19"
+      ]
+    }
+  }
 }
