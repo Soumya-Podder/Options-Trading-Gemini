@@ -985,6 +985,13 @@ def verify_live_scanx_and_resolve_stock_option(client, stock_info, spot_ltp, day
                                previous_close=membership['previous_close'],
                                require_breakout=cfg.require_confirmed_breakout,previous_session=daily_reference,
                                **({"order_flow": flow} if flow is not None else {}))
+    if not sig:
+        sig = evaluate_stock_setup(
+            candles, time.time(), cfg.min_day_change_pct, cfg.ema_period,
+            reasons=reasons, confirm_window_sec=cfg.confirm_window_sec,
+            previous_close=membership['previous_close'], order_flow=flow,
+            orb_ema_only=True,
+        )
     desk_evidence.update(sig or {})
     if not sig:
         if reasons:
@@ -1162,8 +1169,8 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         qty = int(sig["lot_size"])
         if not all(math.isfinite(v) for v in (bid, ask, wallet)) or not 0 < bid <= ask:
             return reject("Unusable bid/ask or wallet")
-        if not 3 <= ask <= cfg.max_premium:
-            return reject(f"Premium {ask:.2f} outside 3-{cfg.max_premium:.0f}")
+        if not 6 <= ask <= cfg.max_premium:
+            return reject(f"Premium {ask:.2f} outside 6-{cfg.max_premium:.0f}")
         depth_lots = min(int(bid_node["quantity"]), int(ask_node["quantity"])) // qty
         if depth_lots < 1:
             return reject("Displayed depth below one lot")

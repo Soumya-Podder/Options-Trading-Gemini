@@ -505,6 +505,50 @@ def order_flow_direction(flow, candle_start=None):
     return 1 if delta >= 0.15 * volume else -1 if delta <= -0.15 * volume else 0
 
 
+def detect_orb_ema_trend_continuation(bars, orb_high, orb_low):
+    """Evaluate a closed ORB/EMA continuation using median RVOL and session VWAP."""
+    if len(bars) < 50 or not 0 < orb_low < orb_high:
+        return {"reason": "Insufficient ORB or EMA history"}
+    latest, previous = bars[-2:][::-1]
+    close = latest["close"]
+    side = "CE" if close > orb_high else "PE" if close < orb_low else None
+    sign = 1 if side == "CE" else -1
+    level = orb_high if sign == 1 else orb_low
+    closes = [bar["close"] for bar in bars]
+    ema9, ema21, ema50 = (_ema(closes, period)[-1] for period in (9, 21, 50))
+    today = [bar for bar in bars if bar["date"] == latest["date"]]
+    volume = sum(bar["volume"] for bar in today)
+    if volume <= 0:
+        return {"reason": "Missing session VWAP"}
+    vwap = sum((bar["high"] + bar["low"] + bar["close"]) * bar["volume"]
+               for bar in today) / (3 * volume)
+    baseline = [bar["volume"] for bar in bars[-15:-1] if bar["volume"] > 0]
+    rvol = latest["volume"] / median(baseline) if baseline else 0
+    ema_stretch = abs(close / ema21 - 1) * 100
+    vwap_stretch = abs(close / vwap - 1) * 100
+    width = latest["high"] - latest["low"]
+    body = sign * (close - latest["open"]) / width if width > 0 else 0
+    edge = previous["high"] if sign == 1 else previous["low"]
+    probe = latest["low"] if sign == 1 else latest["high"]
+    fresh_break = sign * (previous["close"] - level) <= 0
+    trigger = level if fresh_break else edge
+    stacked = sign * (ema9 - ema21) > 0 and sign * (ema21 - ema50) >= -.002 * ema50
+    vwap_aligned = (sign * (close - vwap) > 0 and sign * (ema9 - vwap) >= -.002 * vwap)
+    checks = [
+        (side, "Inside opening range"),
+        (previous["timestamp"] + BAR_SECONDS == latest["timestamp"], "Gap before confirmation"),
+        (min(ema_stretch, vwap_stretch) <= 2.2, "Overextended from EMA21 and VWAP"),
+        (sign * (close - ema9) > 0 and (stacked or vwap_aligned), "EMA/VWAP alignment"),
+        (sign * (close - trigger) > 0, "No close through trigger"),
+        (body >= .38 and rvol >= .75, "Body or median RVOL"),
+        (sign * (probe - ema9) <= .006 * ema9 or sign * (probe - level) <= .006 * level,
+         "Away from EMA9 and ORB"),
+    ]
+    return {"reason": next((reason for passed, reason in checks if not passed), None),
+            "side": side, "trigger_level": trigger, "rvol": rvol, "body": body,
+            "vwap": vwap, "ema21_stretch_pct": ema_stretch, "vwap_stretch_pct": vwap_stretch}
+
+
 def evaluate_stock_setup(
     candles: dict,
     as_of_epoch: float,
@@ -517,6 +561,7 @@ def evaluate_stock_setup(
     require_breakout=False,
     previous_session=None,
     order_flow=None,
+    orb_ema_only=False,
 ) -> Optional[dict]:
     """Return a selective CE/PE setup, or None when any confirmation is absent.
 
@@ -564,7 +609,7 @@ def evaluate_stock_setup(
     day_change_pct = (latest["close"] / reference_close - 1.0) * 100.0
     if abs(day_change_pct) < min_day_change_pct:
         return reject('Closed day move below scanner threshold')
-    if abs(day_change_pct)>5.5+1e-9:
+    if not orb_ema_only and abs(day_change_pct)>5.5+1e-9:
         return reject('Closed day move exceeds 5.5% exhaustion cap')
     bars_15m = _completed_15m_bars(bars)
     if len(bars_15m) < ema_period + 2:
@@ -580,6 +625,37 @@ def evaluate_stock_setup(
         return reject('Unavailable ATR')
     liquidity = analyze_mtf_liquidity_and_reversal_zones(
         bars, 'CE' if day_change_pct > 0 else 'PE', latest['close'])
+    if orb_ema_only:
+        if len(opening_range) != 3 or latest["timestamp"] < session_open + 900:
+            return reject("Opening range incomplete")
+        if any(bar["timestamp"] != session_open + i * BAR_SECONDS for i, bar in enumerate(today_bars)):
+            return reject("Gap in current-session ORB history")
+        setup = detect_orb_ema_trend_continuation(bars, orb_high, orb_low)
+        if setup["reason"]:
+            return reject(setup["reason"])
+        side = setup["side"]
+        direction = 1 if side == "CE" else -1
+        if direction * day_change_pct < min_day_change_pct:
+            return reject("ORB continuation disagrees with day direction")
+        flow_direction = order_flow_direction(order_flow, latest["timestamp"])
+        if flow_direction and flow_direction != direction:
+            return reject("Completed candle order flow opposes ORB continuation")
+        return {
+            "opt_type": side, "scanner": "ORB_EMA9_TREND_CONTINUATION_" + side,
+            "signal_timestamp": latest["timestamp"], "spot_ltp": latest["close"],
+            "conf_close": latest["close"], "conf_high": latest["high"], "conf_low": latest["low"],
+            "atr_5m": atr_5m, "day_change_pct": day_change_pct,
+            "signal_quality": min(96, 72 + setup["rvol"] * 8 + setup["body"] * 15),
+            "relative_volume": setup["rvol"], "quality_volume_ratio": setup["rvol"],
+            "body_ratio": setup["body"], "vwap": setup["vwap"], "orb_high": orb_high, "orb_low": orb_low,
+            "higher_timeframe_aligned": False, "mtf_liquidity": liquidity,
+            "smc_quality": {"smc_passed": True, "qualification": "ORB_EMA_VWAP"},
+            "breakout_confirmation": {
+                "entry_path": "ORB_EMA9_TREND_CONTINUATION", "closed_candle": True,
+                "trigger_level": setup["trigger_level"], "buffer": max(.05, .05 * atr_5m),
+                "relative_volume": setup["rvol"],
+            },
+        }
     sweep_entry = liquidity['liquidity_sweep_bounce']
     total_volume = sum(bar["volume"] for bar in today_bars)
     if total_volume <= 0:
