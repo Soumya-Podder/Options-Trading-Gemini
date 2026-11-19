@@ -53,6 +53,8 @@ class TelegramCallFeed:
     """Public channel candidates only. Broker decisions remain in the PAPER engine."""
     CHANNEL='tradewith_sac'
     SOURCES={-1003882006811:'Tradewithsac',-1002302217039:'GrowX'}
+    ENTRY_TTL = 240
+    RETIREMENT = re.compile(r"\b(?:(?:TARGET\s*1|T1)\s*(?:IS\s+)?(?:HIT|DONE|ACHIEVED|REACHED)|BOOK(?:\s+(?:PROFIT|PARTIAL))?|SAFE\s+TRADERS|SL\s+(?:TO\s+)?COST|HIGH\s+MADE|EXIT|CLOSED)\b", re.I)
     MAX_AGE=900
     MAX_PENDING_AGE=1800
 
@@ -148,11 +150,21 @@ class TelegramCallFeed:
             except (TypeError,ValueError,KeyError):continue
         return updates
 
-    def ingest(self,text,posted_epoch,source_url,now_epoch,source):
+    def ingest(self,text,posted_epoch,source_url,now_epoch,source,reply_url=None):
         call,update=self.parse_message(text,posted_epoch,source_url,now_epoch,source)
         if 0<=now_epoch-posted_epoch<=self.MAX_AGE and call is None and update is None and re.search(r'\b(?:NIFTY|SENSEX)\s+\d+(?:\.\d+)?\s+(?:CE|PE)\b',text.upper()) and re.search(r'\bBUY\b',text.upper()):
             self.logger.warning('[CHANNEL FORMAT REJECT] %s | %s | Unrecognised entry format; no candidate created',source,source_url)
         with self._lock:
+            if self.RETIREMENT.search(text):
+                matches = [c for c in self._calls if c['source'] == source
+                           and 0 <= posted_epoch-c['posted_epoch'] <= self.MAX_PENDING_AGE
+                           and (c['source_url'] in (source_url, reply_url)
+                                or (update and all(c[k] == update[k] for k in ('index','strike','option_type')))
+                                or re.search(rf"\b{c['strike']:g}\s*{c['option_type']}\b", text, re.I))]
+                if matches:
+                    pending = max(matches, key=lambda c: c['posted_epoch'])
+                    pending['retired_reason'] = 'CHANNEL_CALL_RETIRED_TARGET_OR_BOOK_UPDATE'
+                call = None
             if call:
                 call['first_received_epoch']=now_epoch
                 old=next((c for c in self._calls if c['key']==call['key']),None)
@@ -187,17 +199,17 @@ class TelegramCallFeed:
 
     @classmethod
     def entry_is_fresh(cls,call,now_epoch):
-        if call.get('cancelled'):return False
+        if call.get('cancelled') or call.get('retired_reason'):return False
         # SAC announces pending alerts before publishing matching activation.
         if call.get('requires_activation',call.get('source')=='Tradewithsac') and 'activation_epoch' not in call:return False
         if 'activation_epoch' not in call and 0<=call.get('first_received_epoch',float('inf'))-call['posted_epoch']<=cls.MAX_AGE:
-            return 0<=now_epoch-call['posted_epoch']<=cls.MAX_AGE
+            return 0<=now_epoch-call['posted_epoch']<=cls.ENTRY_TTL
         epoch=call.get('activation_epoch',call['posted_epoch'])
         if 'activation_epoch' in call:
             if not (0<=call.get('first_received_epoch',float('inf'))-call['posted_epoch']<=cls.MAX_AGE
                     and 0<=epoch-call['posted_epoch']<=cls.MAX_PENDING_AGE
                     and 0<=call.get('activation_received_epoch',float('inf'))-epoch<=cls.MAX_AGE):return False
-        return 0<=now_epoch-epoch<=cls.MAX_AGE
+        return 0<=now_epoch-epoch<=cls.ENTRY_TTL
 
     def restore_pending(self,calls,now_epoch):
         day=datetime.fromtimestamp(now_epoch,timezone(timedelta(hours=5,minutes=30))).date()
@@ -216,6 +228,17 @@ class TelegramCallFeed:
                     and 0<=now_epoch-c['posted_epoch']<=self.MAX_PENDING_AGE
                     and 0<=c.get('first_received_epoch',float('inf'))-c['posted_epoch']<=self.MAX_AGE]
 
+    def retire(self, call, reason):
+        with self._lock:
+            for pending in self._calls:
+                if pending['key'] == call['key']:
+                    pending.setdefault('retired_reason', reason)
+
+    def still_eligible(self, call, now_epoch):
+        with self._lock:
+            return any(pending['key'] == call['key'] and self.entry_is_fresh(pending, now_epoch)
+                       for pending in self._calls)
+
     def candidates(self, index, now_epoch, consumed):
         if getattr(self,'_authorized_mode',False) and self.connection_status!='CONNECTED':return []
         with self._lock:
@@ -229,6 +252,7 @@ class TelegramCallFeed:
         results=[]
         for call in calls:
             if call['key'] in consumed:state='ALREADY_EXECUTED'
+            elif call.get('retired_reason'):state=call['retired_reason']
             elif call.get('cancelled'):state='CANCELLED'
             elif not 0<=call.get('first_received_epoch',float('inf'))-call['posted_epoch']<=self.MAX_AGE:state='RECEIVED_TOO_LATE'
             elif call.get('requires_activation',call.get('source')=='Tradewithsac') and 'activation_epoch' not in call:state='WAITING_FOR_ACTIVATION'
@@ -255,7 +279,9 @@ class TelegramCallFeed:
             def accept(message,channel_id):
                 if channel_id not in self.SOURCES or not message.date:return
                 url=f'https://t.me/c/{str(abs(channel_id))[3:]}/{message.id}'
-                self.ingest(message.raw_text or '',message.date.timestamp(),url,time.time(),self.SOURCES[channel_id])
+                reply_id = getattr(message, 'reply_to_msg_id', None)
+                reply_url = url.rsplit('/', 1)[0] + '/' + str(reply_id) if reply_id else None
+                self.ingest(message.raw_text or '',message.date.timestamp(),url,time.time(),self.SOURCES[channel_id],reply_url)
             async def receive(event):accept(event.message,event.chat_id)
             client.add_event_handler(receive,events.NewMessage(chats=list(entities.values())))
             client.add_event_handler(receive,events.MessageEdited(chats=list(entities.values())))

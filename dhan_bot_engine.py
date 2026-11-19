@@ -178,7 +178,7 @@ def reserve_index_entry(ledger, day, details, ledger_path="paper_trade_ledger.js
     return True
 
 
-def channel_entry_view(view, chain, call, current_expiry, received_epoch, now_epoch):
+def channel_entry_view(view, chain, call, current_expiry, received_epoch, now_epoch, *, feed=None):
     """Follow fresh channel direction in PAPER (GrowX & Tradewithsac), retaining executable-quote safeguards."""
     try:
         if not current_expiry:
@@ -193,6 +193,13 @@ def channel_entry_view(view, chain, call, current_expiry, received_epoch, now_ep
         bid = float(node['top_bid_price'])
         ask = float(node['top_ask_price'])
         ltp = float(node['last_price'])
+        _, cap = TelegramCallFeed.entry_bounds(call)
+        if math.isfinite(ltp) and ltp >= cap + max(8.0, cap * .06):
+            reason = 'CHANNEL_CALL_RETIRED_MISSED_IMPULSE'
+            if feed is not None:
+                feed.retire(call, reason)
+            return None, reason
+
         greeks = node.get('greeks') or {}
         delta = float(greeks.get('delta', node.get('delta')))
         theta = float(greeks.get('theta', node.get('theta')))
@@ -2982,7 +2989,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
             )
             if quote:
                 checked_view, reason = channel_entry_view({"index": idx_name}, quote["oc"], priority_call,
-                                               expiry, quote["received_epoch"], time.time())
+                                               expiry, quote["received_epoch"], time.time(), feed=call_feed)
                 logger.info("[CHANNEL DIRECT QUOTE] %s | %s", priority_call["source_url"], reason)
                 if checked_view is not None:
                     direct_call_quote = quote
@@ -3395,7 +3402,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                     for candidate in channel_candidates:
                         channel_view, reason = channel_entry_view(
                             view, raw_oc.get('oc', {}), candidate,
-                            expiries.get(idx_name), chain_received_epoch, time.time()
+                            expiries.get(idx_name), chain_received_epoch, time.time(), feed=call_feed
                         )
                         if reason != last_call_decision.get(candidate['key']):
                             logger.info('[TELEGRAM CALL] %s | %s', candidate['source_url'], reason)
@@ -3587,7 +3594,7 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         if live_mode and not sec_id:
                             logger.error("Missing option security ID; no entry submitted.")
                             continue
-                        if channel_call and not TelegramCallFeed.entry_is_fresh(channel_call, time.time()):
+                        if channel_call and not call_feed.still_eligible(channel_call, time.time()):
                             continue
                         position_key = "active_channel_position" if channel_call else "active_position"
                         if not combined_paper_entry_allowed(today_str):
