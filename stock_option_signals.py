@@ -634,7 +634,9 @@ def evaluate_stock_setup(
                         and latest['volume']>=1.2*early_baseline and volume_rising
                         and (buy_continuation if day_change_pct>0 else sell_continuation)):
                     adjusted_volume=True;baseline=early_baseline;adjusted_required=1.2*baseline
-        if not adjusted_volume and not prepared and not sweep_entry:
+        # Strict entries evaluate the structural retest below before rejecting
+        # volume against a mean inflated by the original breakout.
+        if not require_breakout and not adjusted_volume and not prepared and not sweep_entry:
             return reject('Confirmation volume below 1.2 times recent average')
     bullish = (day_change_pct >= min_day_change_pct
                and (volume_rising or buy_continuation or sweep_entry)
@@ -692,6 +694,8 @@ def evaluate_stock_setup(
         sign=1 if bullish else -1
         buffer=max(0.05,0.05*atr_5m)
         retest=confirmed_pullback_retest(today_bars,prior_high,prior_low,orb_high,orb_low,atr_5m,bullish)
+        if not regular_volume and not adjusted_volume and not prepared and not retest:
+            return reject('Confirmation volume below 1.2 times recent average; no confirmed pullback retest')
         # Local bases only qualify on the already-broken side of prior-day and
         # opening levels. Basic scanner membership is still enforced upstream.
         if prepared and sign*(latest['close']-(max(prior_high,orb_high) if bullish else min(prior_low,orb_low)))<=buffer:
