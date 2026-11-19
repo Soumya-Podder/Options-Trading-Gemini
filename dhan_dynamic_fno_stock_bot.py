@@ -598,6 +598,8 @@ class DhanStockOptionsClient:
                 "first_bar":datetime.fromtimestamp(data["timestamp"][0],IST).isoformat(),
                 "last_bar":datetime.fromtimestamp(data["timestamp"][-1],IST).isoformat(),
                 "rows":len(data["timestamp"]), "source":source})
+            if endpoint == "historical":
+                return data
             step = int(payload["interval"])*60
             for previous, current in zip(data["timestamp"],data["timestamp"][1:]):
                 if (datetime.fromtimestamp(previous,IST).date() == datetime.fromtimestamp(current,IST).date()
@@ -2181,7 +2183,9 @@ def simulate_fixed_premium_trade(entry_ts, bars, qty, cfg, opt_type="CE"):
     return None
 
 
-def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current_implementation=False):
+def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current_implementation=False, *, orb_ema=None, output_path="stock_fno_backtest_ledger.json"):
+    if orb_ema is None:
+        orb_ema = current_implementation
     env = load_dotenv_file(".env")
     client = DhanStockOptionsClient(env.get("DHAN_CLIENT_ID", ""), env.get("DHAN_ACCESS_TOKEN", ""), logger)
     universe = DynamicStockOptionsUniverse.load_universe(logger, cfg.min_days_to_expiry)
@@ -2202,6 +2206,7 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current
             continue
         frames[sec] = stock
         last_day, prev_close, last_close = None, None, None
+        daily_rows = None
         for i, ts in enumerate(candles["timestamp"]):
             ts = int(ts)
             if ts < start.timestamp():
@@ -2226,15 +2231,42 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current
             prefix = {k: v[lower:i+1] for k, v in candles.items() if isinstance(v, list)}
             session_volume=sum(float(v) for t,v in zip(prefix['timestamp'],prefix['volume'])
                                if datetime.fromtimestamp(t,IST).date()==day)
+            if current_implementation and daily_rows is None:
+                raw_daily = client._history_window(
+                    "historical", {"securityId": str(sec), "exchangeSegment": "NSE_EQ",
+                                   "instrument": "EQUITY", "expiryCode": 0, "oi": False},
+                    start-timedelta(days=10), end,
+                    ("timestamp", "open", "high", "low", "close", "volume"),
+                    client.history_cache_dir, True,
+                )
+                daily_rows = []
+                if raw_daily:
+                    daily_rows = [
+                        {"date": datetime.fromtimestamp(t, IST).date().isoformat(),
+                         "high": high, "low": low, "close": close, "volume": volume}
+                        for t, high, low, close, volume in zip(
+                            *(raw_daily[k] for k in ("timestamp", "high", "low", "close", "volume")))
+                    ]
+            reference = next((row for row in reversed(daily_rows or []) if row["date"] < day.isoformat()), None)
+            scanner_close = reference["close"] if reference else prev_close
             membership=scanx_stock_membership(prefix,{'last_price':last_close,
-                'ohlc':{'close':prev_close},'volume':session_volume,'received_epoch':ts+300},
+                'ohlc':{'close':scanner_close},'volume':session_volume,'received_epoch':ts+300,
+                'previous_session_reference':reference},
                 ts+300)
             if not membership['allowed']:
                 scanner_rejections[membership['reason']]+=1
                 continue
             sig = evaluate_stock_setup(prefix, ts+300, cfg.min_day_change_pct, cfg.ema_period,
                                         enable_opening_trend=cfg.enable_opening_trend,confirm_window_sec=cfg.confirm_window_sec,
-                                        require_breakout=cfg.require_confirmed_breakout)
+                                        require_breakout=cfg.require_confirmed_breakout,
+                                        previous_close=scanner_close if current_implementation else None,
+                                        previous_session=reference)
+            if not sig and orb_ema:
+                sig = evaluate_stock_setup(
+                    prefix, ts+300, cfg.min_day_change_pct, cfg.ema_period,
+                    confirm_window_sec=cfg.confirm_window_sec,
+                    previous_close=scanner_close, orb_ema_only=True,
+                )
             if sig and (sig.get('smc_quality') or {}).get('smc_passed') and (sig.get('mtf_liquidity') or {}).get('liquidity_clear'):
                 signals[(ts+300, sec)] = sig
     ledger = {"mode": "BACKTEST", "initial_capital": cfg.initial_capital, "trades": [],
@@ -2297,7 +2329,7 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current
                 skipped += 1
                 data_skips["option_history_unavailable" if not bars else "entry_bar_missing_or_invalid_strike"] += 1
                 continue
-            if not 3 <= first["open"] <= cfg.max_premium:
+            if not (6 if orb_ema else 3) <= first["open"] <= cfg.max_premium:
                 strategy_rejections["premium_outside_limits"] += 1
                 continue
             qty = stock["fno_lot_size"]
@@ -2365,12 +2397,14 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current
                   scanner_rejection_counts=dict(scanner_rejections),
                   historical_data_issues=events, historical_data_coverage=client.history_coverage, stock_universe_requested=len(stocks),
                   period={"from_inclusive":start.isoformat(),"to_exclusive":end.isoformat()})
-    atomic_write_json("stock_fno_backtest_ledger.json", ledger)
+    ledger["entry_configuration"]["orb_ema_fallback"] = orb_ema
+    ledger["entry_configuration"]["minimum_option_premium"] = 6 if orb_ema else 3
+    atomic_write_json(output_path, ledger)
     if not complete or identity_unverified:
         logger.error("BACKTEST INCOMPLETE: %d history issues, %d unvalidated signals/outcomes; fixed-contract price identity verified: %s. Recorded P&L is provisional.",len(events),skipped,not identity_unverified)
     logger.info("Selective backtest: %d trades, %d unvalidated candidates/outcomes | net Rs.%+.2f | avg net win/loss ratio %s",
                 ledger["total_trades"], skipped, ledger["net_profit_after_charges"], ledger["net_win_to_loss_ratio"])
-    logger.info("Saved separate stock_fno_backtest_ledger.json. Replay does not validate historical Greeks, strike selection or intrabar execution.")
+    logger.info("Saved %s. Replay does not validate historical Greeks, strike selection or intrabar execution.", output_path)
     return ledger
 
 
