@@ -289,7 +289,7 @@ def index_entry_signal(brain, view, losses, now, cooldown_until, channel_call=No
     return action, sig
 
 
-def index_contract_quality(view, node, strike, option_type):
+def index_contract_quality(view, node, strike, option_type, *, channel_entry=False):
     """Apply the same selected-contract and opposing-wall checks to every entry."""
     structure = view.get('market_structure') or {}
     side = option_type.lower()
@@ -309,7 +309,10 @@ def index_contract_quality(view, node, strike, option_type):
     if matrix and not 0 <= time.time() - float(matrix.get('snapshot_epoch', 0)) <= 30:
         reasons.append('MULTI_HORIZON_SNAPSHOT_STALE')
     walls = []
-    if not structure.get('ready') or not mtf:
+    mtf_ready = bool(mtf and (structure.get('ready') or (
+        channel_entry and view['index'] == 'NIFTY' and structure.get('historical_mtf_ready')
+    )))
+    if not mtf_ready:
         reasons.append('MTF_STRUCTURE_NOT_READY')
     else:
         sign = 1 if option_type == 'CE' else -1
@@ -326,7 +329,7 @@ def index_contract_quality(view, node, strike, option_type):
             reasons.append('OPPOSING_MULTI_TIMEFRAME_WALL')
     components = {
         'greeks': greek['greek_score'],
-        'structure': 100.0 if structure.get('ready') and not walls else 0.0,
+        'structure': 100.0 if mtf_ready and not walls else 0.0,
         'option_flow': (100.0 if matched and (matched.get('premium_change_over_5m') or 0) > 0 else 0.0),
         'regime': 100.0 if (view.get('regime_info') or {}).get('regime') else 0.0,
     }
@@ -3567,7 +3570,10 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             if initial_risk <= 0 or bid <= init_sl:
                                 logger.info("[PAPER NIFTY RETRY] Entry rejected by remaining risk or stop distance")
                                 continue
-                        quality = index_contract_quality(view, {**entry_node, 'top_ask_price': entry_p}, strike_k, opt_type)
+                        quality = index_contract_quality(
+                            view, {**entry_node, 'top_ask_price': entry_p}, strike_k, opt_type,
+                            channel_entry=channel_call is not None,
+                        )
                         outcomes = brain.brain.get('quality_factor_outcomes', {})
                         adjustment = 0
                         for name, value in quality['factors'].items():

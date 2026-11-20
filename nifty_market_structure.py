@@ -198,6 +198,17 @@ def assess_nifty_structure(candles, chain, as_of, spot, direction,
         bars.sort(key=lambda b:b["ts"])
         today=[b for b in bars if b["date"]==now.date()]
         prior=[b for b in bars if b["date"]<now.date()]
+        if prior:
+            previous_day=prior[-1]["date"]
+            previous_session=[b for b in prior if b["date"]==previous_day]
+            if (len(previous_session)!=75 or any(b["ts"]-a["ts"]!=300 for a,b in zip(previous_session,previous_session[1:]))
+                    or datetime.fromtimestamp(previous_session[0]["ts"],IST).time().isoformat()!="09:15:00"
+                    or datetime.fromtimestamp(previous_session[-1]["ts"],IST).time().isoformat()!="15:25:00"):
+                result["reason"]="Prior-session high/low coverage incomplete"
+                return result
+            mtf_info = compute_multi_timeframe_sr_and_bounces(bars, today, spot)
+            if mtf_info.get("htf_4h_levels") and mtf_info.get("mtf_15m_levels"):
+                result.update(mtf_sr=mtf_info, historical_mtf_ready=True)
         if len(today)<(4 if enable_opening_trend else 5) or not prior:
             count="four" if enable_opening_trend else "five"
             result["reason"]=f"Need prior-session data and {count} closed session candles"
@@ -205,13 +216,6 @@ def assess_nifty_structure(candles, chain, as_of, spot, direction,
         latest,previous=today[-1],today[-2]
         if not 0<=as_of-(latest["ts"]+300)<confirm_window_sec or latest["ts"]-previous["ts"]!=300:
             result["reason"]="Stale or gapped confirmation candles"
-            return result
-        previous_day=prior[-1]["date"]
-        previous_session=[b for b in prior if b["date"]==previous_day]
-        if (len(previous_session)!=75 or any(b["ts"]-a["ts"]!=300 for a,b in zip(previous_session,previous_session[1:]))
-                or datetime.fromtimestamp(previous_session[0]["ts"],IST).time().isoformat()!="09:15:00"
-                or datetime.fromtimestamp(previous_session[-1]["ts"],IST).time().isoformat()!="15:25:00"):
-            result["reason"]="Prior-session high/low coverage incomplete"
             return result
         opening=[b for b in today if datetime.fromtimestamp(b["ts"],IST).hour==9 and datetime.fromtimestamp(b["ts"],IST).minute in (15,20,25)]
         if len(opening)!=3 or any(b["ts"]-a["ts"]!=300 for a,b in zip(today,today[1:])):
@@ -233,7 +237,7 @@ def assess_nifty_structure(candles, chain, as_of, spot, direction,
                              min_drive_pct=0.2,allow_drive=enable_opening_drive,
                              min_body_fraction=min_body,min_close_fraction=min_close) if enable_opening_trend else None
         # A pivot needs two already-closed candles on each side, plus 4H/15m/5m multi-bounce levels.
-        mtf_info = compute_multi_timeframe_sr_and_bounces(bars, today, spot)
+        mtf_info = result.get("mtf_sr") or compute_multi_timeframe_sr_and_bounces(bars, today, spot)
         result["mtf_sr"] = mtf_info
         swings = list(mtf_info.get("multi_bounce_levels", [])) + list(mtf_info.get("mtf_15m_levels", [])[-8:])
         for i in range(2,len(today)-2):
@@ -386,6 +390,10 @@ def apply_nifty_level_entry(analysis, candles, chain, as_of, include_nearest=Fal
     analysis["market_structure"]=rejected
     oi=analysis.get("oi_analysis",{})
     if not oi.get("ready"):
+        history = assess_nifty_structure(candles, {}, as_of, analysis["spot"], "BUY_CE",
+                                        enable_opening_trend=enable_opening_trend)
+        if history.get("historical_mtf_ready"):
+            rejected.update(mtf_sr=history["mtf_sr"], historical_mtf_ready=True)
         return rejected
     marked={}
     confirmations={"BUY_CE":{},"BUY_PE":{}}

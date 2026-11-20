@@ -1,14 +1,14 @@
 {
   "mode": "PAPER",
   "initial_capital": 40000.0,
-  "virtual_balance_gross": 33067.75,
-  "virtual_balance_net": 31857.75,
-  "profit_without_charges": -6932.25,
-  "net_profit_after_charges": -8142.25,
-  "total_trades": 18,
+  "virtual_balance_gross": 32073.25,
+  "virtual_balance_net": 30734.25,
+  "profit_without_charges": -7926.75,
+  "net_profit_after_charges": -9265.75,
+  "total_trades": 20,
   "avg_winning_value_rs": 568.75,
-  "avg_losing_value_rs": 657.66,
-  "win_to_loss_ratio": 0.86,
+  "avg_losing_value_rs": 637.61,
+  "win_to_loss_ratio": 0.89,
   "trades": [
     {
       "timestamp": "2026-11-11 12:13:36",
@@ -2840,6 +2840,1095 @@
       "exit_diagnostics": {
         "peak_net_pnl": 0.5
       }
+    },
+    {
+      "timestamp": "2026-11-20 09:47:10",
+      "exit_timestamp": "2026-11-20 09:47:48",
+      "index": "NIFTY",
+      "contract": "25450.0_CE",
+      "lots": 1,
+      "qty": 65,
+      "spot_at_entry": 25501.7,
+      "oi_diff_lakhs": -163.52,
+      "entry_price": 142.75,
+      "exit_price": 134.05,
+      "gross_pnl": -565.5,
+      "net_pnl": -630.0,
+      "initial_risk_points": 7.8,
+      "r_multiple": -1.12,
+      "learning_r_multiple": -1.242604,
+      "learning_risk_rs": 507.0,
+      "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+      "state_vec": [
+        3.0,
+        0.856,
+        0.1598,
+        0.6,
+        -0.8,
+        1.5,
+        1.336,
+        2.0,
+        1.0,
+        -0.7321
+      ],
+      "exit_reason": "INITIAL_SL_HIT",
+      "rule_used": "TELEGRAM_CHANNEL 2026-11-20:NIFTY:25450:CE:142:CURRENT",
+      "data_health": "LIVE_CLEAN",
+      "market_structure": {
+        "allowed": false,
+        "ready": true,
+        "reason": "No marked level with both closed-candle reaction and supportive same-strike OI",
+        "source": "INDEX_5M_OHLC",
+        "day_range_points": 154.64999999999782,
+        "min_body_fraction": 0.4,
+        "min_close_fraction": 0.6,
+        "confirm_window_sec": 600,
+        "confirmation_age_seconds": 129.63096833229065,
+        "mtf_sr": {
+          "htf_4h_levels": [
+            25077.55,
+            25104.8,
+            25141.8,
+            25142.95,
+            25190.25,
+            25246.35,
+            25267.3,
+            25337.6,
+            25384.8,
+            25387.0,
+            25390.8,
+            25501.35
+          ],
+          "mtf_15m_levels": [
+            25104.8,
+            25143.7,
+            25196.0,
+            25196.65,
+            25242.5,
+            25255.6,
+            25270.15,
+            25310.15,
+            25344.55,
+            25345.2,
+            25373.65,
+            25379.1,
+            25387.0,
+            25444.55,
+            25491.65,
+            25514.3
+          ],
+          "ltf_5m_levels": [
+            25416.4
+          ],
+          "multi_bounce_zones": [
+            {
+              "level": 25141.8,
+              "touches": 4,
+              "support_bounces": 4,
+              "resistance_rejections": 0,
+              "role": "STRONG_SUPPORT"
+            },
+            {
+              "level": 25190.25,
+              "touches": 7,
+              "support_bounces": 3,
+              "resistance_rejections": 4,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25206.2,
+              "touches": 7,
+              "support_bounces": 3,
+              "resistance_rejections": 4,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25242.5,
+              "touches": 17,
+              "support_bounces": 8,
+              "resistance_rejections": 9,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25255.6,
+              "touches": 18,
+              "support_bounces": 6,
+              "resistance_rejections": 12,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25270.15,
+              "touches": 10,
+              "support_bounces": 2,
+              "resistance_rejections": 8,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25289.05,
+              "touches": 9,
+              "support_bounces": 3,
+              "resistance_rejections": 6,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25310.15,
+              "touches": 6,
+              "support_bounces": 1,
+              "resistance_rejections": 5,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25337.6,
+              "touches": 7,
+              "support_bounces": 4,
+              "resistance_rejections": 3,
+              "role": "STRONG_SUPPORT"
+            },
+            {
+              "level": 25373.65,
+              "touches": 8,
+              "support_bounces": 1,
+              "resistance_rejections": 7,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25387.0,
+              "touches": 7,
+              "support_bounces": 4,
+              "resistance_rejections": 3,
+              "role": "STRONG_SUPPORT"
+            },
+            {
+              "level": 25416.4,
+              "touches": 3,
+              "support_bounces": 3,
+              "resistance_rejections": 0,
+              "role": "STRONG_SUPPORT"
+            },
+            {
+              "level": 25436.8,
+              "touches": 3,
+              "support_bounces": 2,
+              "resistance_rejections": 1,
+              "role": "STRONG_SUPPORT"
+            },
+            {
+              "level": 25476.95,
+              "touches": 7,
+              "support_bounces": 0,
+              "resistance_rejections": 7,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25491.65,
+              "touches": 3,
+              "support_bounces": 1,
+              "resistance_rejections": 2,
+              "role": "STRONG_RESISTANCE"
+            }
+          ],
+          "multi_bounce_levels": [
+            25141.8,
+            25190.25,
+            25206.2,
+            25242.5,
+            25255.6,
+            25270.15,
+            25289.05,
+            25310.15,
+            25337.6,
+            25373.65,
+            25387.0,
+            25416.4,
+            25436.8,
+            25476.95,
+            25491.65
+          ]
+        },
+        "levels": {
+          "previous_day_high": 25514.3,
+          "previous_day_low": 25104.8,
+          "day_high": 25499.85,
+          "day_low": 25345.2,
+          "opening_high": 25491.25,
+          "opening_low": 25345.2,
+          "range_high_before_confirmation": 25491.25,
+          "range_low_before_confirmation": 25345.2,
+          "range_high_before_breakout": 25491.25,
+          "range_low_before_breakout": 25345.2
+        },
+        "put_oi_wall": {
+          "strike": 25400.0,
+          "oi": 16930875.0,
+          "change_from_previous_close": 9259185.0
+        },
+        "call_oi_wall": {
+          "strike": 25500.0,
+          "oi": 17510350.0,
+          "change_from_previous_close": 8798465.0
+        },
+        "opening_trend": null,
+        "put_oi_buildup": {
+          "strike": 25400.0,
+          "oi": 16930875.0,
+          "change_from_previous_close": 9259185.0
+        },
+        "call_oi_buildup": {
+          "strike": 25500.0,
+          "oi": 17510350.0,
+          "change_from_previous_close": 8798465.0
+        },
+        "nearest_put_oi_level": {
+          "strike": 25500.0,
+          "oi": 9542650.0,
+          "change_from_previous_close": 2328040.0
+        },
+        "nearest_call_oi_level": {
+          "strike": 25550.0,
+          "oi": 5812495.0,
+          "change_from_previous_close": 2965625.0
+        },
+        "swing_levels": [
+          25141.8,
+          25190.25,
+          25206.2,
+          25242.5,
+          25255.6,
+          25270.15,
+          25289.05,
+          25310.15,
+          25337.6,
+          25344.55,
+          25345.2,
+          25373.65,
+          25379.1,
+          25387.0,
+          25416.4,
+          25436.8,
+          25444.55,
+          25476.95,
+          25491.65,
+          25514.3
+        ],
+        "confirmation_close": 25488.65,
+        "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V2",
+        "level_reference_age_seconds": 310.69,
+        "direction_checks": {
+          "BUY_CE": {
+            "allowed": false,
+            "reason": "Current price has advanced beyond the confirmation entry zone",
+            "trigger_level": null,
+            "setup": null,
+            "room_points": null,
+            "structure_rr": null,
+            "oi_confirmed_levels": [
+              25104.8,
+              25242.5,
+              25255.6,
+              25270.15,
+              25289.05,
+              25310.15,
+              25337.6,
+              25344.55,
+              25345.2,
+              25373.65,
+              25379.1,
+              25387.0,
+              25400.0,
+              25416.4,
+              25436.8,
+              25444.55,
+              25476.95,
+              25491.25,
+              25491.65,
+              25500.0,
+              25514.3
+            ]
+          },
+          "BUY_PE": {
+            "allowed": false,
+            "reason": "Price has not held directional confirmation",
+            "trigger_level": null,
+            "setup": null,
+            "room_points": null,
+            "structure_rr": null,
+            "oi_confirmed_levels": []
+          }
+        },
+        "assessed_epoch": 1795148229.650742,
+        "telegram_call": {
+          "index": "NIFTY",
+          "strike": 25450.0,
+          "option_type": "CE",
+          "posted_epoch": 1795147674.0,
+          "source": "Tradewithsac",
+          "source_url": "https://t.me/c/3882006811/1699",
+          "key": "2026-11-20:NIFTY:25450:CE:142:CURRENT",
+          "buy_above": 142.0,
+          "expiry": null,
+          "targets": [
+            152.0,
+            170.0,
+            190.0
+          ],
+          "entry_kind": "ABOVE",
+          "requires_activation": false,
+          "first_received_epoch": 1795147674.9686449,
+          "activation_epoch": 1795148142.0,
+          "activation_received_epoch": 1795148146.006041,
+          "activation_source_url": "https://t.me/c/3882006811/1702",
+          "resolved_expiry": "2026-11-23",
+          "expiry_basis": "CURRENT_CHAIN",
+          "stop_target_basis": "CHANNEL_TARGET_USER_FIXED_PREMIUM_STOP",
+          "exit_observation": {
+            "epoch": 1795148268.4439216,
+            "executable_bid": 134.2,
+            "peak_bid": 142.75,
+            "current_stop": 134.95,
+            "first_target": 152.0,
+            "target_observed": false
+          }
+        },
+        "adaptive_feedback": {
+          "basis": "CLOSED_PAPER_SETUP_WALK_FORWARD",
+          "setup_key": [
+            "NIFTY",
+            "CHANNEL:Tradewithsac",
+            "CE"
+          ],
+          "closed_trades": 4,
+          "independent_days": 4,
+          "quality_adjustment": 0.0,
+          "paused": false,
+          "exit_policy": "STANDARD",
+          "reason": "Insufficient independent closed outcomes"
+        },
+        "trade_quality": {
+          "allowed": true,
+          "score": 100,
+          "components": {
+            "greeks": 100.0,
+            "structure": 100.0,
+            "option_flow": 100.0,
+            "regime": 100.0
+          },
+          "greeks": {
+            "greek_supported": true,
+            "greek_score": 100.0,
+            "greek_veto_reasons": [],
+            "delta": 0.62412,
+            "gamma": 0.00153,
+            "theta": -17.90899,
+            "iv": 9.99899871375331,
+            "iv_change_5m": -0.493,
+            "iv_trend_available": true,
+            "holding_minutes": 20,
+            "modeled_decay_points": 0.9551,
+            "theta_to_directional_gain": 0.044
+          },
+          "factors": {
+            "delta_band": "RESPONSIVE",
+            "iv_trend": "FALLING",
+            "theta_load": "LOW",
+            "structure": "CHANNEL_OR_OTHER",
+            "regime": "HIGH_IV_VEGA_MOMENTUM"
+          },
+          "multi_horizon": {
+            "decision": {
+              "multi_horizon_supported": true,
+              "alignment_score": 65,
+              "veto_reasons": []
+            },
+            "snapshot_epoch": 1795148229.6258943,
+            "horizons": {
+              "5m": {
+                "available": true,
+                "reference_epoch": 1795147918.940729,
+                "reference_age_seconds": 310.69,
+                "ce_oi_change": -290940.0,
+                "pe_oi_change": 822965.0,
+                "dominant_writer": "PUT_SIDE_RELATIVE_BUILDUP",
+                "ce_iv_change": -0.538136141451148,
+                "pe_iv_change": -0.17831172441597762,
+                "ce_delta_change": 0.056310000000000006,
+                "pe_delta_change": 0.03288714285714285,
+                "atm_ce": {
+                  "iv_change": -0.4995677914608603,
+                  "delta_change": 0.05635000000000001,
+                  "absolute_delta_change": 0.05635000000000001
+                },
+                "atm_pe": {
+                  "iv_change": -0.1573421947986411,
+                  "delta_change": 0.03563000000000005,
+                  "absolute_delta_change": -0.03563000000000005
+                }
+              },
+              "10m": {
+                "available": true,
+                "reference_epoch": 1795147617.694078,
+                "reference_age_seconds": 611.93,
+                "ce_oi_change": 1676610.0,
+                "pe_oi_change": 2852590.0,
+                "dominant_writer": "PUT_SIDE_RELATIVE_BUILDUP",
+                "ce_iv_change": -0.7804467959642114,
+                "pe_iv_change": -0.24299866307314208,
+                "ce_delta_change": 0.06729285714285714,
+                "pe_delta_change": 0.04002857142857142,
+                "atm_ce": {
+                  "iv_change": -0.8035985280289868,
+                  "delta_change": 0.0675,
+                  "absolute_delta_change": 0.0675
+                },
+                "atm_pe": {
+                  "iv_change": -0.09832973706332027,
+                  "delta_change": 0.04339000000000004,
+                  "absolute_delta_change": -0.04339000000000004
+                }
+              },
+              "15m": {
+                "available": true,
+                "reference_epoch": 1795147316.427674,
+                "reference_age_seconds": 913.2,
+                "ce_oi_change": 6614205.0,
+                "pe_oi_change": 4064060.0,
+                "dominant_writer": "CALL_SIDE_RELATIVE_BUILDUP",
+                "ce_iv_change": -0.762774050182281,
+                "pe_iv_change": -0.47282247296141705,
+                "ce_delta_change": 0.09073285714285714,
+                "pe_delta_change": 0.05502999999999999,
+                "atm_ce": {
+                  "iv_change": -0.6180905288137257,
+                  "delta_change": 0.09116000000000002,
+                  "absolute_delta_change": 0.09116000000000002
+                },
+                "atm_pe": {
+                  "iv_change": -0.5697386849801873,
+                  "delta_change": 0.05783000000000005,
+                  "absolute_delta_change": -0.05783000000000005
+                }
+              },
+              "30m": {
+                "available": true,
+                "reference_epoch": 1795146419.4135823,
+                "reference_age_seconds": 1810.21,
+                "ce_oi_change": 25079015.0,
+                "pe_oi_change": 22022195.0,
+                "dominant_writer": "BALANCED",
+                "ce_iv_change": -1.454773033907714,
+                "pe_iv_change": -0.7312680845802253,
+                "ce_delta_change": 0.10160428571428572,
+                "pe_delta_change": 0.0634257142857143,
+                "atm_ce": {
+                  "iv_change": -1.3509591246631096,
+                  "delta_change": 0.09671000000000002,
+                  "absolute_delta_change": 0.09671000000000002
+                },
+                "atm_pe": {
+                  "iv_change": -0.6578033033385751,
+                  "delta_change": 0.0635,
+                  "absolute_delta_change": -0.0635
+                }
+              },
+              "1h": {
+                "available": false,
+                "reference_epoch": null,
+                "reference_age_seconds": null,
+                "ce_oi_change": null,
+                "pe_oi_change": null,
+                "dominant_writer": "UNAVAILABLE",
+                "ce_iv_change": null,
+                "pe_iv_change": null,
+                "ce_delta_change": null,
+                "pe_delta_change": null,
+                "atm_ce": null,
+                "atm_pe": null
+              },
+              "4h": {
+                "available": false,
+                "reference_epoch": null,
+                "reference_age_seconds": null,
+                "ce_oi_change": null,
+                "pe_oi_change": null,
+                "dominant_writer": "UNAVAILABLE",
+                "ce_iv_change": null,
+                "pe_iv_change": null,
+                "ce_delta_change": null,
+                "pe_delta_change": null,
+                "atm_ce": null,
+                "atm_pe": null
+              },
+              "morning": {
+                "available": true,
+                "reference_epoch": 1795146300.646139,
+                "reference_age_seconds": 1928.98,
+                "ce_oi_change": 31462535.0,
+                "pe_oi_change": 21832005.0,
+                "dominant_writer": "CALL_SIDE_RELATIVE_BUILDUP",
+                "ce_iv_change": -0.9783373773784673,
+                "pe_iv_change": -0.4143298568943385,
+                "ce_delta_change": 0.19512714285714286,
+                "pe_delta_change": 0.12523428571428571,
+                "atm_ce": {
+                  "iv_change": -0.9245833143549991,
+                  "delta_change": 0.19637000000000004,
+                  "absolute_delta_change": 0.19637000000000004
+                },
+                "atm_pe": {
+                  "iv_change": -0.41655380767070227,
+                  "delta_change": 0.13034,
+                  "absolute_delta_change": -0.13034
+                }
+              }
+            }
+          },
+          "opposing_walls": [],
+          "failure_factors": [],
+          "score_basis": "Rule-based decision evidence, not a profit probability",
+          "learned_adjustment": 0
+        },
+        "entry_quote": {
+          "received_epoch": 1795148229.625327,
+          "decision_epoch": 1795148230.356931,
+          "modeled_entry_price_basis": "EXECUTABLE_ASK_PLUS_0.1PCT_SLIPPAGE",
+          "last_price": 142.55,
+          "top_bid_price": 142.55,
+          "top_ask_price": 142.6,
+          "top_bid_quantity": 455,
+          "top_ask_quantity": 65
+        }
+      }
+    },
+    {
+      "timestamp": "2026-11-20 09:47:31",
+      "exit_timestamp": "2026-11-20 09:47:50",
+      "index": "NIFTY",
+      "contract": "25550_CE",
+      "lots": 1,
+      "qty": 65,
+      "spot_at_entry": 25501.45,
+      "oi_diff_lakhs": -163.47,
+      "entry_price": 96.5,
+      "exit_price": 89.9,
+      "gross_pnl": -429.0,
+      "net_pnl": -493.5,
+      "initial_risk_points": 6.0,
+      "r_multiple": -1.1,
+      "learning_r_multiple": -1.265385,
+      "learning_risk_rs": 390.0,
+      "learning_reward_basis": "NET_AFTER_MODELED_CHARGES",
+      "state_vec": [
+        3.0,
+        0.835,
+        0.8742,
+        0.6,
+        -0.8,
+        1.5,
+        1.256,
+        2.0,
+        1.0,
+        -0.729
+      ],
+      "exit_reason": "INITIAL_SL_HIT",
+      "rule_used": "VWAP_TREND_FLOW & regime=HIGH_IV_VEGA_MOMENTUM & q=LONG_BUILDUP -> BUY_CE",
+      "data_health": "LIVE_CLEAN",
+      "market_structure": {
+        "allowed": false,
+        "ready": true,
+        "reason": "No marked level with both closed-candle reaction and supportive same-strike OI",
+        "source": "INDEX_5M_OHLC",
+        "day_range_points": 154.64999999999782,
+        "min_body_fraction": 0.4,
+        "min_close_fraction": 0.6,
+        "confirm_window_sec": 600,
+        "confirmation_age_seconds": 151.71448826789856,
+        "mtf_sr": {
+          "htf_4h_levels": [
+            25077.55,
+            25104.8,
+            25141.8,
+            25142.95,
+            25190.25,
+            25246.35,
+            25267.3,
+            25337.6,
+            25384.8,
+            25387.0,
+            25390.8,
+            25501.35
+          ],
+          "mtf_15m_levels": [
+            25104.8,
+            25143.7,
+            25196.0,
+            25196.65,
+            25242.5,
+            25255.6,
+            25270.15,
+            25310.15,
+            25344.55,
+            25345.2,
+            25373.65,
+            25379.1,
+            25387.0,
+            25444.55,
+            25491.65,
+            25514.3
+          ],
+          "ltf_5m_levels": [
+            25416.4
+          ],
+          "multi_bounce_zones": [
+            {
+              "level": 25141.8,
+              "touches": 4,
+              "support_bounces": 4,
+              "resistance_rejections": 0,
+              "role": "STRONG_SUPPORT"
+            },
+            {
+              "level": 25190.25,
+              "touches": 7,
+              "support_bounces": 3,
+              "resistance_rejections": 4,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25206.2,
+              "touches": 7,
+              "support_bounces": 3,
+              "resistance_rejections": 4,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25242.5,
+              "touches": 17,
+              "support_bounces": 8,
+              "resistance_rejections": 9,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25255.6,
+              "touches": 18,
+              "support_bounces": 6,
+              "resistance_rejections": 12,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25270.15,
+              "touches": 10,
+              "support_bounces": 2,
+              "resistance_rejections": 8,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25289.05,
+              "touches": 9,
+              "support_bounces": 3,
+              "resistance_rejections": 6,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25310.15,
+              "touches": 6,
+              "support_bounces": 1,
+              "resistance_rejections": 5,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25337.6,
+              "touches": 7,
+              "support_bounces": 4,
+              "resistance_rejections": 3,
+              "role": "STRONG_SUPPORT"
+            },
+            {
+              "level": 25373.65,
+              "touches": 8,
+              "support_bounces": 1,
+              "resistance_rejections": 7,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25387.0,
+              "touches": 7,
+              "support_bounces": 4,
+              "resistance_rejections": 3,
+              "role": "STRONG_SUPPORT"
+            },
+            {
+              "level": 25416.4,
+              "touches": 3,
+              "support_bounces": 3,
+              "resistance_rejections": 0,
+              "role": "STRONG_SUPPORT"
+            },
+            {
+              "level": 25436.8,
+              "touches": 3,
+              "support_bounces": 2,
+              "resistance_rejections": 1,
+              "role": "STRONG_SUPPORT"
+            },
+            {
+              "level": 25476.95,
+              "touches": 7,
+              "support_bounces": 0,
+              "resistance_rejections": 7,
+              "role": "STRONG_RESISTANCE"
+            },
+            {
+              "level": 25491.65,
+              "touches": 3,
+              "support_bounces": 1,
+              "resistance_rejections": 2,
+              "role": "STRONG_RESISTANCE"
+            }
+          ],
+          "multi_bounce_levels": [
+            25141.8,
+            25190.25,
+            25206.2,
+            25242.5,
+            25255.6,
+            25270.15,
+            25289.05,
+            25310.15,
+            25337.6,
+            25373.65,
+            25387.0,
+            25416.4,
+            25436.8,
+            25476.95,
+            25491.65
+          ]
+        },
+        "levels": {
+          "previous_day_high": 25514.3,
+          "previous_day_low": 25104.8,
+          "day_high": 25499.85,
+          "day_low": 25345.2,
+          "opening_high": 25491.25,
+          "opening_low": 25345.2,
+          "range_high_before_confirmation": 25491.25,
+          "range_low_before_confirmation": 25345.2,
+          "range_high_before_breakout": 25491.25,
+          "range_low_before_breakout": 25345.2
+        },
+        "put_oi_wall": {
+          "strike": 25400.0,
+          "oi": 16821545.0,
+          "change_from_previous_close": 9149855.0
+        },
+        "call_oi_wall": {
+          "strike": 25500.0,
+          "oi": 17778215.0,
+          "change_from_previous_close": 9066330.0
+        },
+        "opening_trend": null,
+        "put_oi_buildup": {
+          "strike": 25400.0,
+          "oi": 16821545.0,
+          "change_from_previous_close": 9149855.0
+        },
+        "call_oi_buildup": {
+          "strike": 25500.0,
+          "oi": 17778215.0,
+          "change_from_previous_close": 9066330.0
+        },
+        "nearest_put_oi_level": {
+          "strike": 25500.0,
+          "oi": 9420775.0,
+          "change_from_previous_close": 2206165.0
+        },
+        "nearest_call_oi_level": {
+          "strike": 25550.0,
+          "oi": 5852730.0,
+          "change_from_previous_close": 3005860.0
+        },
+        "swing_levels": [
+          25141.8,
+          25190.25,
+          25206.2,
+          25242.5,
+          25255.6,
+          25270.15,
+          25289.05,
+          25310.15,
+          25337.6,
+          25344.55,
+          25345.2,
+          25373.65,
+          25379.1,
+          25387.0,
+          25416.4,
+          25436.8,
+          25444.55,
+          25476.95,
+          25491.65,
+          25514.3
+        ],
+        "confirmation_close": 25488.65,
+        "entry_model": "LEVEL_CANDLE_AND_STRIKE_OI_V2",
+        "level_reference_age_seconds": 275.69,
+        "direction_checks": {
+          "BUY_CE": {
+            "allowed": false,
+            "reason": "Current price has advanced beyond the confirmation entry zone",
+            "trigger_level": null,
+            "setup": null,
+            "room_points": null,
+            "structure_rr": null,
+            "oi_confirmed_levels": [
+              25104.8,
+              25242.5,
+              25255.6,
+              25270.15,
+              25289.05,
+              25310.15,
+              25337.6,
+              25344.55,
+              25345.2,
+              25373.65,
+              25379.1,
+              25387.0,
+              25400.0,
+              25416.4,
+              25436.8,
+              25444.55,
+              25476.95,
+              25491.25,
+              25491.65,
+              25500.0,
+              25514.3
+            ]
+          },
+          "BUY_PE": {
+            "allowed": false,
+            "reason": "Price has not held directional confirmation",
+            "trigger_level": null,
+            "setup": null,
+            "room_points": null,
+            "structure_rr": null,
+            "oi_confirmed_levels": []
+          }
+        },
+        "assessed_epoch": 1795148251.7356212,
+        "theta_horizon_minutes": 35,
+        "max_hold_minutes": 35,
+        "modeled_holding_theta_points": 0.9997925333333334,
+        "adaptive_feedback": {
+          "basis": "CLOSED_PAPER_SETUP_WALK_FORWARD",
+          "setup_key": null,
+          "closed_trades": 0,
+          "independent_days": 0,
+          "quality_adjustment": 0.0,
+          "paused": false,
+          "exit_policy": "STANDARD",
+          "reason": "Insufficient independent closed outcomes"
+        },
+        "lot_sizing": {
+          "basis": "Strict 1-lot capital shield (requires >= +Rs.1,200 banked intraday profit to scale)",
+          "lots": 1,
+          "risk_budget_rs": 650.0,
+          "probability_estimated": false
+        },
+        "trade_quality": {
+          "allowed": true,
+          "score": 100,
+          "components": {
+            "greeks": 100.0,
+            "structure": 100.0,
+            "option_flow": 100.0,
+            "regime": 100.0
+          },
+          "greeks": {
+            "greek_supported": true,
+            "greek_score": 100.0,
+            "greek_veto_reasons": [],
+            "delta": 0.466,
+            "gamma": 0.00147,
+            "theta": -18.74611,
+            "iv": 10.901810307439622,
+            "iv_change_5m": -0.267,
+            "iv_trend_available": true,
+            "holding_minutes": 20,
+            "modeled_decay_points": 0.9998,
+            "theta_to_directional_gain": 0.0651
+          },
+          "factors": {
+            "delta_band": "MODERATE",
+            "iv_trend": "FALLING",
+            "theta_load": "LOW",
+            "structure": "CHANNEL_OR_OTHER",
+            "regime": "HIGH_IV_VEGA_MOMENTUM"
+          },
+          "multi_horizon": {
+            "decision": {
+              "multi_horizon_supported": true,
+              "alignment_score": 65,
+              "veto_reasons": []
+            },
+            "snapshot_epoch": 1795148251.6458952,
+            "horizons": {
+              "5m": {
+                "available": true,
+                "reference_epoch": 1795147918.940729,
+                "reference_age_seconds": 332.71,
+                "ce_oi_change": -294580.0,
+                "pe_oi_change": 1517685.0,
+                "dominant_writer": "PUT_SIDE_RELATIVE_BUILDUP",
+                "ce_iv_change": -0.4100810366565573,
+                "pe_iv_change": -0.29208972219714063,
+                "ce_delta_change": 0.04963142857142857,
+                "pe_delta_change": 0.029888571428571414,
+                "atm_ce": {
+                  "iv_change": -0.26066309477167593,
+                  "delta_change": 0.048370000000000024,
+                  "absolute_delta_change": 0.048370000000000024
+                },
+                "atm_pe": {
+                  "iv_change": -0.3701573599417003,
+                  "delta_change": 0.03138000000000002,
+                  "absolute_delta_change": -0.03138000000000002
+                }
+              },
+              "10m": {
+                "available": true,
+                "reference_epoch": 1795147617.694078,
+                "reference_age_seconds": 633.95,
+                "ce_oi_change": 1672970.0,
+                "pe_oi_change": 3547310.0,
+                "dominant_writer": "PUT_SIDE_RELATIVE_BUILDUP",
+                "ce_iv_change": -0.6523916911696208,
+                "pe_iv_change": -0.3567766608543051,
+                "ce_delta_change": 0.06061428571428572,
+                "pe_delta_change": 0.03702999999999999,
+                "atm_ce": {
+                  "iv_change": -0.5646938313398024,
+                  "delta_change": 0.05952000000000002,
+                  "absolute_delta_change": 0.05952000000000002
+                },
+                "atm_pe": {
+                  "iv_change": -0.31114490220637947,
+                  "delta_change": 0.03914000000000001,
+                  "absolute_delta_change": -0.03914000000000001
+                }
+              },
+              "15m": {
+                "available": true,
+                "reference_epoch": 1795147316.427674,
+                "reference_age_seconds": 935.22,
+                "ce_oi_change": 6610565.0,
+                "pe_oi_change": 4758780.0,
+                "dominant_writer": "CALL_SIDE_RELATIVE_BUILDUP",
+                "ce_iv_change": -0.6347189453876904,
+                "pe_iv_change": -0.58660047074258,
+                "ce_delta_change": 0.08405428571428572,
+                "pe_delta_change": 0.052031428571428555,
+                "atm_ce": {
+                  "iv_change": -0.3791858321245414,
+                  "delta_change": 0.08318000000000003,
+                  "absolute_delta_change": 0.08318000000000003
+                },
+                "atm_pe": {
+                  "iv_change": -0.7825538501232465,
+                  "delta_change": 0.053580000000000017,
+                  "absolute_delta_change": -0.053580000000000017
+                }
+              },
+              "30m": {
+                "available": true,
+                "reference_epoch": 1795146419.4135823,
+                "reference_age_seconds": 1832.23,
+                "ce_oi_change": 25075375.0,
+                "pe_oi_change": 22716915.0,
+                "dominant_writer": "BALANCED",
+                "ce_iv_change": -1.3267179291131235,
+                "pe_iv_change": -0.8450460823613882,
+                "ce_delta_change": 0.09492571428571428,
+                "pe_delta_change": 0.06042714285714285,
+                "atm_ce": {
+                  "iv_change": -1.1120544279739253,
+                  "delta_change": 0.08873000000000003,
+                  "absolute_delta_change": 0.08873000000000003
+                },
+                "atm_pe": {
+                  "iv_change": -0.8706184684816343,
+                  "delta_change": 0.05924999999999997,
+                  "absolute_delta_change": -0.05924999999999997
+                }
+              },
+              "1h": {
+                "available": false,
+                "reference_epoch": null,
+                "reference_age_seconds": null,
+                "ce_oi_change": null,
+                "pe_oi_change": null,
+                "dominant_writer": "UNAVAILABLE",
+                "ce_iv_change": null,
+                "pe_iv_change": null,
+                "ce_delta_change": null,
+                "pe_delta_change": null,
+                "atm_ce": null,
+                "atm_pe": null
+              },
+              "4h": {
+                "available": false,
+                "reference_epoch": null,
+                "reference_age_seconds": null,
+                "ce_oi_change": null,
+                "pe_oi_change": null,
+                "dominant_writer": "UNAVAILABLE",
+                "ce_iv_change": null,
+                "pe_iv_change": null,
+                "ce_delta_change": null,
+                "pe_delta_change": null,
+                "atm_ce": null,
+                "atm_pe": null
+              },
+              "morning": {
+                "available": true,
+                "reference_epoch": 1795146300.646139,
+                "reference_age_seconds": 1951.0,
+                "ce_oi_change": 31458895.0,
+                "pe_oi_change": 22526725.0,
+                "dominant_writer": "CALL_SIDE_RELATIVE_BUILDUP",
+                "ce_iv_change": -0.8502822725838767,
+                "pe_iv_change": -0.5281078546755015,
+                "ce_delta_change": 0.18844857142857144,
+                "pe_delta_change": 0.1222357142857143,
+                "atm_ce": {
+                  "iv_change": -0.6856786176658147,
+                  "delta_change": 0.18839000000000006,
+                  "absolute_delta_change": 0.18839000000000006
+                },
+                "atm_pe": {
+                  "iv_change": -0.6293689728137615,
+                  "delta_change": 0.12608999999999998,
+                  "absolute_delta_change": -0.12608999999999998
+                }
+              }
+            }
+          },
+          "opposing_walls": [],
+          "failure_factors": [],
+          "score_basis": "Rule-based decision evidence, not a profit probability",
+          "learned_adjustment": 0
+        },
+        "entry_quote": {
+          "received_epoch": 1795148251.6449509,
+          "decision_epoch": 1795148251.741925,
+          "modeled_entry_price_basis": "EXECUTABLE_ASK_PLUS_0.1PCT_SLIPPAGE",
+          "last_price": 96.4,
+          "top_bid_price": 96.2,
+          "top_ask_price": 96.4,
+          "top_bid_quantity": 520,
+          "top_ask_quantity": 65
+        }
+      },
+      "exit_diagnostics": {
+        "peak_net_pnl": -353.75000000000017
+      }
     }
   ],
   "pending_channel_calls": [],
@@ -2850,7 +3939,8 @@
     "2026-11-16": 3,
     "2026-11-17": 2,
     "2026-11-18": 4,
-    "2026-11-19": 2
+    "2026-11-19": 2,
+    "2026-11-20": 2
   },
   "daily_profit_protection": {
     "day": "2026-11-11",
@@ -2872,7 +3962,8 @@
     "2026-11-18:NIFTY:25350:PE:190:CURRENT",
     "2026-11-18:NIFTY:25350:CE:180:CURRENT",
     "2026-11-18:NIFTY:25400:CE:150:CURRENT",
-    "2026-11-19:NIFTY:25150:PE:150:CURRENT"
+    "2026-11-19:NIFTY:25150:PE:150:CURRENT",
+    "2026-11-20:NIFTY:25450:CE:142:CURRENT"
   ],
   "removed_trades_audit": [
     {

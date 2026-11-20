@@ -2,7 +2,7 @@ import math
 import logging
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -63,6 +63,33 @@ class EntryQualityTests(unittest.TestCase):
         view = self.view()
         view['market_structure'] = {}
         self.assertIn('MTF_STRUCTURE_NOT_READY', index.index_contract_quality(view, self.node(), 25000, 'CE')['failure_factors'])
+
+    def test_opening_channel_uses_complete_historical_structure_only(self):
+        from nifty_market_structure import apply_nifty_level_entry
+
+        start = datetime(2026, 11, 19, 9, 15, tzinfo=IST)
+        prices = [24900 + (i % 24) for i in range(75)]
+        candles = {
+            "timestamp": [(start + timedelta(minutes=5*i)).timestamp() for i in range(75)],
+            "open": prices, "close": prices,
+            "high": [price + 4 for price in prices],
+            "low": [price - 4 for price in prices],
+        }
+        view = self.view()
+        now = (start + timedelta(days=1)).timestamp()
+        structure = apply_nifty_level_entry(view, candles, {}, now)
+        self.assertFalse(structure["ready"])
+        self.assertFalse(structure["allowed"])
+        self.assertTrue(structure["historical_mtf_ready"])
+        native = index.index_contract_quality(view, self.node(), 25000, "CE")
+        channel = index.index_contract_quality(view, self.node(), 25000, "CE", channel_entry=True)
+        self.assertIn("MTF_STRUCTURE_NOT_READY", native["failure_factors"])
+        self.assertTrue(channel["allowed"], channel["failure_factors"])
+
+        candles = {key: values[:-1] for key, values in candles.items()}
+        apply_nifty_level_entry(view, candles, {}, now)
+        channel = index.index_contract_quality(view, self.node(), 25000, "CE", channel_entry=True)
+        self.assertIn("MTF_STRUCTURE_NOT_READY", channel["failure_factors"])
 
     def test_bsm_recovers_known_atm_volatility(self):
         s, k, t, iv, rate = 100, 100, 30 / 365, .25, .065
