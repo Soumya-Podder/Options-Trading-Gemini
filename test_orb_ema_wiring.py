@@ -59,7 +59,7 @@ class ItmFallbackTests(unittest.TestCase):
                        delta=.5, theta=-1, gamma=.01, atr_5m=5, expiry="1970-02-01",
                        itm_fallback_contract=dict(strike=380, opt_security_id="itm"),
                        alternate_contracts=[dict(strike=375, opt_security_id="other")])
-        cfg = SimpleNamespace(max_spread_pct=3.5, max_premium=100, max_lots=1, slippage_pct=.1, min_days_to_expiry=3,
+        cfg = SimpleNamespace(max_spread_pct=3.5, max_premium=100, max_lots=1, slippage_pct=.1, min_days_to_expiry=3, rupee_max_risk=950,
                               rupee_target=500, plan=Mock(return_value=None))
         for book, expected in ((quote(9.75, 9.85), "No affordable lot count"),
                                (quote(4.65, 4.75), "outside"),

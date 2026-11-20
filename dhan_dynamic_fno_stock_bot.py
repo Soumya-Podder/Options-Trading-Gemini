@@ -25,7 +25,7 @@ import requests
 from collections import Counter
 from bisect import bisect_left
 from pathlib import Path
-from stock_option_signals import evaluate_stock_setup, scanx_stock_membership, recent_entry_momentum, order_flow_direction, compute_bsm_greeks_for_stock_option, evaluate_intraday_theta_viability
+from stock_option_signals import evaluate_stock_setup, scanx_stock_membership, recent_entry_momentum, order_flow_direction, compute_bsm_greeks_for_stock_option, evaluate_intraday_theta_viability, closed_stock_structure_break
 from stock_option_policy import premium_plan, rank_candidates, learned_profit_floor, DailyTradeGate, stock_reentry_reason, option_chain_request_slot, market_quote_request_slot, single_bot_session, session_open_wait_seconds, combined_paper_loss_state, combined_paper_entry_allowed, COMBINED_PAPER_LOSS_LIMIT_RS, option_order_book_pressure
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -200,16 +200,24 @@ class DynamicStrategyConfig:
         if not 5<=self.runner_max_hold_minutes<=120:
             raise ValueError('Runner holding limit must be between 5 and 120 minutes')
 
-    def plan(self, entry: float, qty: int, max_target_price=None, min_lots=1, min_net_rr=None, max_lots=None, *, dynamic_friction=None):
+    def plan(self, entry: float, qty: int, max_target_price=None, min_lots=1, min_net_rr=None, max_lots=None, *, dynamic_friction=None, natural_stop=None):
         # Cash loss is an exit trigger for the whole position, not an entry veto.
-        plan = premium_plan(entry, qty, compute_fno_option_charges, self.target_pct,
+        plan = premium_plan(entry, qty, compute_fno_option_charges, 25.0 if natural_stop is not None else self.target_pct,
                             self.stop_pct, max(self.min_rr_target, min_net_rr or 0), self.slippage_pct,
                             self.rupee_target if dynamic_friction is None else 3 * dynamic_friction,
                             min(self.max_lots, max_lots) if max_lots is not None else self.max_lots,
-                            float("inf"), self.extend_rupee_target or dynamic_friction is not None, max_target_price,
-                            min_lots=min_lots,cash_loss_limit=self.rupee_max_risk)
+                            self.rupee_max_risk if natural_stop is not None else float("inf"),
+                            self.extend_rupee_target or dynamic_friction is not None, max_target_price,
+                            min_lots=min_lots,
+                            cash_loss_limit=self.rupee_max_risk if natural_stop is None else None,
+                            stop_price=natural_stop)
         if plan is None:
             return None
+        if natural_stop is not None:
+            plan.update(cash_loss_stop_price=natural_stop, natural_stop_price=natural_stop,
+                        total_risk_limit=self.rupee_max_risk,
+                        expected_net_risk_per_lot=plan["expected_net_risk"] / plan["lots"])
+            return plan
         units = plan['qty']
         # Find the first bid tick whose modeled liquidation loss is within the
         # cash threshold. Replay uses this stop and still fills gaps at the open.
@@ -1159,6 +1167,16 @@ def stock_entry_structure_check(sig, plan, ask, bid):
         return {'allowed':False,'reason':'Structural entry/risk context unavailable or malformed'}
 
 
+def natural_stock_stop(entry, delta, atr, lot_size, cfg):
+    distance = max(1.15 * atr * abs(delta), .12 * entry)
+    stop = math.floor((entry - distance) * 20 + 1e-9) / 20
+    if stop < .05:
+        return stop, math.inf
+    fill = math.floor(stop * (1 - cfg.slippage_pct / 100) * 20 + 1e-9) / 20
+    risk = (entry - fill) * lot_size + compute_fno_option_charges(entry, fill, lot_size)
+    return stop, risk
+
+
 def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
     """Qualify executable depth; optionally append the first rejection reason."""
     def reject(reason):
@@ -1201,6 +1219,9 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         theta_ok, theta_reason = evaluate_intraday_theta_viability(theta, delta, atr, ask)
         if not theta_ok:
             return reject(theta_reason)
+        natural_stop, natural_risk = natural_stock_stop(ask, delta, atr, qty, cfg)
+        if natural_risk > cfg.rupee_max_risk:
+            return reject(f"NATURAL_STOP_EXCEEDS_RISK_BUDGET(1lot=Rs.{natural_risk:.2f},cap=Rs.{cfg.rupee_max_risk:.2f})")
         decay = max(0, -theta) * 30 / 375
         move = 1.5 * atr
         wall_pct = (sig.get("mtf_liquidity") or {}).get("nearest_opposing_zone_pct")
@@ -1219,7 +1240,7 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
             candidate = cfg.plan(
                 ask, qty, max_target_price=ceiling, min_lots=lots, max_lots=lots,
                 min_net_rr=max(1.5, sig.get("order_flow_min_net_rr") or 0),
-                dynamic_friction=friction,
+                dynamic_friction=friction, natural_stop=natural_stop,
             )
             if candidate and ask * units + candidate["estimated_costs"] <= wallet:
                 plan = candidate
@@ -1657,7 +1678,8 @@ def paper_exit(pos, quote, now, cfg, urgent_only=False, combined_net=None):
     if reason is None and net <= -cfg.rupee_max_risk:
         reason = "CASH_LOSS_LIMIT"
     elif reason is None and bid <= pos["current_sl"]:
-        reason = "COMBINED_PAPER_LOSS_LIMIT" if (combined_net is not None and net < 0 and combined_net + net <= -COMBINED_PAPER_LOSS_LIMIT_RS + 25.0) else ("TRAIL_STOP" if pos["current_sl"] > pos["initial_sl"] else "PREMIUM_STOP")
+        reason = "COMBINED_PAPER_LOSS_LIMIT" if (combined_net is not None and net < 0 and combined_net + net <= -COMBINED_PAPER_LOSS_LIMIT_RS + 25.0) else ("TRAIL_STOP" if pos["current_sl"] > pos["initial_sl"] else
+                 "HARD_CATASTROPHE_SL_HIT" if pos.get("natural_stop_price") else "PREMIUM_STOP")
     elif reason is None and (combined_net is not None and net < 0
           and combined_net + net <= -COMBINED_PAPER_LOSS_LIMIT_RS):
         reason = "COMBINED_PAPER_LOSS_LIMIT"
@@ -1673,7 +1695,9 @@ def paper_exit(pos, quote, now, cfg, urgent_only=False, combined_net=None):
         reason='ORDER_FLOW_PROFIT_EXIT'
     elif base_target_reached:
         reason='RUPEE_TARGET'
-    elif (net < 0 and bid < pos['entry_price'] and (underwater_reason := underwater_exit_reason(
+    elif pos.get("natural_stop_price") and (pos.get("breakout_failure") or {}).get("failed"):
+        reason = "UNDERLYING_5M_STRUCTURE_BREAK"
+    elif (not pos.get("natural_stop_price") and net < 0 and bid < pos['entry_price'] and (underwater_reason := underwater_exit_reason(
         elapsed=elapsed,
         breached=bool((pos.get('breakout_failure') or {}).get('failed')
                       and 0 <= stamp - pos['breakout_failure'].get('assessed_epoch', 0) <= 90),
@@ -1818,14 +1842,29 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
                     except (KeyError,TypeError,ValueError,IndexError):continue
                     combined_net, _ = combined_paper_loss_state(today, Path(__file__).resolve().parent)
                     urgent=paper_exit(pos,urgent_quote,now,cfg,urgent_only=True,combined_net=combined_net)
-                    if urgent and urgent[1] in ("COMBINED_PAPER_LOSS_LIMIT","CASH_LOSS_LIMIT","TRAIL_STOP","PREMIUM_STOP","EOD_SQUAREOFF","NO_PROGRESS","TIME_EXIT","RUNNER_NET_TARGET","RUPEE_TARGET_TRAILED","UNDERLYING_BREAKOUT_FAILED"):
+                    if urgent and urgent[1] in ("COMBINED_PAPER_LOSS_LIMIT","CASH_LOSS_LIMIT","TRAIL_STOP","PREMIUM_STOP","HARD_CATASTROPHE_SL_HIT","EOD_SQUAREOFF","NO_PROGRESS","TIME_EXIT","RUNNER_NET_TARGET","RUPEE_TARGET_TRAILED","UNDERLYING_BREAKOUT_FAILED"):
                         rec=close_paper_position(ledger,pos,*urgent,now)
                         gate.mark_closed(today,rec,pos["slot"])
                         positions.remove(pos)
                         logger.info("[PAPER OPTSTK EXIT] %s | %s | net Rs.%+.2f",pos["contract"],urgent[1],rec["net_pnl"])
                         if telegram:telegram.exited({**pos, **rec}, position_key=pos["slot"], ledger_trades=ledger["trades"])
                 for pos in positions[:]:
-                    if (pos.get('breakout_confirmation') and pos.get('eq_security_id')
+                    if pos.get("natural_stop_price") and pos.get("eq_security_id"):
+                        checked = time.time()
+                        closed_start = int(checked) // 300 * 300 - 300
+                        if (closed_start + 300 > pos["entry_epoch"]
+                                and closed_start != pos.get("structure_checked_candle")
+                                and checked - pos.get("breakout_check_epoch", 0) >= 15):
+                            pos["breakout_check_epoch"] = checked
+                            candles = client.fetch_intraday_candles(
+                                pos["eq_security_id"], interval="5",
+                                from_date=datetime.fromtimestamp(checked - 5 * 86400, IST),
+                                to_date=datetime.fromtimestamp(checked, IST), use_cache=False)
+                            failed = closed_stock_structure_break(pos, candles, checked, closed_start)
+                            if failed is not None:
+                                pos["structure_checked_candle"] = closed_start
+                                pos["breakout_failure"] = {"failed": failed, "assessed_epoch": checked}
+                    elif (not pos.get("natural_stop_price") and pos.get('breakout_confirmation') and pos.get('eq_security_id')
                             and time.time()-pos.get('breakout_check_epoch',0)>=30):
                         checked=time.time();pos['breakout_check_epoch']=checked
                         minutes=client.fetch_intraday_candles(pos['eq_security_id'],interval='1',

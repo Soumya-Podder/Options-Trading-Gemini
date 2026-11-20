@@ -528,6 +528,18 @@ def order_flow_direction(flow, candle_start=None):
     return 1 if delta >= 0.15 * volume else -1 if delta <= -0.15 * volume else 0
 
 
+def closed_stock_structure_break(position, candles, now, closed_start):
+    bars = _closed_bars(candles, now)
+    trigger = (position.get("breakout_confirmation") or {}).get("trigger_level")
+    if not bars or len(bars) < 9 or bars[-1]["timestamp"] != closed_start or not trigger:
+        return None
+    close = bars[-1]["close"]
+    ema9 = _ema([bar["close"] for bar in bars], 9)[-1]
+    if position["opt_type"] == "CE":
+        return close < min(ema9, trigger)
+    return close > max(ema9, trigger)
+
+
 def detect_orb_ema_trend_continuation(bars, orb_high, orb_low):
     """Evaluate a closed ORB/EMA continuation using median RVOL and session VWAP."""
     if len(bars) < 50 or not 0 < orb_low < orb_high:
@@ -567,6 +579,16 @@ def detect_orb_ema_trend_continuation(bars, orb_high, orb_low):
         (sign * (probe - ema9) <= .006 * ema9 or sign * (probe - level) <= .006 * level,
          "Away from EMA9 and ORB"),
     ]
+    close_time = datetime.fromtimestamp(latest["timestamp"] + BAR_SECONDS, IST).time()
+    if side == "CE" and (close_time.hour, close_time.minute) >= (10, 30):
+        day_low = min(bar["low"] for bar in today)
+        prior_high = max(bar["high"] for bar in today[:-1]) if len(today) > 1 else latest["high"]
+        run_pct = (close / day_low - 1) * 100
+        checks.extend([
+            (run_pct <= 4, f"LATE_SESSION_EXTENDED_RUN({run_pct:.2f}%>4.0%)"),
+            (not 0 < (prior_high / close - 1) * 100 < .25,
+             f"PINNED_BELOW_SESSION_HIGH(close={close:.2f},high={prior_high:.2f})"),
+        ])
     return {"reason": next((reason for passed, reason in checks if not passed), None),
             "side": side, "trigger_level": trigger, "rvol": rvol, "body": body,
             "vwap": vwap, "ema21_stretch_pct": ema_stretch, "vwap_stretch_pct": vwap_stretch}

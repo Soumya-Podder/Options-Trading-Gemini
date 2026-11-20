@@ -211,6 +211,7 @@ def _percentage_plan(
     min_net_rr: float = 3.0,
     slippage_pct: float = 0.1,
     cash_loss_limit=None,
+    stop_price=None,
 ) -> Optional[Dict[str, float]]:
     """Return a tick-rounded plan only if estimated net reward/risk qualifies."""
     try:
@@ -238,6 +239,8 @@ def _percentage_plan(
         stop = (
             price * (1 - stop_percent / 100) / TICK
         ).to_integral_value(rounding=ROUND_CEILING) * TICK
+        if stop_price is not None:
+            stop = _decimal(stop_price)
         reward_distance, risk_distance = target - price, price - stop
         if stop <= 0 or reward_distance < TICK or risk_distance < TICK:
             return None
@@ -291,6 +294,7 @@ def premium_plan(
     risk_per_lot=False,
     min_lots=1,
     cash_loss_limit=None,
+    stop_price=None,
 ):
     """Choose the smallest lot count reaching the net rupee target within limits."""
     if (
@@ -338,7 +342,7 @@ def premium_plan(
         units = qty * lots
         ceiling_pct = min(25.0, max(target_pct, 18.0)) if extend_rupee_target and rupee_target else target_pct
         plan = _percentage_plan(
-            entry, units, charge_fn, ceiling_pct, stop_pct, min_net_rr, slippage_pct, cash_loss_limit
+            entry, units, charge_fn, ceiling_pct, stop_pct, min_net_rr, slippage_pct, cash_loss_limit, stop_price
         )
         if not plan or plan["expected_net_reward"] < rupee_target or plan["expected_net_risk"] > risk_budget:
             continue

@@ -180,6 +180,20 @@ class EntryQualityTests(unittest.TestCase):
         self.assertIn("EXCEEDS_ATR", evaluate_intraday_theta_viability(-9.82, .5, 1, 100)[1])
         self.assertIn("EXTREME", evaluate_intraday_theta_viability(-35, .5, 30, 100)[1])
 
+    def test_stock_structure_stop_only_evaluates_closed_candle(self):
+        from stock_option_signals import closed_stock_structure_break
+        start = datetime(2026, 11, 20, 9, 15, tzinfo=IST).timestamp()
+        closes = [100] * 9 + [97]
+        stamps = [start + 300 * i for i in range(len(closes))]
+        candles = {"timestamp": stamps, "open": closes, "close": closes,
+                   "high": [c + 1 for c in closes], "low": [c - 1 for c in closes],
+                   "volume": [100] * len(closes)}
+        position = {"opt_type": "CE", "breakout_confirmation": {"trigger_level": 98}}
+        self.assertIsNone(closed_stock_structure_break(position, candles, stamps[-1] + 299, stamps[-1]))
+        self.assertTrue(closed_stock_structure_break(position, candles, stamps[-1] + 300, stamps[-1]))
+        position["breakout_confirmation"]["trigger_level"] = 96
+        self.assertFalse(closed_stock_structure_break(position, candles, stamps[-1] + 300, stamps[-1]))
+
     def test_stock_execution_gate_checks_model_at_actual_ask(self):
         import argparse
         import dhan_dynamic_fno_stock_bot as stock
@@ -187,8 +201,8 @@ class EntryQualityTests(unittest.TestCase):
         cfg = stock.DynamicStrategyConfig({'STOCK_OPT_STOP_PCT': '1', 'STOCK_OPT_TARGET_PCT': '10',
             'STOCK_OPT_MIN_NET_RR': '1.2', 'STOCK_OPT_RUPEE_TARGET': '2000',
             'STOCK_OPT_RUPEE_MAX_RISK': '1000', 'STOCK_OPT_MAX_LOTS': '3'}, argparse.Namespace())
-        signal = dict(symbol='TEST', lot_size=500, spot_ltp=1000, strike=1000,
-                      signal_timestamp=now.timestamp()-310, delta=.6, theta=-1, gamma=.01,
+        signal = dict(symbol='TEST', lot_size=60, spot_ltp=1000, strike=1000,
+                      signal_timestamp=now.timestamp()-310, delta=.6, theta=-1, gamma=.02,
                       iv=20, iv_range_low=15, iv_range_high=30, opt_type='CE',
                       greeks_timestamp=now.timestamp(), expiry='2026-11-26', atr_5m=20)
         quote = {'received_epoch': now.timestamp(), 'last_trade_time': '22/10/2026 11:00:10',
@@ -196,6 +210,11 @@ class EntryQualityTests(unittest.TestCase):
                            'sell': [dict(price=100, quantity=500)]}}
         qualified = stock.qualify_quote(signal, quote, cfg, 60000, now.timestamp())
         self.assertEqual(qualified["lots"], 1)
+        self.assertEqual(qualified["initial_sl"], 86.20)
+        self.assertEqual(qualified["cash_loss_stop_price"], qualified["initial_sl"])
+        reasons = []
+        self.assertIsNone(stock.qualify_quote({**signal, "lot_size": 500}, quote, cfg, 60000, now.timestamp(), reasons))
+        self.assertIn("NATURAL_STOP_EXCEEDS_RISK_BUDGET", reasons[0])
         self.assertLess(qualified["net_profit_target"], cfg.rupee_target)
         self.assertGreaterEqual(qualified["expected_net_rr"], 1.5)
         reasons = []
