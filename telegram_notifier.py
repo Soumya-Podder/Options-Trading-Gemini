@@ -376,6 +376,20 @@ class TelegramNotifier:
         except (TypeError, ValueError, OverflowError):
             return "-"
 
+    def _display_target(self, trade):
+        entry = trade.get("entry_price")
+        call = (trade.get("market_structure") or {}).get("telegram_call") or {}
+        targets = sorted(float(t) for t in call.get("targets", [])
+                         if self._price(t) != "-" and self._price(entry) != "-" and float(t) > float(entry))
+        target = trade.get("rupee_target_price")
+        if call and targets:
+            target = (targets[1] if len(targets) > 1 else None) if trade.get("target_one_done") else targets[0]
+        elif not call and trade.get("index") == "NIFTY" and trade.get("target_points"):
+            target = float(entry) + (12 if trade.get("target_one_qty") and not trade.get("target_one_done") else trade["target_points"])
+        elif not target:
+            target = (trade.get("entry_diagnostics") or {}).get("rupee_target_price")
+        return target
+
     def _trade_table(self, positions, session_trades=None):
         headers, columns, gross_values = [], [], []
         now = time.time()
@@ -402,15 +416,7 @@ class TelegramNotifier:
             source = f" · {call['source']}" if call.get("source") else ""
             icon = " 🟢" if gross is not None and gross > 0 else " 🔴" if gross is not None and gross < 0 else ""
             headers.append(f"{number}. <b>{name}</b> {html.escape(str(contract) + expiry + source)}{icon}")
-            targets = sorted(float(t) for t in call.get("targets", [])
-                             if self._price(t) != "-" and self._price(entry) != "-" and float(t) > float(entry))
-            target = trade.get("rupee_target_price")
-            if call and targets:
-                target = (targets[1] if len(targets) > 1 else None) if trade.get("target_one_done") else targets[0]
-            elif not call and trade.get("index") == "NIFTY" and trade.get("target_points"):
-                target = float(entry) + (12 if trade.get("target_one_qty") and not trade.get("target_one_done") else trade["target_points"])
-            elif not target:
-                target = (trade.get("entry_diagnostics") or {}).get("rupee_target_price")
+            target = self._display_target(trade)
             cash_stop = trade.get("cash_loss_stop_price")
             stop = trade.get("current_sl") or (trade.get("entry_diagnostics") or {}).get("initial_sl")
             if self._price(cash_stop) != "-":
@@ -559,9 +565,7 @@ class TelegramNotifier:
                         for p in self._positions.values()
                     )
                 stop = self._price(closed.get("current_sl"))
-                target = self._price(closed.get("rupee_target_price"))
-                if target == "-" and closed.get("index") == "NIFTY" and closed.get("target_points"):
-                    target = self._price(closed["entry_price"] + closed["target_points"])
+                target = self._price(self._display_target(closed))
                 table += f"\nLatest exit SL: {stop} · Target: {target}"
             elif self.mode == "PAPER MCX" and session_trades is not None:
                 table = self.completed_trade_table(session_trades)

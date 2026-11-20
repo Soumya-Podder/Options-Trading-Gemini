@@ -147,8 +147,26 @@ def analyze_mtf_liquidity_and_reversal_zones(candles_5m, direction, spot=0.0):
         return failure
 
 
+def evaluate_intraday_theta_viability(theta_daily, delta, atr_5m, premium, expected_hold_minutes=30.0):
+    """Screen modeled hold-window decay against premium and delta times ATR."""
+    try:
+        theta, delta, atr, premium, minutes = map(float, (
+            theta_daily, delta, atr_5m, premium, expected_hold_minutes))
+    except (TypeError, ValueError, OverflowError):
+        return False, "INVALID_INTRADAY_THETA_INPUT"
+    if not all(map(isfinite, (theta, delta, atr, premium, minutes))) or min(atr, premium, minutes) <= 0 or abs(delta) < .25:
+        return False, "INVALID_INTRADAY_THETA_INPUT"
+    decay = max(0.0, -theta) * minutes / 375
+    gain = abs(delta) * atr
+    if decay > .30 * gain:
+        return False, f"INTRADAY_THETA_EXCEEDS_ATR(decay={decay:.2f},gain={gain:.2f})"
+    if decay > .025 * premium:
+        return False, f"EXTREME_INTRADAY_THETA_PCT(decay={decay / premium:.2%})"
+    return True, "INTRADAY_THETA_OK"
+
+
 def compute_bsm_greeks_for_stock_option(spot, strike, premium, option_type,
-                                       days_to_expiry, rate=.065):
+                                       days_to_expiry, rate=.065, *, atr_5m=None):
     """Invert a European BSM price; report the model assumption and daily theta."""
     import math
     failure = {'greek_supported': False, 'reasons': ['INVALID_BSM_INPUT_OR_PRICE']}
@@ -195,8 +213,13 @@ def compute_bsm_greeks_for_stock_option(spot, strike, premium, option_type,
             reasons.append('STOCK_OPT_LOW_DELTA')
         if iv > .85:
             reasons.append('STOCK_OPT_EXTREME_IV')
-        if drag > .55:
-            reasons.append('STOCK_OPT_THETA_TRAP')
+        if atr_5m is None:
+            if drag > .55:
+                reasons.append('STOCK_OPT_THETA_TRAP')
+        else:
+            theta_ok, theta_reason = evaluate_intraday_theta_viability(theta, delta, atr_5m, premium)
+            if not theta_ok:
+                reasons.append(theta_reason)
         return {'greek_supported': not reasons, 'delta': delta, 'gamma': gamma,
                 'theta_daily': theta, 'iv_pct': iv * 100, 'theta_ratio': drag,
                 'model': 'European BSM, zero dividend yield', 'reasons': reasons}

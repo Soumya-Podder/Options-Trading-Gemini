@@ -26,6 +26,30 @@ class EntryQualityTests(unittest.TestCase):
                 'oi_analysis': {'nearby_strikes': [dict(strike=25000, side='ce', change_over_5m=-100,
                                                        iv_change_5m=.2, premium_change_over_5m=5)]}}
 
+    def test_index_reservation_blocks_shared_underlying(self):
+        for slot, other in (("active_position", "active_channel_position"),
+                            ("active_channel_position", "active_position")):
+            ledger = {slot: {"index": "NIFTY", "option_type": "CE"}}
+            self.assertFalse(index.reserve_index_entry(
+                ledger, "2026-11-20", {"index": "NIFTY", "option_type": "PE"}, position_key=other))
+            self.assertFalse(index.index_has_open_position("SENSEX", ledger.values()))
+
+    def test_executable_quote_rejects_missing_stale_future_and_crossed(self):
+        node = dict(top_bid_price=140, top_ask_price=141, depth_received_epoch=100)
+        self.assertIsNone(index.index_entry_quote_block_reason(node, 105))
+        for bad, now in (({}, 105), (node, 105.01), (node, 99),
+                         ({**node, "top_bid_price": 142}, 105),
+                         ({**node, "top_ask_price": float("nan")}, 105)):
+            self.assertIsNotNone(index.index_entry_quote_block_reason(bad, now))
+
+    def test_nifty_daily_budget_rejects_second_trade_stop(self):
+        day = "2026-11-20"
+        ledger = {"trades": [{"index": "NIFTY", "exit_timestamp": day + " 09:47:48", "net_pnl": -630}]}
+        self.assertIsNone(index.nifty_daily_entry_risk_reason({}, day, 142.75, 134.95, 1, 65))
+        self.assertIn("planned stop", index.nifty_daily_entry_risk_reason(ledger, day, 96.50, 90.50, 1, 65))
+        ledger["trades"][0]["net_pnl"] = -850
+        self.assertIn("limit", index.nifty_daily_entry_risk_reason(ledger, day, 96.50, 90.50, 1, 65))
+
     def test_missing_and_wrong_sign_greeks_fail(self):
         for node in ({}, self.node('PE')):
             self.assertFalse(validate_option_greeks_and_iv(node, 'CE')['greek_supported'])
@@ -150,6 +174,12 @@ class EntryQualityTests(unittest.TestCase):
             result = brain.brain['quality_factor_outcomes']['1|iv_trend|FALLING']
             self.assertEqual((result['trades'], result['wins'], result['net_r_sum']), (2, 1, 1.0))
 
+    def test_stock_theta_uses_hold_window_and_atr(self):
+        from stock_option_signals import evaluate_intraday_theta_viability
+        self.assertTrue(evaluate_intraday_theta_viability(-9.82, .5, 8, 100)[0])
+        self.assertIn("EXCEEDS_ATR", evaluate_intraday_theta_viability(-9.82, .5, 1, 100)[1])
+        self.assertIn("EXTREME", evaluate_intraday_theta_viability(-35, .5, 30, 100)[1])
+
     def test_stock_execution_gate_checks_model_at_actual_ask(self):
         import argparse
         import dhan_dynamic_fno_stock_bot as stock
@@ -164,7 +194,14 @@ class EntryQualityTests(unittest.TestCase):
         quote = {'received_epoch': now.timestamp(), 'last_trade_time': '22/10/2026 11:00:10',
                  'depth': {'buy': [dict(price=99.95, quantity=500)],
                            'sell': [dict(price=100, quantity=500)]}}
-        self.assertIsNotNone(stock.qualify_quote(signal, quote, cfg, 60000, now.timestamp()))
+        qualified = stock.qualify_quote(signal, quote, cfg, 60000, now.timestamp())
+        self.assertEqual(qualified["lots"], 1)
+        self.assertLess(qualified["net_profit_target"], cfg.rupee_target)
+        self.assertGreaterEqual(qualified["expected_net_rr"], 1.5)
+        reasons = []
+        near_wall = {**signal, "mtf_liquidity": {"nearest_opposing_zone_pct": .04}}
+        self.assertIsNone(stock.qualify_quote(near_wall, quote, cfg, 60000, now.timestamp(), reasons))
+        self.assertIn("3x friction", reasons[0])
         with patch.object(stock, 'compute_bsm_greeks_for_stock_option',
                           return_value={'greek_supported': False, 'reasons': ['STOCK_OPT_EXTREME_IV']}) as model:
             reasons = []

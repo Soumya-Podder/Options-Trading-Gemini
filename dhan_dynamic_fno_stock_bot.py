@@ -25,7 +25,7 @@ import requests
 from collections import Counter
 from bisect import bisect_left
 from pathlib import Path
-from stock_option_signals import evaluate_stock_setup, scanx_stock_membership, recent_entry_momentum, order_flow_direction, compute_bsm_greeks_for_stock_option
+from stock_option_signals import evaluate_stock_setup, scanx_stock_membership, recent_entry_momentum, order_flow_direction, compute_bsm_greeks_for_stock_option, evaluate_intraday_theta_viability
 from stock_option_policy import premium_plan, rank_candidates, learned_profit_floor, DailyTradeGate, stock_reentry_reason, option_chain_request_slot, market_quote_request_slot, single_bot_session, session_open_wait_seconds, combined_paper_loss_state, combined_paper_entry_allowed, COMBINED_PAPER_LOSS_LIMIT_RS, option_order_book_pressure
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -166,12 +166,9 @@ class DynamicStrategyConfig:
         self.runner_target = float(env.get('STOCK_OPT_RUNNER_TARGET',5000))
         self.rupee_max_risk = float(env.get("STOCK_OPT_RUPEE_MAX_RISK", 1500))
         self.max_lots = int(env.get("STOCK_OPT_MAX_LOTS", 2))
-        # User policy: use the current listed expiry, including expiry day.
-        # A stale minimum-DTE override must never silently select next month.
-        self.min_days_to_expiry = 0
+        self.min_days_to_expiry = 3
         self.min_delta = float(env.get("STOCK_OPT_MIN_DELTA", 0.38))
         self.max_delta = float(env.get("STOCK_OPT_MAX_DELTA", 0.78))
-        self.max_theta_pct_per_day = float(env.get("STOCK_OPT_MAX_THETA_PCT_PER_DAY", 6))
         self.no_progress_bars = int(env.get("STOCK_OPT_NO_PROGRESS_BARS", 3))
         self.max_premium = float(env.get("STOCK_OPT_MAX_PREMIUM", 1000))
         self.confirm_window_sec = int(env.get("STOCK_OPT_CONFIRM_WINDOW_SEC", 300))
@@ -185,7 +182,7 @@ class DynamicStrategyConfig:
         self.runner_max_hold_minutes=float(env.get('STOCK_OPT_RUNNER_MAX_HOLD_MINUTES',90))
         numbers = (self.target_pct, self.stop_pct, self.min_rr_target, self.slippage_pct,
                    self.max_spread_pct, self.rupee_target, self.rupee_max_risk,
-                   self.min_delta, self.max_delta, self.max_theta_pct_per_day, self.max_premium,
+                   self.min_delta, self.max_delta, self.max_premium,
                    self.poll_interval_sec,self.runner_target,self.daily_loss_limit,self.runner_max_hold_minutes)
         if not all(math.isfinite(v) for v in numbers):
             raise ValueError("Stock option settings must be finite")
@@ -194,8 +191,8 @@ class DynamicStrategyConfig:
                 and 1 <= self.max_concurrent <= min(2,self.max_daily_trades) and self.max_daily_trades <= 4
                 and 1 <= self.max_consec_losses <= 4 and self.daily_loss_limit > 0
                 and 0 < self.rupee_target <= self.runner_target and self.rupee_max_risk > 0 and 1<=self.max_lots<=3
-                and 0 < self.min_delta < self.max_delta <= 1 and self.min_days_to_expiry == 0
-                and self.max_theta_pct_per_day > 0 and self.max_premium >= 3
+                and 0 < self.min_delta < self.max_delta <= 1
+                and self.max_premium >= 3
                 and 300 <= self.confirm_window_sec <= 900
                 and 3 <= self.poll_interval_sec <= 5
                 and 1 <= self.no_progress_bars <= self.max_hold_bars_5m):
@@ -203,11 +200,13 @@ class DynamicStrategyConfig:
         if not 5<=self.runner_max_hold_minutes<=120:
             raise ValueError('Runner holding limit must be between 5 and 120 minutes')
 
-    def plan(self, entry: float, qty: int, max_target_price=None, min_lots=1, min_net_rr=None, max_lots=None):
+    def plan(self, entry: float, qty: int, max_target_price=None, min_lots=1, min_net_rr=None, max_lots=None, *, dynamic_friction=None):
         # Cash loss is an exit trigger for the whole position, not an entry veto.
         plan = premium_plan(entry, qty, compute_fno_option_charges, self.target_pct,
                             self.stop_pct, max(self.min_rr_target, min_net_rr or 0), self.slippage_pct,
-                            self.rupee_target, min(self.max_lots, max_lots) if max_lots is not None else self.max_lots, float("inf"),self.extend_rupee_target,max_target_price,
+                            self.rupee_target if dynamic_friction is None else 3 * dynamic_friction,
+                            min(self.max_lots, max_lots) if max_lots is not None else self.max_lots,
+                            float("inf"), self.extend_rupee_target or dynamic_friction is not None, max_target_price,
                             min_lots=min_lots,cash_loss_limit=self.rupee_max_risk)
         if plan is None:
             return None
@@ -247,9 +246,8 @@ class DynamicStockOptionsUniverse:
 
     @classmethod
     def load_universe(cls, logger: logging.Logger, min_days_to_expiry=0) -> Dict[str, Dict[str, Any]]:
-        if min_days_to_expiry != 0:
-            raise ValueError('Current expiry required; minimum DTE cannot select a later expiry')
-        today_str = datetime.now(IST).strftime("%Y-%m-%d")
+        earliest_expiry = (datetime.now(IST).date() + timedelta(days=min_days_to_expiry)).isoformat()
+        today_str = datetime.now(IST).date().isoformat()
         cache_file = os.path.join(CACHE_DIR, f"dynamic_optstk_universe_{today_str}_dte{min_days_to_expiry}.json")
         if os.path.exists(cache_file):
             try:
@@ -318,7 +316,7 @@ class DynamicStockOptionsUniverse:
             if base_sym not in eq_map or not contracts:
                 continue
             valid_exps = sorted({c["expiry"] for c in contracts
-                if c['expiry'] >= today_str})
+                if c['expiry'] >= earliest_expiry})
             if not valid_exps:
                 continue
             chosen_exp = valid_exps[0]
@@ -1195,23 +1193,39 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
             spread_limit = min(spread_limit, 2.0)
         if spread > spread_limit:
             return reject(f"Spread {spread:.2f}% above {spread_limit:.2f}%")
-        flow_rr = sig.get("order_flow_min_net_rr")
-        plan_options = {"min_net_rr": flow_rr, "max_lots": depth_lots}
-        if cfg.extend_rupee_target:
-            # Feed the same option-move estimate into sizing. A small first lot
-            # must not veto a larger affordable lot count that fits both the
-            # target-move estimate and the unchanged cash-risk ceiling.
-            delta,theta,gamma=(float(sig[k]) for k in ('delta','theta','gamma'))
-            move=1.5*float(sig['atr_5m'])
-            decay=max(0,-theta)*cfg.max_hold_bars_5m*5/375
-            premium_move=abs(delta)*move+0.5*gamma*move*move-decay
-            # Strong movers use the explicit 55% scenario screen below; the
-            # cash target, full planned RR and cash-risk cap remain mandatory.
-            plan=cfg.plan(ask,qty,max_target_price=None if strong_mover else ask+premium_move, **plan_options)
-        else:
-            plan = cfg.plan(ask, qty, **plan_options)
+        dte = (datetime.strptime(sig["expiry"], "%Y-%m-%d").date() - datetime.fromtimestamp(now_epoch, IST).date()).days
+        if dte < cfg.min_days_to_expiry:
+            return reject('Contract is within the two-calendar-day expiry exclusion')
+        delta, theta, gamma = (float(sig[key]) for key in ("delta", "theta", "gamma"))
+        atr = float(sig["atr_5m"])
+        theta_ok, theta_reason = evaluate_intraday_theta_viability(theta, delta, atr, ask)
+        if not theta_ok:
+            return reject(theta_reason)
+        decay = max(0, -theta) * 30 / 375
+        move = 1.5 * atr
+        wall_pct = (sig.get("mtf_liquidity") or {}).get("nearest_opposing_zone_pct")
+        if wall_pct is not None:
+            move = min(move, float(sig["spot_ltp"]) * float(wall_pct) / 100)
+        premium_move = abs(delta) * move + .5 * gamma * move**2 - decay
+        ceiling = ask + premium_move
+        if not math.isfinite(ceiling) or premium_move <= 0:
+            return reject("No viable option move before the structural wall")
+        plan = None
+        for lots in range(1, min(cfg.max_lots, depth_lots) + 1):
+            units = qty * lots
+            projected_fill = math.floor(ceiling * (1 - cfg.slippage_pct / 100) * 20 + 1e-9) / 20
+            friction = compute_fno_option_charges(ask, projected_fill, units) + (
+                ask - bid + ceiling - projected_fill) * units
+            candidate = cfg.plan(
+                ask, qty, max_target_price=ceiling, min_lots=lots, max_lots=lots,
+                min_net_rr=max(1.5, sig.get("order_flow_min_net_rr") or 0),
+                dynamic_friction=friction,
+            )
+            if candidate and ask * units + candidate["estimated_costs"] <= wallet:
+                plan = candidate
+                break
         if not plan:
-            return reject(f"No lot count reaches Rs.{cfg.rupee_target:.0f} within risk/RR limits")
+            return reject("No affordable lot count clears 3x friction and net reward/risk within projected room")
         qty = plan["qty"]
         if min(int(bid_node["quantity"]), int(ask_node["quantity"])) < qty:
             return reject(f"Displayed depth below {plan['lots']} lots")
@@ -1235,31 +1249,16 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
             return reject("Delta sign disagrees with option type")
         if not 0 <= now_epoch-sig.get("greeks_received_epoch", sig["greeks_timestamp"]) <= 120:
             return reject("Greek snapshot received over 120s ago or future-dated")
-        dte = (datetime.strptime(sig["expiry"], "%Y-%m-%d").date() - datetime.fromtimestamp(now_epoch, IST).date()).days
-        if dte < 0:
-            return reject('Contract already expired')
         expiry_epoch = datetime.combine(datetime.strptime(sig['expiry'], '%Y-%m-%d').date(), dtime(15, 30), IST).timestamp()
         model = compute_bsm_greeks_for_stock_option(
-            sig['spot_ltp'], sig['strike'], ask, sig['opt_type'], (expiry_epoch - now_epoch) / 86400)
+            sig['spot_ltp'], sig['strike'], ask, sig['opt_type'], (expiry_epoch - now_epoch) / 86400, atr_5m=atr)
         sig['bsm_quality'] = model
         if not model['greek_supported']:
             return reject('BSM quality: ' + ', '.join(model['reasons']))
         if iv > 85:
             return reject('Broker IV exceeds 85%')
-        theta_pct = max(0, -theta)/ask*100
-        if theta_pct > cfg.max_theta_pct_per_day:
-            return reject(f"Theta {theta_pct:.2f}%/day above {cfg.max_theta_pct_per_day:.2f}%")
-        decay = max(0, -theta) * cfg.max_hold_bars_5m * 5 / 375
-        if decay*qty >= cfg.rupee_target:
-            return reject(f"Decay over hold Rs.{decay*qty:.0f} exceeds the Rs.{cfg.rupee_target:.0f} target")
-        move = 1.5 * float(sig["atr_5m"])
-        expected_gain = abs(delta)*move + 0.5*gamma*move*move - decay
-        if not math.isfinite(expected_gain):return reject('Non-finite expected option move')
-        net_gain = expected_gain*qty - plan["target_estimated_costs"]
-        minimum_fraction=0.55 if strong_mover else (1.0 if cfg.extend_rupee_target else 0.75)
-        required_gain=max(cfg.rupee_target,plan.get('net_profit_target',cfg.rupee_target))*minimum_fraction
-        if net_gain < required_gain:
-            return reject(f"A 1.5 ATR move nets only Rs.{net_gain:.0f} of the required Rs.{required_gain:.0f} ({minimum_fraction:.0%} minimum)")
+        theta_pct = max(0, -theta) / ask * 100
+        net_gain = premium_move * qty - plan["target_estimated_costs"]
         # Cross-sectional IV range in the same expiry/side, not historical IV rank.
         low, high = float(sig["iv_range_low"]), float(sig["iv_range_high"])
         if not all(math.isfinite(v) for v in (low, high)) or high <= low:
@@ -1268,27 +1267,6 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
         if (iv-low)/(high-low) >= iv_limit:
             return reject(f"IV in the top {100*(1-(iv-low)/(high-low)):.0f}% of the chain")
         sizing={'basis':'Smallest qualifying size','lots':plan['lots']}
-        # Scale only a strong, higher-timeframe-aligned setup that already
-        # passed every one-position entry check. Fresh depth/cash still bind.
-        if (float(sig.get('signal_quality',0))>=76 or float(sig.get('buying_pressure_score',0))>=78) and sig.get('higher_timeframe_aligned') and option_order_book_pressure(quote)['book_pressure_ratio']>=0.95:
-            lot_size=int(sig['lot_size'])
-            for lots in range(plan['lots']+1,min(3,cfg.max_lots,depth_lots)+1):
-                larger=cfg.plan(ask,lot_size,min_lots=lots,
-                    max_target_price=ask+premium_move if cfg.extend_rupee_target and not strong_mover else None,
-                    **plan_options)
-                if not larger or larger['lots']!=lots:continue
-                if not stock_entry_structure_check(sig,larger,ask,bid)['allowed']:continue
-                if ask-bid>0.25*(ask-max(larger['initial_sl'],larger['cash_loss_stop_price']))+1e-9:continue
-                units=larger['qty']
-                if min(int(bid_node['quantity']),int(ask_node['quantity']))<units:continue
-                if ask*units+larger['estimated_costs']>wallet or decay*units>=cfg.rupee_target:continue
-                projected=expected_gain*units-larger['target_estimated_costs']
-                if projected<max(1.2*larger['net_profit_target'],1.5*larger['expected_net_risk']):continue
-                plan=larger;qty=units;net_gain=projected
-                sizing={'basis':'Strong aligned setup with buffered reward, funded size and depth',
-                        'lots':lots,'projected_net_gain':round(projected,2),
-                        'planned_total_risk':round(larger['expected_net_risk'],2)}
-                if projected>=cfg.runner_target:break
         entry_structure=stock_entry_structure_check(sig,plan,ask,bid)
         if not entry_structure['allowed']:return reject(entry_structure['reason'])
         try:
@@ -1307,7 +1285,7 @@ def qualify_quote(sig, quote, cfg, wallet, now_epoch=None, reasons=None):
                 "dte": dte, "theta_pct_per_day": theta_pct, "expected_move_gain": net_gain,
                 "strong_mover": strong_mover, "spread_limit_pct": spread_limit,
                 "confirmation_age_seconds": age_after_close, "confirm_window_sec": window,
-                "expected_gain_fraction": minimum_fraction, "iv_range_limit": iv_limit,
+                "iv_range_limit": iv_limit,
                 "quote_age_seconds": quote_received_age(quote, now_epoch),
                 "last_trade_age_seconds": last_trade_age,
                 "greeks_receipt_age_seconds": now_epoch-sig.get("greeks_received_epoch",sig["greeks_timestamp"])}
@@ -1801,8 +1779,8 @@ def run_dynamic_stock_options_session(live_mode, scan_once, cfg, logger):
     telegram = TelegramNotifier(env, logger, "LIVE" if live_mode else "PAPER") if TelegramNotifier and not scan_once else None
     logger.info("Stock options: max %d/day | net target Rs.%.0f | cash loss exit Rs.%.0f per position",
                 cfg.max_daily_trades, cfg.rupee_target, cfg.rupee_max_risk)
-    logger.info("Entry profile: gap continuation %s | cash-target extension %s | maximum %d lots",
-                cfg.enable_opening_trend,cfg.extend_rupee_target,cfg.max_lots)
+    logger.info("Entry profile: gap continuation %s | dynamic friction/RR sizing | maximum %d lots | minimum DTE %d",
+                cfg.enable_opening_trend, cfg.max_lots, cfg.min_days_to_expiry)
     logger.info("Market quote refresh: %.1fs; position checks also run between screening requests",
                 cfg.poll_interval_sec)
     logger.info('Stock PAPER runner upper cap Rs.%.0f | staged profit %s | extended runner cap %.0f minutes',
@@ -2226,7 +2204,7 @@ def run_stock_options_historical_backtest(days, max_stocks, cfg, logger, current
         orb_ema = current_implementation
     env = load_dotenv_file(".env")
     client = DhanStockOptionsClient(env.get("DHAN_CLIENT_ID", ""), env.get("DHAN_ACCESS_TOKEN", ""), logger)
-    universe = DynamicStockOptionsUniverse.load_universe(logger, cfg.min_days_to_expiry)
+    universe = DynamicStockOptionsUniverse.load_universe(logger)
     # Deterministic coverage; do not use today's momentum to select past winners.
     stocks = sorted(universe.values(), key=lambda s: s["symbol"])
     if max_stocks > 0:

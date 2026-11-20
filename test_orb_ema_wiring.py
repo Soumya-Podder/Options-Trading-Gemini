@@ -56,11 +56,12 @@ class ItmFallbackTests(unittest.TestCase):
 
         primary = dict(symbol="TEST", opt_type="CE", strike=385, opt_security_id="atm",
                        lot_size=100, signal_timestamp=600, day_change_pct=7,
+                       delta=.5, theta=-1, gamma=.01, atr_5m=5, expiry="1970-02-01",
                        itm_fallback_contract=dict(strike=380, opt_security_id="itm"),
                        alternate_contracts=[dict(strike=375, opt_security_id="other")])
-        cfg = SimpleNamespace(max_spread_pct=3.5, max_premium=100, extend_rupee_target=False,
+        cfg = SimpleNamespace(max_spread_pct=3.5, max_premium=100, max_lots=1, slippage_pct=.1, min_days_to_expiry=3,
                               rupee_target=500, plan=Mock(return_value=None))
-        for book, expected in ((quote(9.75, 9.85), "No lot count"),
+        for book, expected in ((quote(9.75, 9.85), "No affordable lot count"),
                                (quote(4.65, 4.75), "outside"),
                                (quote(9.70, 10.10), "above 2.00%"),
                                (quote(0, 9.85), "Unusable bid/ask")):

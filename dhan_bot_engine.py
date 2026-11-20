@@ -148,10 +148,51 @@ def index_entries_today(ledger, day):
     return max(saved, closed + int(outstanding))
 
 
+NIFTY_DAILY_LOSS_LIMIT_RS = 850.0
+INDEX_ENTRY_QUOTE_MAX_AGE_SEC = 5.0
+
+
+def index_has_open_position(index, positions):
+    return bool(index) and any(
+        str(pos.get("index") or pos.get("underlying") or "").upper() == index.upper()
+        for pos in positions if isinstance(pos, dict)
+    )
+
+
+def index_entry_quote_block_reason(node, now_epoch):
+    try:
+        bid, ask, received = (float(node[key]) for key in
+                              ("top_bid_price", "top_ask_price", "depth_received_epoch"))
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return "Missing executable option quote"
+    if not all(math.isfinite(value) for value in (bid, ask, received)) or not 0 < bid <= ask:
+        return "Missing or invalid executable bid/ask"
+    if not 0 <= now_epoch - received <= INDEX_ENTRY_QUOTE_MAX_AGE_SEC:
+        return "Executable option quote stale or future-dated (5s limit)"
+    return None
+
+
+def nifty_daily_entry_risk_reason(ledger, day, entry, stop, lots, qty):
+    realized = sum(float(trade["net_pnl"]) for trade in ledger.get("trades", [])
+                   if trade.get("index") == "NIFTY" and str(trade.get("exit_timestamp", "")).startswith(day)
+                   and not trade.get("exclude_from_performance"))
+    if realized <= -NIFTY_DAILY_LOSS_LIMIT_RS:
+        return "NIFTY daily loss limit (Rs.850) reached"
+    modeled_stop = math.floor(stop * .999 * 20 + 1e-9) / 20
+    planned_loss = (entry - modeled_stop) * qty + 40 + 24.5 * lots
+    if realized - planned_loss < -NIFTY_DAILY_LOSS_LIMIT_RS - 1e-9:
+        return "NIFTY planned stop exceeds remaining Rs.850 daily loss budget"
+    return None
+
+
 def reserve_index_entry(ledger, day, details, ledger_path="paper_trade_ledger.json", position_key="active_position"):
     """Persist a consumed slot before an order; ambiguous slots stay consumed."""
     count = index_entries_today(ledger, day)
     if count >= MAX_TRADES_PER_DAY or ledger.get("pending_entry") or ledger.get(position_key):
+        return False
+    if index_has_open_position(details.get("index"), (
+        ledger.get("active_position"), ledger.get("active_channel_position"),
+    )):
         return False
     runner_reentry = details.get('post_lock_runner', False)
     reentry_count = ledger.get('daily_runner_entry_counts', {}).get(day, 0)
@@ -3535,26 +3576,6 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             if initial_risk <= 0 or ask - bid > .20 * initial_risk:
                                 view["entry_decision"] = {"action": "HOLD", "reason": "Spread too wide for Rs.650 per-lot risk plan"}
                                 continue
-                            held_depth = direct_call_quote or dhan.fetch_held_channel_quote({
-                                "index": idx_name, "strike": strike_k, "option_type": opt_type,
-                                "security_id": sec_id, "qty": qty,
-                            })
-                            depth_node = (held_depth or {}).get("oc", {}).get(f"{strike_k:.6f}", {}).get(quote_side, {})
-                            try:
-                                held_bid = float(depth_node.get("top_bid_price") or 0)
-                                held_ask = float(depth_node.get("top_ask_price") or 0)
-                                held_ask_qty = float(depth_node.get("top_ask_quantity") or 0)
-                                held_age = time.time() - float(depth_node.get("depth_received_epoch") or 0)
-                            except (TypeError, ValueError, OverflowError):
-                                held_bid = held_ask = held_ask_qty = 0
-                                held_age = math.inf
-                            if (
-                                0 <= held_age <= 12 and held_bid > init_sl
-                                and held_ask > 0 and held_ask <= TelegramCallFeed.entry_bounds(channel_call)[1] * 1.03
-                            ):
-                                entry_p = math.ceil(held_ask * 1.001 * 20 - 1e-9) / 20
-                                init_sl = channel_initial_stop(idx_name, entry_p, cfg["lot_size"], lots)
-                                initial_risk = round(entry_p - init_sl, 2)
                             now = datetime.now()
                             if now.time() >= EOD_SQUAREOFF_TIME or time.time() - chain_received_epoch > 8:
                                 continue
@@ -3592,10 +3613,48 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             view['entry_decision'] = {'action': 'HOLD', 'reason': reason, 'rule': sig}
                             logger.info('[INDEX QUALITY HOLD] %s | %s', idx_name, reason)
                             continue
+                        if index_has_open_position(idx_name, positions.values()):
+                            reason = f"{idx_name} already has an open position"
+                            view["entry_decision"] = {"action": "HOLD", "reason": reason, "rule": sig}
+                            logger.info("[INDEX EXECUTION HOLD] %s", reason)
+                            continue
+                        depth = dhan.fetch_held_channel_quote({
+                            "index": idx_name, "strike": strike_k, "option_type": opt_type,
+                            "security_id": sec_id, "qty": qty,
+                        })
+                        executable = (depth or {}).get("oc", {}).get(f"{strike_k:.6f}", {}).get(quote_side, {})
+                        checked_epoch = time.time()
+                        reason = index_entry_quote_block_reason(executable, checked_epoch)
+                        if not reason:
+                            bid, ask = (float(executable[k]) for k in ("top_bid_price", "top_ask_price"))
+                            fresh_entry = math.ceil(ask * 1.001 * 20 - 1e-9) / 20
+                            if fresh_entry > entry_p or bid <= init_sl:
+                                reason = "Executable price moved outside the validated entry/stop"
+                            elif not spread_and_liquidity_ok(
+                                bid, ask, (bid + ask) / 2, float(executable.get("top_bid_quantity") or 0),
+                                float(executable.get("top_ask_quantity") or 0), lots, cfg["lot_size"], fresh_entry,
+                            ):
+                                reason = "Fresh executable spread or depth failed at sized quantity"
+                            elif channel_call and (ask - bid > .20 * (fresh_entry - init_sl)
+                                                   or fresh_entry > TelegramCallFeed.entry_bounds(channel_call)[1]):
+                                reason = "Fresh executable quote failed channel spread or entry cap"
+                            elif idx_name == "NIFTY":
+                                reason = nifty_daily_entry_risk_reason(
+                                    ledger, today_str, fresh_entry, init_sl, lots, qty)
+                        if reason:
+                            view["entry_decision"] = {"action": "HOLD", "reason": reason, "rule": sig}
+                            logger.info("[INDEX EXECUTION HOLD] %s | %s", idx_name, reason)
+                            continue
+                        entry_p = fresh_entry
+                        initial_risk = round(entry_p - init_sl, 2)
+                        now = datetime.now()
+                        if not SESSION_START_TIME <= now.time() < LAST_ENTRY_TIME:
+                            continue
                         view.setdefault("market_structure", {})["entry_quote"] = {
-                            "received_epoch": chain_received_epoch, "decision_epoch": time.time(),
+                            "received_epoch": executable["depth_received_epoch"], "decision_epoch": checked_epoch,
                             "modeled_entry_price_basis": "EXECUTABLE_ASK_PLUS_0.1PCT_SLIPPAGE",
-                            **{k: entry_node.get(k) for k in ("last_price", "top_bid_price", "top_ask_price", "top_bid_quantity", "top_ask_quantity")}
+                            **{k: executable.get(k) for k in ("last_price", "top_bid_price", "top_ask_price",
+                                                            "top_bid_quantity", "top_ask_quantity")},
                         }
                         if live_mode and not sec_id:
                             logger.error("Missing option security ID; no entry submitted.")
@@ -3605,6 +3664,8 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         position_key = "active_channel_position" if channel_call else "active_position"
                         if not combined_paper_entry_allowed(today_str):
                             view["entry_decision"] = {"action": "HOLD", "reason": "Combined PAPER loss limit reached or state unavailable"}
+                            continue
+                        if index_entry_quote_block_reason(executable, time.time()):
                             continue
                         if not reserve_index_entry(
                             ledger, today_str,
@@ -3618,6 +3679,11 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                         ):
                             continue
                         day_entries = index_entries_today(ledger, today_str)
+                        if index_entry_quote_block_reason(executable, time.time()):
+                            ledger.pop("pending_entry", None)
+                            atomic_write_json(ledger_path, ledger)
+                            logger.info("[INDEX EXECUTION HOLD] Executable quote expired during reservation")
+                            continue
                         if live_mode:
                             entry_order = dhan.place_market_order(
                                 security_id=sec_id,
@@ -3637,7 +3703,10 @@ def run_intraday_market_session(live_mode: bool, logger: logging.Logger, indices
                             "lots": lots,
                             "qty": qty,
                             "entry_price": entry_p,
-                            "current_ltp": entry_p,
+                            "current_ltp": executable.get("last_price"),
+                            "current_bid": bid,
+                            "current_ask": ask,
+                            "quote_received_epoch": executable["depth_received_epoch"],
                             "highest_ltp": entry_p,
                             "current_sl": init_sl,
                             "initial_risk_points": initial_risk,

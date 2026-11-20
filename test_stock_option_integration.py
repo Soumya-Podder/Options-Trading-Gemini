@@ -293,19 +293,16 @@ class IntegrationTests(unittest.TestCase):
         quote['received_epoch']=cutoff.timestamp()
         self.assertEqual(bot.paper_exit(pos,quote,cutoff,cfg)[1],'EOD_SQUAREOFF')
 
-    def test_current_expiry_includes_today_and_cannot_be_pushed_out_by_old_dte_setting(self):
-        cfg=bot.DynamicStrategyConfig({'STOCK_OPT_MIN_DAYS_TO_EXPIRY':'4'},argparse.Namespace())
-        self.assertEqual(cfg.min_days_to_expiry,0)
-        sig={**self.sig,'expiry':self.now.date().isoformat()}
-        # Isolate expiry eligibility; model validity has dedicated quality tests.
-        with patch.object(bot, 'compute_bsm_greeks_for_stock_option', return_value={'greek_supported':True}):
-            self.assertIsNotNone(bot.qualify_quote(sig,self.quote,self.cfg,60000,self.now.timestamp()))
-        sig['expiry']=(self.now-timedelta(days=1)).date().isoformat()
-        reasons=[]
-        self.assertIsNone(bot.qualify_quote(sig,self.quote,self.cfg,60000,self.now.timestamp(),reasons))
-        self.assertEqual(reasons,['Contract already expired'])
+    def test_entry_excludes_expiries_with_two_calendar_days_remaining(self):
+        for days in (-1, 0, 1, 2):
+            with self.subTest(days=days):
+                sig = {**self.sig, "expiry": (self.now + timedelta(days=days)).date().isoformat()}
+                reasons = []
+                self.assertIsNone(bot.qualify_quote(sig, self.quote, self.cfg, 60000,
+                                                    self.now.timestamp(), reasons))
+                self.assertIn("expiry exclusion", reasons[0])
 
-    def test_universe_selects_current_expiry_without_later_month_fallback(self):
+    def test_universe_rolls_live_selection_but_supports_legacy_replay(self):
         import csv,io
         from unittest.mock import MagicMock
         today=bot.datetime.now(bot.IST).date()
@@ -327,8 +324,11 @@ class IntegrationTests(unittest.TestCase):
         self.assertTrue(save.call_args.args[0].endswith('_dte0.json'))
         future_chain={'1660':{'ce':{'security_id':'200','greeks':{'delta':.6,'theta':-1,'gamma':.01},'implied_volatility':20}}}
         self.assertIsNone(bot.DynamicStockOptionsUniverse.resolve_atm_option(stock,1660,'CE',future_chain,self.cfg))
-        with self.assertRaisesRegex(ValueError,'Current expiry required'):
-            bot.DynamicStockOptionsUniverse.load_universe(logging.getLogger('test'),4)
+        with patch.object(bot.os.path, 'exists', return_value=False), patch.object(
+                bot.requests, 'get', return_value=response), patch.object(bot, 'atomic_write_json') as save:
+            rolled = bot.DynamicStockOptionsUniverse.load_universe(logging.getLogger('test'), 3)['1']
+        self.assertEqual(rolled['strikes_map']['1660.00']['CE']['security_id'], '200')
+        self.assertTrue(save.call_args.args[0].endswith('_dte3.json'))
 
     def test_strong_setup_can_scale_only_with_cash_depth_and_reward_support(self):
         cfg=bot.DynamicStrategyConfig({'STOCK_OPT_RUPEE_TARGET':'1600','STOCK_OPT_STOP_PCT':'4',
@@ -779,19 +779,19 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(pos["persisted_state"],(99,101))
 
     def test_detailed_rejection_reason_and_qualified_metrics(self):
-        self.assertEqual(self.cfg.min_days_to_expiry,0)
+        self.assertEqual(self.cfg.min_days_to_expiry,3)
         reasons=[]
         result=bot.qualify_quote(self.sig,self.quote,self.cfg,60000,self.now.timestamp(),reasons)
         self.assertIsNotNone(result)
         self.assertEqual(reasons,[])
         self.assertEqual(result["dte"],35)
         self.assertAlmostEqual(result["theta_pct_per_day"],1)
-        self.assertGreaterEqual(result["expected_move_gain"],self.cfg.rupee_target)
-        for edits,expected in (({"expiry":"2026-10-21"},"Contract already expired"),
-                               ({"theta":-7},"Theta 7.00%/day above 6.00%"),
-                               ({"atr_5m":0.1},"A 1.5 ATR move nets only Rs."),
+        self.assertGreaterEqual(result["expected_net_rr"], 1.5)
+        for edits,expected in (({"expiry":"2026-10-21"},"Contract is within"),
+                               ({"theta":-40},"EXTREME_INTRADAY_THETA_PCT"),
+                               ({"atr_5m":0.1},"INTRADAY_THETA_EXCEEDS_ATR"),
                                ({"iv":29},"IV in the top"),
-                               ({"delta":float("nan")},"Non-finite broker Greeks")):
+                               ({"delta":float("nan")},"INVALID_INTRADAY_THETA_INPUT")):
             with self.subTest(edits=edits):
                 reasons=[]
                 self.assertIsNone(bot.qualify_quote({**self.sig,**edits},self.quote,self.cfg,60000,self.now.timestamp(),reasons))
